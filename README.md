@@ -1,0 +1,185 @@
+# rdis
+
+A scriptable, multi-format disassembler and decompiler — a cross-platform, browser-based answer to
+Hopper. Pure Python over [Capstone](https://www.capstone-engine.org/) (decoding) and
+[LIEF](https://lief.re/) (binary parsing), with a from-scratch WebAssembly backend. Use it as a
+Hopper-style web workspace, a CLI, an importable library, or a zero-dependency MCP server an AI
+agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
+
+## Features
+
+| Capability | rdis | Hopper |
+|---|---|---|
+| Formats | Mach-O (thin + fat), ELF, PE, **WebAssembly**, raw firmware | Mach-O/ELF/PE |
+| Containers | **APK / IPA / AAR / JAR / ZIP** (open one lib or the whole package), **DMG** (via `hdiutil`) | — |
+| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **WASM** | x86/x64/ARM |
+| Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
+| Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
+| Function / basic-block discovery | symbols, function-starts, `.pdata`, prologue scan, call graph | yes |
+| Control-flow graph | Graphviz DOT, colored edges | yes (native view) |
+| C pseudo-code | yes (structuring + symbolic lifter, expression propagation) | yes (more mature) |
+| Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
+| Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
+| Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
+| Struct/field reconstruction | `p->field_N` for pointer args, `s[i]` for `char *` buffers | yes |
+| Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
+| Demangling | Swift + C++ (system tools) | yes |
+| Cross-references | to any address/symbol | yes |
+| Strings | ASCII + UTF-16 | yes |
+| Scripting | import `rdis` as a library | Python API |
+| Plugin SDK | custom loaders, CPUs, tools | SDK |
+| AI integration | **built-in MCP server, zero deps** | MCP server |
+| Debugger | LLDB batch wrapper (static + live) | LLDB/GDB |
+| GUI | web three-pane (navigator / asm / pseudo-CFG), or native window | native app |
+| Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP | yes |
+| Runs on Linux | **yes** | no (macOS only) |
+
+Where rdis is behind: the decompiler is a pragmatic pattern lifter, not a full IR/type-recovery
+pipeline, so its output on heavily optimized code is rougher. The lifter is most complete on
+arm64/x86-64; 32-bit ARM/Thumb decodes and structures correctly but some operand forms still lift to
+a raw-instruction line rather than a C expression. Like every decompiler (Hopper says so too), the
+pseudo-code is a reconstruction, not compilable source.
+
+## Install
+
+One codebase, all three OSes (Windows, macOS, Linux):
+
+```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install .                 # -> rdis (CLI), rdis-gui (web UI), rdis-mcp (agent server)
+pip install '.[desktop]'      # also enables `rdis-gui --desktop` (native window)
+```
+
+Or just the libraries for development: `pip install capstone lief`.
+
+Optional external tools (already present on a Mac with Xcode CLT) unlock extras:
+`swift-demangle`, `c++filt` (demangling), `dot`/viz.js (render CFGs), `lldb` (debugger).
+
+## CLI
+
+```sh
+export PYTHONPATH=.
+python -m rdis BIN                      # list functions
+python -m rdis BIN -f main              # disassemble (annotated with names + strings)
+python -m rdis BIN -f main -d           # decompile to C pseudo-code
+python -m rdis BIN -f main --cfg | dot -Tpng -o cfg.png
+python -m rdis BIN --strings
+python -m rdis BIN --classes            # Objective-C / Swift declarations
+python -m rdis BIN --imports
+python -m rdis BIN --arch arm64 ...     # pick a fat Mach-O slice
+python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
+```
+
+Add `--json` to most commands for machine-readable output.
+
+## GUI
+
+```sh
+rdis-gui /path/to/binary --arch arm64        # opens http://127.0.0.1:8000 in your browser
+rdis-gui /path/to/binary --desktop           # native window (needs the [desktop] extra)
+```
+
+Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter) · disassembly with
+clickable call targets · inspector (binary info, sections, cross-references). The top toggle
+switches **Assembly / Pseudo-code / CFG / Hex**. Double-click a function to rename it; double-click an
+instruction address to comment. Renames and comments save to `<binary>.rdb` next to the binary and
+reload automatically.
+
+Drop any file on the page: native binaries open directly; **APK/IPA/AAR/JAR/ZIP** and **DMG** images
+show a loader dialog listing the native libraries inside. Pick one (e.g. `lib/arm64-v8a/…​.so`), or
+click **Open all N libraries** to load the whole package at once — every library becomes a switchable
+document in the toolbar list and is analyzed lazily the first time you open it, so even a 200-library
+APK opens instantly. Unchecking **Start automatic analysis** lists a file without analyzing it yet
+(it analyzes when you select it). WebAssembly `.wasm` modules disassemble to their instruction
+listing. (Dalvik `.dex` is Java bytecode — use a DEX tool like jadx; rdis is a native-code decompiler.)
+
+### Hosting it for several people
+
+```sh
+rdis-gui --host 0.0.0.0 --port 8000          # public bind: automatically per-visitor
+rdis-gui --multi-user                        # or force per-visitor sessions on loopback (behind a proxy)
+```
+
+Each visitor gets their own cookie session and their own documents, renames and navigation — nothing
+is shared between people. When several open the **same** binary it is analyzed **once** and the heavy
+read-only data is shared, so memory scales; each person's edits stay private. A public bind also
+disables server-path opening and the `py` console command. Verified with a 20-visitor concurrency
+stress test (`tests/concurrency_test.py`): no cross-session leaks, no races, deterministic output.
+Works in current Chrome, Firefox, Safari and Edge (the CFG uses viz.js/WASM and degrades to a notice
+if it can't load).
+
+## Library
+
+```python
+from rdis.loader import open_image
+from rdis.analysis import Program
+from rdis.decompile import Decompiler
+
+prog = Program(open_image("/bin/ls", arch="arm64")).analyze()
+for addr, name in prog.names.items():
+    if addr in prog.functions:
+        print(hex(addr), prog.display(addr))
+print(Decompiler(prog, prog.functions[prog.resolve("_main")]).c())
+```
+
+## MCP server (for AI agents / REA)
+
+Zero third-party dependencies — speaks MCP stdio JSON-RPC directly.
+
+```sh
+PYTHONPATH=. python -m rdis.mcp_server
+```
+
+Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
+(use the venv's python). Tools (12): `info`, `list_functions`, `disassemble`, `decompile`, `cfg`,
+`strings`, `imports`, `classes`, `xrefs`, `hexdump`, `rename`, `comment`.
+
+These cover the native-provider surface [REA](https://github.com/morluto/rea) expects (pseudocode,
+assembly, strings, symbols, calls, references), so rdis can act as a REA analysis provider in place
+of Hopper/Ghidra/IDA.
+
+## Plugins
+
+Drop a `.py` file in `./plugins` (or `$RDIS_PLUGINS`) that registers at import:
+
+```python
+from rdis import plugins
+plugins.register_loader("myfmt", probe_fn, load_fn)   # custom file format
+plugins.register_arch("mycpu", arch_factory)          # custom CPU backend
+plugins.register_tool("name", fn, "help")             # extra MCP/CLI tool
+```
+
+See `rdis/raw.py` for a complete loader plugin (headerless blobs).
+
+## Tests
+
+```sh
+PYTHONPATH=. .venv/bin/python tests/test_rdis.py
+```
+
+Loads and fully analyzes system binaries, compiles small C/Objective-C/Swift fixtures (if `clang`/
+`swiftc` are present) and checks disassembly, decompilation, type/variable recovery, struct-field
+access, name recovery, Objective-C/Swift metadata (incl. protocols & conformances), and xrefs.
+
+**Stress-tested** against 699 real binaries (Mach-O/ELF/PE across x86/x64/ARM/ARM64) covering
+47k+ functions: zero crashes, zero malformed output. Large binaries analyze fast (bash ~2.5s,
+dyld ~4.5s end to end).
+
+## Layout
+
+```
+rdis/
+  loader.py      formats -> uniform Image (Mach-O/ELF/PE + chained fixups)
+  arch.py        CPU backends: decode + branch/data-ref facts
+  analysis.py    functions, basic blocks, xrefs, strings
+  decompile.py   CFG structuring (dominators, loops) -> nested C
+  lift.py        per-block symbolic execution -> C statements
+  objc.py        Objective-C runtime metadata + type-encoding decoder
+  swift.py       Swift 5 type metadata
+  demangle.py    Swift / C++ demangling via system tools
+  render.py      annotated disassembly + DOT
+  debug.py       LLDB batch wrapper
+  mcp_server.py  MCP stdio server
+  plugins.py     loader / CPU / tool registry
+  raw.py         example plugin: headerless blobs
+```

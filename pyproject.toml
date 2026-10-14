@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rdis"
+version = "1.0.0"
+description = "Cross-platform scriptable disassembler and decompiler (a Hopper alternative)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["capstone>=5.0", "lief>=0.14"]
+
+[project.optional-dependencies]
+desktop = ["pywebview>=5.0"]  # native window around the local UI; browser is used without it
+
+[project.scripts]
+rdis = "rdis.__main__:main"            # CLI: disassemble / decompile / inspect
+rdis-gui = "rdis.server:main"          # launch the local web UI
+rdis-mcp = "rdis.mcp_server:main"      # MCP server for AI agents
+
+[tool.setuptools]
+packages = ["rdis"]
+
+[tool.setuptools.package-data]
+rdis = ["web/*.html"]

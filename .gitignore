@@ -1,0 +1,17 @@
+# virtualenv / build
+.venv/
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+
+# rdis runtime state (never commit uploaded binaries or per-binary analysis databases)
+.rdis_uploads/
+.rdis_db/
+*.rdb
+*.rdb.json
+
+# OS / editor
+.DS_Store
+*.swp

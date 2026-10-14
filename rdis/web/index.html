@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rdis</title>
+<style>
+:root{
+  --bg:#ececec; --chrome:#f6f6f6; --panel:#fafafa; --pane:#ffffff; --line:#d9d9d9; --line2:#e8e8e8;
+  --text:#1d1d1f; --dim:#7a7a7f; --faint:#a6a6ab; --accent:#2f7bf5; --accent-bg:#dbe8ff; --sel:#cfe0ff;
+  --addr:#5b5b62; --mnem:#a3247a; --reg:#c1272d; --num:#1f6fd6; --str:#c4501a; --cmt:#3b8a3b;
+  --lbl:#2155c7; --banner:#5a66c8; --sect-bg:#f7f3e6; --code-bg:#fffdf6; --arrow-c:#d33b3b; --arrow-j:#2f63d8;
+  --kw:#9b2393; --ty:#0b6ea8; --btn:#ffffff; --shadow:0 1px 2px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#1c1c1e; --chrome:#2a2a2d; --panel:#242427; --pane:#1e1e20; --line:#3a3a3e; --line2:#2f2f33;
+  --text:#e6e6e8; --dim:#9a9aa1; --faint:#6d6d73; --accent:#4c8dff; --accent-bg:#1f3a66; --sel:#28456f;
+  --addr:#8e8e96; --mnem:#e07ad0; --reg:#ff7b72; --num:#79b8ff; --str:#ffab70; --cmt:#7ec27e;
+  --lbl:#7aa2ff; --banner:#9aa4ff; --sect-bg:#2b2a22; --code-bg:#1f1f1c; --arrow-c:#ff6b6b; --arrow-j:#6f9bff;
+  --kw:#ff79c6; --ty:#66d9ef; --btn:#333337; --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --bg:#1c1c1e; --chrome:#2a2a2d; --panel:#242427; --pane:#1e1e20; --line:#3a3a3e; --line2:#2f2f33;
+  --text:#e6e6e8; --dim:#9a9aa1; --faint:#6d6d73; --accent:#4c8dff; --accent-bg:#1f3a66; --sel:#28456f;
+  --addr:#8e8e96; --mnem:#e07ad0; --reg:#ff7b72; --num:#79b8ff; --str:#ffab70; --cmt:#7ec27e;
+  --lbl:#7aa2ff; --banner:#9aa4ff; --sect-bg:#2b2a22; --code-bg:#1f1f1c; --arrow-c:#ff6b6b; --arrow-j:#6f9bff;
+  --kw:#ff79c6; --ty:#66d9ef; --btn:#333337; --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overflow:hidden;
+  font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.mono,pre,code,.row,.lst{font-family:"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace}
+button{font:inherit;color:inherit}
+#app{display:flex;flex-direction:column;height:100%}
+
+/* toolbar */
+#tb{display:flex;align-items:center;gap:8px;height:48px;padding:0 10px;background:var(--chrome);
+  border-bottom:1px solid var(--line);flex:0 0 auto}
+.tgrp{display:flex;align-items:center;background:var(--btn);border:1px solid var(--line);border-radius:9px;
+  box-shadow:var(--shadow);padding:2px}
+.tb{min-width:30px;height:28px;border:0;background:none;border-radius:7px;cursor:pointer;padding:0 7px;
+  display:inline-flex;align-items:center;justify-content:center;color:var(--text)}
+.tb:hover{background:var(--line2)}
+.tb:disabled{opacity:.35;cursor:default;background:none}
+.tb.on{background:var(--accent-bg);color:var(--accent)}
+.tb .k{font:600 11px/1 "SF Mono",Menlo,monospace;border:1.5px solid currentColor;border-radius:4px;padding:2px 3px}
+.tb .stack{font:9px/1.05 "SF Mono",Menlo,monospace;text-align:center}
+#title{font-weight:600;font-size:15px;margin:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28vw}
+#docsel{max-width:180px}
+.sp{flex:1}
+select,input[type=text],input[type=search]{background:var(--pane);color:var(--text);border:1px solid var(--line);
+  border-radius:7px;padding:4px 8px;font:inherit}
+
+/* body */
+#body{flex:1;display:flex;min-height:0}
+#nav{width:300px;flex:0 0 auto;background:var(--panel);border-right:1px solid var(--line);display:flex;
+  flex-direction:column;min-height:0}
+#nav.hide,#insp.hide{display:none}
+#navtabs{display:flex;margin:10px 10px 8px;background:var(--line2);border-radius:9px;padding:2px}
+#navtabs button{flex:1;border:0;background:none;border-radius:7px;height:28px;cursor:pointer;font-size:13px;color:var(--text)}
+#navtabs button.on{background:var(--accent);color:#fff}
+#q{margin:0 10px 6px}
+#navhead{display:grid;grid-template-columns:118px 38px 1fr;padding:4px 10px;color:var(--dim);font-size:12px;
+  border-bottom:1px solid var(--line)}
+#list{flex:1;overflow:auto;position:relative;min-height:0}
+#listinner{position:relative}
+.nrow{position:absolute;left:0;right:0;height:21px;display:grid;grid-template-columns:118px 38px 1fr;
+  padding:0 10px;align-items:center;cursor:default;white-space:nowrap;font-size:12px}
+.nrow:hover{background:var(--line2)}
+.nrow.on{background:var(--sel)}
+.nrow .a{font-family:"SF Mono",Menlo,monospace;color:var(--addr)}
+.nrow .t{color:var(--dim);font-family:"SF Mono",Menlo,monospace}
+.nrow .n{overflow:hidden;text-overflow:ellipsis}
+#navfoot{padding:6px 12px;color:var(--faint);font-size:11px;border-top:1px solid var(--line)}
+
+#center{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+#view{flex:1;overflow:auto;background:var(--pane);position:relative;min-height:0}
+#console{height:190px;flex:0 0 auto;border-top:1px solid var(--line);background:var(--pane);display:flex;flex-direction:column}
+#console.small{height:34px}
+#log{flex:1;overflow:auto;padding:6px 10px;font:12px/1.4 "SF Mono",Menlo,monospace;white-space:pre-wrap;color:var(--text)}
+#log .dim{color:var(--dim)} #log .err{color:var(--reg)}
+#cmdbar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-top:1px solid var(--line2)}
+#cmd{flex:1;border-radius:7px}
+
+/* listing */
+.lst{position:relative;font-size:12.5px;line-height:18px;padding:6px 0 30px}
+.lst .r{height:18px;white-space:pre;padding-left:var(--gut);padding-right:16px;cursor:default}
+.lst .r:hover{background:rgba(127,127,127,.07)}
+.lst .r.sel{background:var(--sel)}
+.lst .ad{color:var(--addr);display:inline-block;width:150px}
+.lst .by{color:var(--faint);display:inline-block;width:110px;overflow:hidden;vertical-align:top}
+.lst .mn{color:var(--mnem);display:inline-block;width:80px}
+.lst .op{color:var(--text)}
+.lst .rg{color:var(--reg)} .lst .nm{color:var(--num)} .lst .sy{color:var(--lbl);cursor:pointer}
+.lst .sy:hover{text-decoration:underline}
+.lst .cm{color:var(--cmt);padding-left:24px}
+.lst .uc{color:var(--accent);padding-left:24px}
+.lst .lb{color:var(--lbl);font-weight:600;padding-left:150px}
+.lst .xr{color:var(--cmt);font-weight:400;padding-left:24px}
+.lst .bn{color:var(--banner);padding-left:150px}
+.lst .vr{color:var(--dim);padding-left:150px}
+.lst .sec{background:var(--sect-bg);color:var(--banner);padding-left:150px}
+#gutter{position:absolute;left:0;top:6px;pointer-events:none}
+.mode-hidebytes .by{display:none}
+
+/* other views */
+pre.c{margin:0;padding:12px 18px;font-size:12.5px;line-height:1.55;white-space:pre}
+.c .kw{color:var(--kw)} .c .ty{color:var(--ty)} .c .st{color:var(--str)} .c .nm{color:var(--num)} .c .cm{color:var(--cmt)}
+.c .fn{color:var(--lbl);cursor:pointer} .c .fn:hover{text-decoration:underline}
+#cfgwrap{padding:16px;transform-origin:0 0}
+#cfgwrap svg{max-width:none}
+#cfgtools{position:sticky;top:8px;left:8px;z-index:2;display:inline-flex;gap:4px;margin:8px}
+.hex{padding:10px 16px;font-size:12.5px;line-height:18px;white-space:pre}
+.hex .ad{color:var(--addr)} .hex .as{color:var(--cmt)}
+
+/* inspector */
+#insp{width:310px;flex:0 0 auto;background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:4px 12px 20px}
+details{border-bottom:1px solid var(--line2);padding:6px 0}
+summary{font-weight:600;cursor:pointer;padding:4px 0;list-style:none}
+summary::before{content:"›";display:inline-block;width:14px;transition:transform .15s;color:var(--dim)}
+details[open] summary::before{transform:rotate(90deg)}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:6px;align-items:center;margin:5px 0;font-size:12px}
+.kv label{color:var(--dim);text-align:right}
+.kv .v{background:var(--pane);border:1px solid var(--line2);border-radius:6px;padding:3px 7px;
+  font-family:"SF Mono",Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:22px}
+.radio{display:flex;gap:10px;font-size:12px;margin-left:102px}
+.xi,.hi{font:12px/1.5 "SF Mono",Menlo,monospace;padding:2px 4px;border-radius:4px;cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xi:hover,.hi:hover{background:var(--line2)}
+.xi .k{color:var(--dim)}
+.enc{font:13px "SF Mono",Menlo,monospace;padding:6px 4px}
+.small-btn{width:100%;margin-top:6px;height:26px;border:1px solid var(--line);background:var(--btn);border-radius:6px;cursor:pointer}
+
+/* empty state + dialogs */
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:var(--dim);gap:14px;text-align:center;padding:20px}
+#empty .big{font-size:18px}
+#empty.drag{background:var(--accent-bg);outline:3px dashed var(--accent);outline-offset:-14px}
+.pbtn{height:32px;padding:0 16px;border-radius:8px;border:1px solid var(--line);background:var(--btn);cursor:pointer}
+.pbtn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:none;align-items:center;justify-content:center;z-index:20}
+#overlay.show{display:flex}
+.dlg{background:var(--panel);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:18px 20px;
+  width:min(560px,92vw);border:1px solid var(--line)}
+.dlg h2{font-size:15px;margin:0 0 12px}
+.dlg .row2{display:flex;gap:10px;align-items:center;margin:8px 0}
+.dlg .box{background:var(--pane);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;margin:8px 0}
+.dlg label.cb{display:flex;gap:8px;align-items:center;padding:4px 0}
+.dlg .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#busy{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:30;background:rgba(0,0,0,.15)}
+#busy.show{display:flex}
+#busy div{background:var(--panel);padding:14px 22px;border-radius:10px;box-shadow:var(--shadow);border:1px solid var(--line)}
+.kbd{font:11px "SF Mono",Menlo,monospace;border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--btn)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="tb">
+    <div class="tgrp"><button class="tb" id="bNav" title="Toggle navigator">
+      <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="16" height="12" rx="2.5"/><path d="M6 1v12"/></svg></button></div>
+    <div class="tgrp"><button class="tb" id="bBack" title="Back (⌘[ or Esc)">‹</button><button class="tb" id="bFwd" title="Forward (⌘])">›</button></div>
+    <span id="title">Untitled</span>
+    <select id="docsel" title="Open documents" hidden></select>
+    <span class="sp"></span>
+    <div class="tgrp" title="Change type at the selected address">
+      <button class="tb mk" data-k="D" title="Data (D)"><span class="k">D</span></button>
+      <button class="tb mk" data-k="A" title="ASCII string (A)"><span class="k">A</span></button>
+      <button class="tb mk" data-k="C" title="Code (C)"><span class="k">C</span></button>
+      <button class="tb mk" data-k="P" title="Procedure (P)"><span class="k">P</span></button>
+      <button class="tb mk" data-k="U" title="Undefined (U)"><span class="k">U</span></button>
+    </div>
+    <div class="tgrp" id="modes">
+      <button class="tb on" data-mode="listing" title="Assembly (1)"><span class="stack">mov<br>add</span></button>
+      <button class="tb" data-mode="cfg" title="Control-flow graph (2 / Space)">
+        <svg width="18" height="16" viewBox="0 0 18 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="1" width="8" height="4" rx="1"/><rect x="1" y="11" width="7" height="4" rx="1"/><rect x="10" y="11" width="7" height="4" rx="1"/><path d="M9 5v3M4.5 11V8h9v3"/></svg></button>
+      <button class="tb" data-mode="pseudo" title="Pseudo-code (3)"><span class="stack">if (b)<br>f(x);</span></button>
+      <button class="tb" data-mode="hex" title="Hex (4)"><span class="stack">48 89<br>e5 c3</span></button>
+    </div>
+    <div class="tgrp">
+      <button class="tb" id="bBytes" title="Show instruction bytes">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 10h6"/></svg></button>
+      <button class="tb" id="bOpen" title="Open file (⌘O)">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 3a1.5 1.5 0 0 1 1.5-1.5h4l1.6 1.8h7.4A1.5 1.5 0 0 1 17 4.8V11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 1 11z"/></svg></button>
+      <button class="tb" id="bExport" title="Save analysis database (renames, comments, bookmarks)">⤓</button>
+      <button class="tb" id="bImport" title="Load analysis database">⤒</button>
+      <button class="tb" id="bTheme" title="Toggle light/dark">◐</button>
+    </div>
+    <div class="tgrp"><button class="tb" id="bInsp" title="Toggle inspector">
+      <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="16" height="12" rx="2.5"/><path d="M12 1v12"/></svg></button></div>
+  </div>
+
+  <div id="body">
+    <aside id="nav">
+      <div id="navtabs">
+        <button data-tab="labels" class="on" title="Labels">@</button>
+        <button data-tab="functions" title="Procedures">P</button>
+        <button data-tab="strings" title="Strings">❝</button>
+        <button data-tab="imports" title="Imports">I</button>
+        <button data-tab="classes" title="Objective-C / Swift types">◉</button>
+        <button data-tab="bookmarks" title="Bookmarks">★</button>
+      </div>
+      <input id="q" type="search" placeholder="Search">
+      <div id="navhead"><span>Address</span><span>Type</span><span>Name</span></div>
+      <div id="list"><div id="listinner"></div></div>
+      <div id="navfoot">0 labels</div>
+    </aside>
+
+    <main id="center">
+      <div id="view">
+        <div id="empty">
+          <svg width="150" height="150" viewBox="0 0 120 120" fill="none">
+            <rect x="8" y="8" width="104" height="104" rx="26" fill="var(--line2)" stroke="var(--line)"/>
+            <circle cx="58" cy="54" r="24" stroke="var(--faint)" stroke-width="7"/>
+            <path d="M41 72 24 92" stroke="var(--faint)" stroke-width="9" stroke-linecap="round"/>
+          </svg>
+          <div class="big">No document loaded.<br>Drop a file here to start a new analysis.</div>
+          <div><button class="pbtn primary" id="eOpen">Open file…</button></div>
+          <div id="ePath" style="display:none;gap:6px">
+            <input type="text" id="pathIn" placeholder="/path/on/this/machine" style="width:320px">
+            <button class="pbtn" id="pathGo">Open path</button>
+          </div>
+          <div style="font-size:12px">Mach-O (fat & thin), ELF, PE, raw firmware · x86, x86-64, ARM, AArch64</div>
+        </div>
+      </div>
+      <section id="console">
+        <div id="log"><span class="dim">rdis is ready. Type <b>help</b> for console commands.</span>
+</div>
+        <div id="cmdbar"><span class="dim">›</span><input id="cmd" type="text" placeholder="Enter a command (help, goto main, xrefs _printf, findhex 55 48 89 e5…)" autocomplete="off" spellcheck="false">
+          <button class="tb" id="bClear" title="Clear console">⌫</button><button class="tb" id="bCon" title="Collapse console">▾</button></div>
+      </section>
+    </main>
+
+    <aside id="insp"></aside>
+  </div>
+</div>
+
+<input type="file" id="file" hidden>
+<input type="file" id="dbfile" accept=".json,.rdb,application/json" hidden>
+<div id="overlay"><div class="dlg" id="dlg"></div></div>
+<div id="busy"><div id="busytext">Analyzing…</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.2.4/lib/viz-standalone.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api = async (r, q = {}) => { const x = await fetch(`/api/${r}?` + new URLSearchParams(q)); const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; };
+const post = async (r, b, q) => { const x = await fetch(`/api/${r}` + (q ? "?" + new URLSearchParams(q) : ""), {method: "POST",
+  headers: {"Content-Type": b instanceof Blob ? "application/octet-stream" : "application/json"},
+  body: b instanceof Blob ? b : JSON.stringify(b || {})}); const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; };
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem("rdis." + k)) ?? d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem("rdis." + k, JSON.stringify(v)); } catch {} } };
+
+const S = { info: null, tab: "labels", mode: "listing", lists: {}, cur: null, sel: null, hist: [], hpos: -1,
+            procByName: new Map(), procs: new Set(), hexOffsets: store.get("hexoff", false), bytes: store.get("bytes", false),
+            cmdHist: [], cmdPos: 0, viz: null };
+
+/* ---------------- console ---------------- */
+function log(msg, cls) {
+  const L = $("#log"), d = document.createElement("div");
+  if (cls) d.className = cls; d.textContent = msg; L.appendChild(d); L.scrollTop = L.scrollHeight;
+}
+async function runCmd(line) {
+  log("> " + line, "dim");
+  try {
+    const r = await post("command", {line});
+    if (r.output) log(r.output);
+    if (r.changed) await refreshLists();
+    if (r.goto) await go(r.goto); else if (r.changed) await show();
+  } catch (e) { log(String(e.message || e), "err"); }
+}
+
+/* ---------------- boot / documents ---------------- */
+async function boot() {
+  applyTheme(store.get("theme", null));
+  const d = await api("docs");
+  $("#ePath").style.display = d.allow_paths ? "flex" : "none";  // server paths: local installs only
+  renderDocSel(d);
+  if (d.current) await loadDoc(); else empty(true);
+}
+function renderDocSel(d) {
+  const sel = $("#docsel");
+  sel.hidden = d.docs.length < 2;
+  sel.innerHTML = d.docs.map(x => `<option value="${x.id}" ${x.id === d.current ? "selected" : ""}>${esc(x.name)} (${x.arch})${x.pending ? " · not analyzed" : ""}</option>`).join("");
+}
+function empty(on) { $("#empty").style.display = on ? "flex" : "none"; if (on) { $("#title").textContent = "Untitled"; } }
+
+async function loadDoc() {
+  busy(true, "Loading…");
+  try {
+    S.info = await api("info");
+    $("#title").textContent = S.info.name;
+    document.title = `${S.info.name} — rdis`;
+    S.hist = []; S.hpos = -1; S.lists = {};
+    await refreshLists();
+    empty(false);
+    renderInspector();
+    log(`Loaded ${S.info.name}: ${S.info.format} ${S.info.arch}, ${S.info.counts.functions} procedures, ` +
+        `${S.info.counts.strings} strings, ${S.info.counts.imports} imports`);
+    // Default view, like Hopper: open at the entry point in assembly mode.
+    const start = S.procs.has(S.info.entry) ? S.info.entry : (S.lists.functions[0] || {}).addr;
+    if (start) await go(start, {mode: "listing"});
+  } catch (e) { log("load failed: " + e.message, "err"); empty(true); }
+  finally { busy(false); }
+}
+async function refreshLists() {
+  const tabs = ["labels", "functions", "strings", "imports", "classes", "bookmarks"];
+  const res = await Promise.all(tabs.map(t => api(t).catch(() => ({items: []}))));
+  tabs.forEach((t, i) => S.lists[t] = res[i].items);
+  S.procByName = new Map(S.lists.functions.map(f => [f.name, f.addr]));
+  S.procs = new Set(S.lists.functions.map(f => f.addr));
+  renderList();
+}
+
+/* ---------------- open / upload / loader dialog ---------------- */
+function pickFile() { $("#file").value = ""; $("#file").click(); }
+$("#file").onchange = e => e.target.files[0] && uploadFile(e.target.files[0]);
+async function uploadFile(f) {
+  busy(true, `Uploading ${f.name}…`);
+  try {
+    const up = await post("upload", f, {name: f.name});
+    busy(false);
+    loaderDialog({name: up.name, size: up.size, slices: up.slices, token: up.token});
+  } catch (e) { busy(false); log("upload failed: " + e.message, "err"); }
+}
+async function openPath(path) {
+  try { const s = await api("slices", {path}); loaderDialog({name: path, slices: s.slices, path}); }
+  catch (e) { log("open failed: " + e.message, "err"); }
+}
+function loaderDialog(src) {
+  const raw = src.slices.some(s => s.loader === "raw");
+  const archive = src.slices.some(s => s.entry);
+  const sel = `<select id="ldr" size="${archive ? Math.min(12, src.slices.length) : 1}" style="flex:1;${archive ? "font-family:var(--mono,monospace);font-size:12px" : ""}">${src.slices.map((s, i) =>
+      `<option value="${i}" ${s.disabled ? "disabled style='color:var(--dim)'" : ""}>${esc(s.label)}</option>`).join("")}</select>`;
+  $("#dlg").innerHTML = `
+    <h2>Open “${esc(src.name)}”${src.size ? ` <span style="color:var(--dim);font-weight:400">(${(src.size/1048576).toFixed(1)} MB)</span>` : ""}</h2>
+    ${archive ? `<div style="color:var(--dim);font-size:12px;margin-bottom:6px">Archive — choose a native library to analyze:</div>` : ""}
+    <div class="row2"><b style="width:70px">${archive ? "Library" : "Loader"}:</b>${sel}</div>
+    <div>Options</div>
+    <div class="box">
+      <label class="cb"><input type="checkbox" id="oAuto" checked> Start automatic analysis after the file is loaded</label>
+      <label class="cb"><input type="checkbox" id="oObjc" checked> Parse Objective-C sections if present</label>
+      <label class="cb"><input type="checkbox" id="oSwift" checked> Parse Swift sections if present</label>
+      <label class="cb"><input type="checkbox" id="oPro" checked> Search code gaps for procedure prologues</label>
+    </div>
+    ${raw ? `<div class="row2"><b style="width:110px">Base address:</b><input type="text" id="oBase" value="0x0" style="flex:1"></div>` : ""}
+    <div class="actions"><button class="pbtn" id="dCancel">Cancel</button>${archive ? `<button class="pbtn" id="dAll">Open all ${src.slices.filter(s => s.entry && !s.disabled).length} libraries</button>` : ""}<button class="pbtn primary" id="dOk">OK</button></div>`;
+  $("#overlay").classList.add("show");
+  // preselect the first enabled option (arm64 lib sorts first)
+  const first = src.slices.findIndex(s => !s.disabled);
+  if (first >= 0) $("#ldr").value = first;
+  $("#dCancel").onclick = () => $("#overlay").classList.remove("show");
+  const opts = () => ({objc: $("#oObjc").checked, swift: $("#oSwift").checked,
+                       prologues: $("#oPro").checked, base: raw ? $("#oBase").value : undefined,
+                       ...(src.token ? {token: src.token} : {path: src.path})});
+  const go = async () => {
+    const sl = src.slices[+$("#ldr").value];
+    if (!sl || sl.disabled) return;
+    const auto = $("#oAuto").checked;
+    const body = {arch: sl.arch, loader: sl.loader, entry: sl.entry, analyze: auto, ...opts()};
+    $("#overlay").classList.remove("show");
+    if (!auto) {  // deferred: list it without analyzing; it analyzes when you open it
+      try { await post("open", body); renderDocSel(await api("docs"));
+            log(`Added ${esc(sl.entry || src.name)} (not analyzed — select it to analyze)`); }
+      catch (e) { log("open failed: " + e.message, "err"); }
+      return;
+    }
+    busy(true, `Analyzing ${esc(sl.entry || src.name)}…`);
+    const t0 = performance.now();
+    try { await post("open", body); log(`Analysis finished in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+          renderDocSel(await api("docs")); await loadDoc(); }
+    catch (e) { log("analysis failed: " + e.message, "err"); }
+    finally { busy(false); }
+  };
+  const goAll = async () => {
+    $("#overlay").classList.remove("show");
+    busy(true, "Opening all native libraries…");
+    try { const r = await post("open_all", opts());
+          log(`Opened ${r.count} native libraries (switch between them in the document list; each analyzes when first opened)`);
+          renderDocSel(await api("docs")); await loadDoc(); }
+    catch (e) { log("open failed: " + e.message, "err"); }
+    finally { busy(false); }
+  };
+  $("#dOk").onclick = go;
+  if ($("#dAll")) $("#dAll").onclick = goAll;
+  if (archive) $("#ldr").ondblclick = go;
+  $("#dOk").focus();
+}
+function busy(on, text) { if (text) $("#busytext").textContent = text; $("#busy").classList.toggle("show", on); }
+
+/* drag & drop anywhere */
+let dragDepth = 0;
+addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; $("#empty").classList.add("drag"); empty(true); });
+addEventListener("dragleave", e => { if (--dragDepth <= 0) { dragDepth = 0; $("#empty").classList.remove("drag"); if (S.info) empty(false); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("#empty").classList.remove("drag");
+  if (S.info) empty(false); const f = e.dataTransfer.files[0]; if (f) uploadFile(f); });
+
+/* ---------------- navigator (virtualized) ---------------- */
+const ROWH = 21;
+function filtered() {
+  const q = $("#q").value.trim().toLowerCase();
+  const it = S.lists[S.tab] || [];
+  return q ? it.filter(i => i.name.toLowerCase().includes(q) || (i.addr || "").includes(q)) : it;
+}
+function renderList() {
+  const items = filtered(), box = $("#list"), inner = $("#listinner");
+  inner.style.height = items.length * ROWH + "px";
+  const word = {labels: "labels", functions: "procedures", strings: "strings", imports: "imports", classes: "types", bookmarks: "bookmarks"}[S.tab];
+  $("#navfoot").textContent = `${items.length.toLocaleString()} ${word}`;
+  const draw = () => {
+    const top = box.scrollTop, h = box.clientHeight;
+    const a = Math.max(0, Math.floor(top / ROWH) - 10), b = Math.min(items.length, Math.ceil((top + h) / ROWH) + 10);
+    let html = "";
+    for (let i = a; i < b; i++) {
+      const it = items[i], on = S.sel && it.addr === S.sel ? " on" : "";
+      const addr = it.addr ? it.addr : "", t = it.type ? (it.type.startsWith("@") ? "@" : it.type[0]) : "";
+      html += `<div class="nrow${on}" style="top:${i * ROWH}px" data-i="${i}"><span class="a">${addr}</span><span class="t">${esc(t)}</span><span class="n" title="${esc(it.name)}">${esc(it.name)}</span></div>`;
+    }
+    inner.innerHTML = html;
+  };
+  box.onscroll = draw; draw();
+  inner.onclick = e => { const r = e.target.closest(".nrow"); if (!r) return; navItem(items[+r.dataset.i]); };
+  inner.ondblclick = e => { const r = e.target.closest(".nrow"); if (!r) return; const it = items[+r.dataset.i];
+    if (it.addr && S.tab !== "strings" && S.tab !== "classes") renameAt(it.addr, it.name); };
+}
+function navItem(it) {
+  if (S.tab === "classes") { S.mode = "pseudo"; syncModes(); return showDecl(it); }
+  if (S.tab === "strings") return go(it.addr, {mode: "hex"});
+  go(it.addr);
+}
+function setTab(t) { S.tab = t; document.querySelectorAll("#navtabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("#list").scrollTop = 0; renderList(); }
+
+/* ---------------- navigation ---------------- */
+async function go(addr, opt = {}) {
+  if (opt.mode) { S.mode = opt.mode; syncModes(); }
+  const entry = {addr, mode: S.mode};
+  if (!opt.noHist) { S.hist = S.hist.slice(0, S.hpos + 1); S.hist.push(entry); S.hpos = S.hist.length - 1; }
+  S.sel = addr;
+  await show();
+  updateNavBtns();
+}
+function back() { if (S.hpos > 0) { S.hpos--; const h = S.hist[S.hpos]; S.mode = h.mode; syncModes(); S.sel = h.addr; show().then(updateNavBtns); } }
+function fwd() { if (S.hpos < S.hist.length - 1) { S.hpos++; const h = S.hist[S.hpos]; S.mode = h.mode; syncModes(); S.sel = h.addr; show().then(updateNavBtns); } }
+function updateNavBtns() { $("#bBack").disabled = S.hpos <= 0; $("#bFwd").disabled = S.hpos >= S.hist.length - 1; renderHistory(); }
+function syncModes() { document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.mode === S.mode)); }
+
+async function show() {
+  if (!S.info || !S.sel) return;
+  const v = $("#view");
+  try {
+    if (S.mode === "hex") await showHex(S.sel);
+    else if (S.mode === "pseudo") await showPseudo(S.sel);
+    else if (S.mode === "cfg") await showCFG(S.sel);
+    else await showListing(S.sel);
+  } catch (e) {
+    // not inside a procedure (data, string, import): fall back to hex so every address is viewable
+    if (S.mode !== "hex") { await showHex(S.sel); log(`${S.sel}: ${e.message} — showing bytes`, "dim"); }
+    else v.innerHTML = `<div class="hex">// ${esc(e.message)}</div>`;
+  }
+  inspectAddr(S.sel);
+  renderList();
+}
+
+/* ---------------- listing view ---------------- */
+/* single-pass tokenizers: escape every gap, wrap every token -- never regex over generated HTML */
+function tokenize(text, re, wrap) {
+  let out = "", last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(text))) {
+    out += esc(text.slice(last, m.index)) + wrap(m);
+    last = re.lastIndex;
+    if (m[0] === "") re.lastIndex++;
+  }
+  return out + esc(text.slice(last));
+}
+const OPS_RE = /(#?-?0x[0-9a-fA-F]+|#-?\d+\b)|\b([xw]\d{1,2}|[re]?[abcd]x|[re]?[sd]i|[re]?[sb]p|r\d{1,2}[dwb]?|[abcd][lh]|[xy]mm\d+|[qdsvbh]\d{1,2}|sp|fp|lr|pc|xzr|wzr|rip|eip)\b/g;
+function fmtOps(ops, target) {
+  let linked = false;
+  return tokenize(ops, OPS_RE, m => {
+    if (m[1]) {
+      if (target && !linked && parseInt(m[1].replace("#", ""), 16) === parseInt(target.addr, 16)) {
+        linked = true;
+        return `<span class="sy" data-go="${target.addr}">${esc(target.name)}</span>`;
+      }
+      return `<span class="nm">${esc(m[1])}</span>`;
+    }
+    return `<span class="rg">${esc(m[2])}</span>`;
+  });
+}
+async function showListing(addr) {
+  const d = await api("listing", {func: addr});
+  const out = [], labelRow = {}, insnRow = {}, jumps = [];
+  const blank = () => out.push(`<div class="r"> </div>`);
+  d.rows.forEach(r => {
+    if (r.kind === "section") out.push(`<div class="r sec">; Section ${esc(r.text.replace("Section ", ""))}   ${esc(r.detail)}</div>`);
+    else if (r.kind === "banner") { blank();
+      out.push(`<div class="r bn">; ================ B E G I N N I N G   O F   P R O C E D U R E ================</div>`); blank(); }
+    else if (r.kind === "vars") { out.push(`<div class="r vr">; Variables:</div>`);
+      r.items.forEach(v => out.push(`<div class="r vr">;    ${String(v.off).padStart(6)} : ${esc(v.name)}  (${esc(v.type)})</div>`));
+      blank(); }
+    else if (r.kind === "label") {
+      const x = r.xrefs.length ? `<span class="xr">; ${r.xrefs.some(q => q.kind !== "data") ? "CODE" : "DATA"} XREF=${r.xrefs.slice(0, 4).map(q =>
+        `<span class="sy" data-go="${q.addr}">${esc(q.name)}</span>`).join(", ")}${r.xrefs.length > 4 ? `, … (${r.xrefs.length})` : ""}</span>` : "";
+      blank();
+      labelRow[r.addr] = out.length;
+      out.push(`<div class="r lb" data-a="${r.addr}" data-label="1">${esc(r.text)}${x}</div>`);
+    }
+    else if (r.kind === "insn") {
+      insnRow[r.addr] = out.length;
+      const cm = r.user ? `<span class="uc">; ${esc(r.user)}</span>` : r.comment ? `<span class="cm">; ${esc(r.comment)}</span>` : "";
+      out.push(`<div class="r${r.addr === S.sel ? " sel" : ""}" data-a="${r.addr}"><span class="ad">${r.addr.replace(/^0x/, "").padStart(16, "0")}</span><span class="by">${esc(r.bytes)}</span><span class="mn">${esc(r.mnem)}</span><span class="op">${fmtOps(r.ops, r.target)}</span>${cm}</div>`);
+      if (r.jump) jumps.push({from: r.addr, to: r.jump, cond: r.flow === "cjmp"});
+    }
+    else if (r.kind === "endp") out.push(`<div class="r bn">; endp</div>`);
+  });
+  // gutter arrows: one lane per overlapping jump, like Hopper's left margin
+  const spans = jumps.map(j => ({...j, a: insnRow[j.from] ?? -1, b: labelRow[j.to] ?? insnRow[j.to] ?? -1}))
+    .filter(j => j.a >= 0 && j.b >= 0)
+    .sort((x, y) => Math.abs(x.a - x.b) - Math.abs(y.a - y.b));
+  const lanes = [];
+  spans.forEach(s => { const lo = Math.min(s.a, s.b), hi = Math.max(s.a, s.b); let l = 0;
+    while ((lanes[l] || []).some(o => !(hi < o[0] || lo > o[1]))) l++; (lanes[l] = lanes[l] || []).push([lo, hi]); s.lane = l; });
+  const nl = Math.min(lanes.length, 12), gut = 14 + nl * 9, H = 18, gx = gut - 4;
+  let svg = "";
+  spans.forEach(s => { const lane = Math.min(s.lane, 11), x = gx - 6 - lane * 9, y1 = s.a * H + 9, y2 = s.b * H + 9,
+    c = s.cond ? "var(--arrow-c)" : "var(--arrow-j)";
+    svg += `<path d="M${gx} ${y1}H${x}V${y2}H${gx - 4}" fill="none" stroke="${c}" stroke-width="1.3"/>` +
+           `<path d="M${gx - 4} ${y2 - 3}l4 3-4 3" fill="${c}"/>`; });
+  const v = $("#view");
+  v.innerHTML = `<div class="lst ${S.bytes ? "" : "mode-hidebytes"}" style="--gut:${gut + 8}px"><svg id="gutter" width="${gut}" height="${out.length * H}">${svg}</svg>${out.join("")}</div>`;
+  const lst = v.querySelector(".lst");
+  lst.onclick = e => { const g = e.target.closest("[data-go]"); if (g) return; const r = e.target.closest("[data-a]");
+    if (!r) return; lst.querySelectorAll(".sel").forEach(x => x.classList.remove("sel")); r.classList.add("sel"); S.sel = r.dataset.a; inspectAddr(S.sel); };
+  lst.ondblclick = e => { const g = e.target.closest("[data-go]"); if (g) return go(g.dataset.go);
+    const r = e.target.closest("[data-a]"); if (!r) return;
+    if (r.dataset.label) renameAt(r.dataset.a, r.textContent.split(":")[0]); else commentAt(r.dataset.a); };
+  lst.querySelectorAll("[data-go]").forEach(g => g.onclick = e => { e.stopPropagation(); go(g.dataset.go); });
+  const target = lst.querySelector(`.r[data-a="${addr}"]`);
+  if (target && addr !== d.addr) target.scrollIntoView({block: "center"}); else v.scrollTop = 0;
+}
+
+/* ---------------- pseudo / decls ---------------- */
+const C_RE = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*)|("(?:\\.|[^"\\\n])*")|(@[A-Za-z]+)|\b(return|if|else|while|for|goto|do|switch|case|break|struct|union|enum|class|let|var|protocol|func|init)\b|\b(int64_t|int32_t|int16_t|int8_t|uint64_t|uint32_t|uint8_t|int|char|short|void|long|unsigned|id|SEL|Class|BOOL|double|float|String|Int|Double|Bool)\b|\b(0x[0-9a-fA-F]+|\d+)\b|([A-Za-z_$][\w$.:]*)(?=\()/g;
+function hlC(code) {
+  return tokenize(code, C_RE, m => {
+    if (m[1]) return `<span class="cm">${esc(m[1])}</span>`;
+    if (m[2]) return `<span class="st">${esc(m[2])}</span>`;
+    if (m[3] || m[4]) return `<span class="kw">${esc(m[3] || m[4])}</span>`;
+    if (m[5]) return `<span class="ty">${esc(m[5])}</span>`;
+    if (m[6]) return `<span class="nm">${esc(m[6])}</span>`;
+    const n = m[7];  // a call: clickable when it names a known procedure
+    return S.procByName.has(n) ? `<span class="fn" data-go="${S.procByName.get(n)}">${esc(n)}</span>` : esc(n);
+  });
+}
+async function showPseudo(addr) {
+  const d = await api("pseudo", {func: addr});
+  const v = $("#view");
+  v.innerHTML = `<pre class="c">${hlC(d.c)}</pre>`;
+  v.querySelectorAll("[data-go]").forEach(g => g.onclick = () => go(g.dataset.go));
+  v.scrollTop = 0;
+}
+function showDecl(it) { $("#view").innerHTML = `<pre class="c">${hlC(it.decl)}</pre>`; empty(false); }
+
+/* ---------------- CFG ---------------- */
+let cfgScale = 1;
+async function showCFG(addr) {
+  const d = await api("cfg", {func: addr});
+  const v = $("#view");
+  v.innerHTML = `<div id="cfgtools" class="tgrp"><button class="tb" id="zin">＋</button><button class="tb" id="zout">－</button><button class="tb" id="zfit">fit</button><button class="tb" id="zsvg" title="Download SVG">⤓</button></div><div id="cfgwrap">rendering…</div>`;
+  if (typeof Viz === "undefined") { $("#cfgwrap").textContent = "CFG renderer could not load (offline?). Use the DOT output via the console or MCP."; return; }
+  S.viz = S.viz || await Viz.instance();
+  const svg = S.viz.renderSVGElement(d.dot);
+  const w = $("#cfgwrap"); w.innerHTML = ""; w.appendChild(svg);
+  const apply = () => w.style.transform = `scale(${cfgScale})`;
+  $("#zin").onclick = () => { cfgScale *= 1.2; apply(); };
+  $("#zout").onclick = () => { cfgScale /= 1.2; apply(); };
+  $("#zfit").onclick = () => { cfgScale = Math.min(1, (v.clientWidth - 40) / svg.getBBox().width); apply(); };
+  $("#zsvg").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([svg.outerHTML], {type: "image/svg+xml"}));
+    a.download = `${d.name || "cfg"}.svg`; a.click(); };
+  v.onwheel = e => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); cfgScale *= e.deltaY < 0 ? 1.1 : 0.9; apply(); } };
+  svg.querySelectorAll("g.node").forEach(n => { n.style.cursor = "pointer";
+    n.onclick = () => { const t = n.querySelector("title"); if (t) { S.sel = t.textContent; inspectAddr(S.sel); } };
+    n.ondblclick = () => { const t = n.querySelector("title"); if (t) go(t.textContent, {mode: "listing"}); }; });
+  apply();
+}
+
+/* ---------------- hex ---------------- */
+async function showHex(addr) {
+  const d = await api("hex", {addr});
+  $("#view").innerHTML = `<div class="hex">${d.rows.map(r =>
+    `<span class="ad">${r.addr.replace(/^0x/, "").padStart(16, "0")}</span>  ${esc(r.hex).padEnd(47)}  <span class="as">${esc(r.ascii)}</span>`).join("\n")}</div>`;
+}
+
+/* ---------------- inspector ---------------- */
+const OPEN = store.get("insp", {file: true, addr: true, enc: true, xr: true, hist: false});
+function sect(id, title, body) {
+  return `<details data-id="${id}" ${OPEN[id] ? "open" : ""}><summary>${title}</summary>${body}</details>`;
+}
+const kv = (k, v, t) => `<div class="kv"><label>${k}</label><div class="v" title="${esc(t ?? v)}">${esc(v)}</div></div>`;
+function renderInspector() {
+  const i = S.info;
+  $("#insp").innerHTML =
+    sect("file", "File Information",
+      kv("Path", i.path) + kv("Loader", i.format === "macho" ? "Mach-O" : i.format.toUpperCase()) + kv("CPU", i.arch) +
+      kv("Entry point", i.entry) + kv("Base", i.base) +
+      kv("Procedures", i.counts.functions.toLocaleString()) + kv("Strings", i.counts.strings.toLocaleString()) +
+      kv("Imports", i.counts.imports.toLocaleString()) + kv("Types", i.counts.classes)) +
+    sect("addr", "Address Information", `<div id="ai"></div>`) +
+    sect("enc", "Instruction Encoding", `<div id="enc" class="enc"></div>`) +
+    sect("xr", "Cross-References", `<div id="xr"></div>`) +
+    sect("sec", "Sections", i.sections.map(s => `<div class="xi" data-go="${s.va}">${esc(s.name)} <span class="k">${s.va} · ${s.size.toLocaleString()} B${s.code ? " · code" : ""}</span></div>`).join("")) +
+    sect("hist", "Navigation History", `<div id="hist"></div><button class="small-btn" id="hclr">Clear Navigation Stack</button>`);
+  $("#insp").querySelectorAll("details").forEach(d => d.ontoggle = () => { OPEN[d.dataset.id] = d.open; store.set("insp", OPEN); });
+  $("#insp").querySelectorAll("[data-go]").forEach(g => g.onclick = () => go(g.dataset.go, {mode: "hex"}));
+  $("#hclr").onclick = () => { S.hist = S.hpos >= 0 ? [S.hist[S.hpos]] : []; S.hpos = S.hist.length - 1; updateNavBtns(); };
+}
+let aiSeq = 0;
+async function inspectAddr(addr) {
+  if (!$("#ai")) return;
+  const seq = ++aiSeq;
+  try {
+    const [a, x] = await Promise.all([api("addrinfo", {addr}), api("xrefs", {addr})]);
+    if (seq !== aiSeq) return;
+    const off = a.file_offset == null ? "-" : (S.hexOffsets ? "0x" + a.file_offset.toString(16) : String(a.file_offset));
+    $("#ai").innerHTML = kv("Address", a.addr) + kv("Name", a.name || "-") + kv("Section", a.section || "-") +
+      kv("File Offset", off) +
+      `<div class="radio"><label><input type="radio" name="ofs" ${S.hexOffsets ? "" : "checked"} value="d"> Decimal</label><label><input type="radio" name="ofs" ${S.hexOffsets ? "checked" : ""} value="h"> Hexadecimal</label></div>` +
+      kv("Type", a.type) + kv("Procedure", a.procedure ? `${a.procedure}${a.proc_offset ? " + " + a.proc_offset : ""}` : "-") +
+      kv("Comment", a.comment || "-") + kv("Bookmark", a.bookmarked ? "★ yes" : "no");
+    $("#ai").querySelectorAll("input[name=ofs]").forEach(r => r.onchange = () => { S.hexOffsets = r.value === "h"; store.set("hexoff", S.hexOffsets); inspectAddr(addr); });
+    $("#enc").innerHTML = a.encoding ? `${esc(a.encoding)}<div style="color:var(--dim);font-size:12px;margin-top:4px">${esc(a.insn)}</div>` : `<span style="color:var(--dim)">not an instruction</span>`;
+    $("#xr").innerHTML = x.items.length ? x.items.slice(0, 200).map(r =>
+      `<div class="xi" data-go="${r.addr}"><span class="k">${r.kind}</span> ${esc(r.name)} <span class="k">${r.addr}</span></div>`).join("") : `<span style="color:var(--dim);font-size:12px">no references</span>`;
+    $("#xr").querySelectorAll("[data-go]").forEach(g => g.onclick = () => go(g.dataset.go, {mode: "listing"}));
+  } catch (e) { /* address outside image: leave the panel as is */ }
+}
+function renderHistory() {
+  const h = $("#hist"); if (!h) return;
+  h.innerHTML = S.hist.map((e, i) => `<div class="hi" data-i="${i}" style="${i === S.hpos ? "font-weight:700" : ""}">${e.addr} <span style="color:var(--dim)">${e.mode}</span></div>`).reverse().join("");
+  h.querySelectorAll(".hi").forEach(x => x.onclick = () => { S.hpos = +x.dataset.i; const e = S.hist[S.hpos]; S.mode = e.mode; syncModes(); S.sel = e.addr; show().then(updateNavBtns); });
+}
+
+/* ---------------- edits ---------------- */
+async function renameAt(addr, cur) {
+  const name = prompt(`Rename ${addr}`, cur || ""); if (!name || name === cur) return;
+  try { await post("rename", {addr, name}); log(`renamed ${addr} → ${name}`); await refreshLists(); await show(); } catch (e) { log(e.message, "err"); }
+}
+async function commentAt(addr) {
+  const text = prompt(`Comment at ${addr}`, ""); if (text === null) return;
+  try { await post("comment", {addr, text}); await show(); } catch (e) { log(e.message, "err"); }
+}
+async function mark(kind) {
+  if (!S.sel) return;
+  try { const r = await post("mark", {kind, addr: S.sel}); log(r.output); await refreshLists(); await show(); } catch (e) { log(e.message, "err"); }
+}
+async function toggleBookmark() {
+  if (!S.sel) return;
+  try { await post("bookmark", {addr: S.sel}); await refreshLists(); inspectAddr(S.sel); log(`bookmark toggled at ${S.sel}`); } catch (e) { log(e.message, "err"); }
+}
+
+/* ---------------- theme / chrome ---------------- */
+function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+$("#bTheme").onclick = () => { const cur = document.documentElement.dataset.theme ||
+  (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); const t = cur === "dark" ? "light" : "dark"; applyTheme(t); store.set("theme", t); };
+$("#bNav").onclick = () => $("#nav").classList.toggle("hide");
+$("#bInsp").onclick = () => $("#insp").classList.toggle("hide");
+$("#bBytes").onclick = () => { S.bytes = !S.bytes; store.set("bytes", S.bytes); $("#bBytes").classList.toggle("on", S.bytes); show(); };
+$("#bBytes").classList.toggle("on", S.bytes);
+$("#bOpen").onclick = $("#eOpen").onclick = pickFile;
+$("#bExport").onclick = async () => {
+  if (!S.info) return;
+  try { const db = await api("export"); const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(db, null, 2)], {type: "application/json"}));
+    a.download = `${S.info.name}.rdb.json`; a.click(); log(`saved analysis database ${a.download}`); }
+  catch (e) { log(e.message, "err"); }
+};
+$("#bImport").onclick = () => { if (S.info) { $("#dbfile").value = ""; $("#dbfile").click(); } };
+$("#dbfile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { await post("import", JSON.parse(await f.text())); log(`loaded analysis database ${f.name}`);
+        await refreshLists(); await show(); }
+  catch (err) { log("import failed: " + err.message, "err"); }
+};
+$("#pathGo").onclick = () => $("#pathIn").value.trim() && openPath($("#pathIn").value.trim());
+$("#pathIn").onkeydown = e => e.key === "Enter" && $("#pathGo").click();
+$("#bBack").onclick = back; $("#bFwd").onclick = fwd;
+$("#bClear").onclick = () => $("#log").innerHTML = "";
+$("#bCon").onclick = () => $("#console").classList.toggle("small");
+$("#docsel").onchange = async e => { await post("switch", {id: e.target.value}); await loadDoc(); };
+document.querySelectorAll("#navtabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => { S.mode = b.dataset.mode; syncModes();
+  if (S.sel) go(S.sel, {mode: S.mode}); });
+document.querySelectorAll(".mk").forEach(b => b.onclick = () => mark(b.dataset.k));
+$("#q").oninput = () => { $("#list").scrollTop = 0; renderList(); };
+$("#cmd").onkeydown = e => {
+  if (e.key === "Enter" && e.target.value.trim()) { const l = e.target.value.trim(); S.cmdHist.push(l); S.cmdPos = S.cmdHist.length; e.target.value = ""; runCmd(l); }
+  else if (e.key === "ArrowUp" && S.cmdPos > 0) { e.target.value = S.cmdHist[--S.cmdPos]; e.preventDefault(); }
+  else if (e.key === "ArrowDown") { S.cmdPos = Math.min(S.cmdHist.length, S.cmdPos + 1); e.target.value = S.cmdHist[S.cmdPos] || ""; }
+};
+
+/* keyboard: Hopper-like single keys when not typing */
+addEventListener("keydown", e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === "o") { e.preventDefault(); return pickFile(); }
+  if (mod && e.key === "[") { e.preventDefault(); return back(); }
+  if (mod && e.key === "]") { e.preventDefault(); return fwd(); }
+  if (mod && e.key === "f") { e.preventDefault(); return $("#q").focus(); }
+  if (typing || mod || !S.info) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  const k = e.key;
+  if (k === "Escape") return back();
+  if (k === "1") { S.mode = "listing"; } else if (k === "2") { S.mode = "cfg"; } else if (k === "3") { S.mode = "pseudo"; } else if (k === "4") { S.mode = "hex"; }
+  else if (k === " ") { e.preventDefault(); S.mode = S.mode === "cfg" ? "listing" : "cfg"; }
+  else if (k === "g") { e.preventDefault(); $("#cmd").value = "goto "; return $("#cmd").focus(); }
+  else if (k === "n") return S.sel && renameAt(S.sel, "");
+  else if (k === ";") return S.sel && commentAt(S.sel);
+  else if (k === "x") { const d = $("#insp details[data-id=xr]"); if (d) d.open = true; return; }
+  else if (k === "b") return toggleBookmark();
+  else if ("dacpu".includes(k)) return mark(k.toUpperCase());
+  else if (k === "?") return runCmd("help");
+  else return;
+  syncModes(); if (S.sel) go(S.sel, {mode: S.mode});
+});
+
+boot();
+</script>
+</body>
+</html>
