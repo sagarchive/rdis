@@ -61,7 +61,7 @@ macOS and Linux:
 python3 -m venv ~/rdis-env
 source ~/rdis-env/bin/activate
 pip install "git+https://github.com/sagarchive/rdis.git"
-rdis-gui /bin/ls                 # opens http://127.0.0.1:8000
+rdis-gui                         # opens http://127.0.0.1:8000, then drop a binary on the page
 ```
 
 Windows (PowerShell):
@@ -70,11 +70,12 @@ Windows (PowerShell):
 py -m venv $HOME\rdis-env
 $HOME\rdis-env\Scripts\Activate.ps1
 pip install "git+https://github.com/sagarchive/rdis.git"
-rdis-gui C:\Windows\System32\notepad.exe
+rdis-gui                         # then drop a binary on the page
 ```
 
 If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
-Next time, activate the environment again before running `rdis-gui`. To update, run
+Next time, activate the environment again and run `rdis-gui`. To open a file straight away, pass
+its path: `rdis-gui path/to/YourApp`. To update, run
 `pip install --upgrade "git+https://github.com/sagarchive/rdis.git"`.
 
 From source: `git clone https://github.com/sagarchive/rdis.git && cd rdis`, then `pip install .` inside

@@ -593,7 +593,8 @@ def main(argv=None):
         open_doc(a.binary, arch=a.arch)
     url = f"http://{'127.0.0.1' if a.host == '0.0.0.0' else a.host}:{a.port}"
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"rdis: serving {url}  (Ctrl-C to stop)" + (f"  -- opened {a.binary}" if a.binary else ""))
+    print(f"rdis: serving {url}  (Ctrl-C to stop)" + (f"  -- opened {a.binary}" if a.binary else
+          "\n      drop a binary, app or package on the page, or click Open file"))
     if a.desktop:
         try:
             import webview  # pywebview: native window on Win/Mac/Linux, one codebase

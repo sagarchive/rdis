@@ -795,8 +795,8 @@ rdis-gui ./MyApp</pre>
       </div>
     </div>
     <div class="allinone rise">
-      <p class="cap"><b>Paste this once.</b> It makes the environment, installs rdis from GitHub and opens a binary.</p>
-      <div class="cmd"><pre data-unix="python3 -m venv ~/rdis-env&#10;source ~/rdis-env/bin/activate&#10;pip install &quot;git+https://github.com/sagarchive/rdis.git&quot;&#10;rdis-gui /bin/ls" data-win="py -m venv $HOME\rdis-env&#10;$HOME\rdis-env\Scripts\Activate.ps1&#10;pip install &quot;git+https://github.com/sagarchive/rdis.git&quot;&#10;rdis-gui C:\Windows\System32\notepad.exe"></pre><button type="button" class="cp">Copy</button></div>
+      <p class="cap"><b>Paste this once.</b> It makes the environment, installs rdis from GitHub and starts it.</p>
+      <div class="cmd"><pre data-unix="python3 -m venv ~/rdis-env&#10;source ~/rdis-env/bin/activate&#10;pip install &quot;git+https://github.com/sagarchive/rdis.git&quot;&#10;rdis-gui" data-win="py -m venv $HOME\rdis-env&#10;$HOME\rdis-env\Scripts\Activate.ps1&#10;pip install &quot;git+https://github.com/sagarchive/rdis.git&quot;&#10;rdis-gui"></pre><button type="button" class="cp">Copy</button></div>
     </div>
     <div class="steps3">
       <div class="st rise">
@@ -813,14 +813,14 @@ rdis-gui ./MyApp</pre>
       </div>
       <div class="st rise">
         <span class="k">Step 3</span>
-        <h3>Open a binary.</h3>
-        <p>The browser opens on <code>http://127.0.0.1:8000</code>. Drop any other file onto the page.</p>
-        <div class="cmd"><pre data-unix="rdis-gui /bin/ls" data-win="rdis-gui C:\Windows\System32\notepad.exe"></pre><button type="button" class="cp">Copy</button></div>
+        <h3>Start rdis.</h3>
+        <p>Your browser opens rdis on <code>127.0.0.1:8000</code>. Drop a binary, app or package onto the page, or click <b>Open file</b>. Press Ctrl+C in the terminal to stop.</p>
+        <div class="cmd"><pre data-unix="rdis-gui" data-win="rdis-gui"></pre><button type="button" class="cp">Copy</button></div>
       </div>
     </div>
     <div class="later rise">
-      <div><p class="cap"><b>Every time after.</b> Activate the environment, then open what you want to read.</p>
-        <div class="cmd"><pre data-unix="source ~/rdis-env/bin/activate&#10;rdis-gui ./YourApp" data-win="$HOME\rdis-env\Scripts\Activate.ps1&#10;rdis-gui .\YourApp.exe"></pre><button type="button" class="cp">Copy</button></div></div>
+      <div><p class="cap"><b>Every time after.</b> Activate the environment and start rdis. Already know the file? Put its path after <code>rdis-gui</code> to open it straight away.</p>
+        <div class="cmd"><pre data-unix="source ~/rdis-env/bin/activate&#10;rdis-gui" data-win="$HOME\rdis-env\Scripts\Activate.ps1&#10;rdis-gui"></pre><button type="button" class="cp">Copy</button></div></div>
       <div><p class="cap"><b>Update to the latest.</b> Same environment, one command.</p>
         <div class="cmd"><pre data-unix="pip install --upgrade &quot;git+https://github.com/sagarchive/rdis.git&quot;" data-win="pip install --upgrade &quot;git+https://github.com/sagarchive/rdis.git&quot;"></pre><button type="button" class="cp">Copy</button></div></div>
     </div>
