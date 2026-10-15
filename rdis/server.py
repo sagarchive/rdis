@@ -167,10 +167,11 @@ def _open_program(path, arch=None, objc=True, swift=True, prologues=True, loader
     with open(path, "rb") as source:
         for chunk in iter(lambda: source.read(1 << 20), b""):
             digest.update(chunk)
-    p._doc_key = hashlib.sha1(
+    doc_identity = (
         f"{os.path.abspath(path)}|{digest.hexdigest()}|{arch}|{loader}|{base}|"
-        f"{int(objc)}|{int(swift)}|{int(prologues)}".encode()
-    ).hexdigest()[:12]
+        f"{int(objc)}|{int(swift)}|{int(prologues)}"
+    )
+    p._doc_key = hashlib.sha1(doc_identity.encode()).hexdigest()[:12]
     return p
 
 
