@@ -938,7 +938,7 @@ async function showCFG(addr, detail = false) {
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
-    const ns = Math.min(4, Math.max(0.025, scale * factor));
+    const ns = Math.min(4, Math.max(0.005, scale * factor));
     tx = cx - (cx - tx) * (ns / scale); ty = cy - (cy - ty) * (ns / scale);
     scale = ns; apply();
   };
