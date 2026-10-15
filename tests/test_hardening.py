@@ -326,7 +326,7 @@ class CFGLayoutTests(unittest.TestCase):
         overview = to_dot(prog, func)
         detail = to_dot(prog, func, detail=True)
         self.assertLess(overview.count(r"\\l"), detail.count(r"\\l"))
-        self.assertIn("ranksep=\\"0.62 equally\\"", overview)
+        self.assertIn('ranksep="0.62 equally"', overview)
         self.assertIn("pad=0.22", overview)
 
 
