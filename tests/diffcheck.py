@@ -97,14 +97,14 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
         lines = harness.splitlines()
         context = []
         for err in errs:
-            m = re.search(r":(\\d+):\\d+: error:", err)
+            m = re.search(r":(\d+):\d+: error:", err)
             if not m:
                 continue
             line_no = int(m.group(1))
             # Attribute a compiler diagnostic to the generated decompiler function, not only a
             # temporary file line number. This makes semantic regressions actionable in CI.
             owner = next((lines[i].strip() for i in range(min(line_no - 1, len(lines) - 1), -1, -1)
-                          if re.search(r"\\bdec_[A-Za-z0-9_]+\\s*\\(", lines[i])
+                          if re.search(r"\bdec_[A-Za-z0-9_]+\s*\(", lines[i])
                           and lines[i].rstrip().endswith("{")), "unknown generated function")
             context.append(f"{owner} (harness line {line_no})")
         detail = " | ".join(errs)
