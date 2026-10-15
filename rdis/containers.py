@@ -7,6 +7,7 @@ member. `_extract` pulls one member into a content-addressed cache file.
 import hashlib
 import os
 import shutil
+import threading
 
 import lief
 
@@ -86,23 +87,55 @@ def _peek_compressed(path):
     return [{**s, "entry": DECOMP, "label": f"{kind} → " + s["label"]} for s in _RAW]
 
 
-def _write_atomic(cache_dir, out, fill):
-    """Write `out` via a temp file + atomic rename; on failure (a truncated stream, a zip member
-    whose CRC fails at EOF, ...) remove the temp, or every bad upload leaves up to max_mb behind."""
+class StorageLimitError(ValueError):
+    """The shared extraction/upload directory has reached its configured disk quota."""
+
+
+_STORAGE_WRITE_LOCK = threading.Lock()
+
+
+def _directory_size(path):
+    total = 0
+    if not os.path.isdir(path):
+        return 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                if not os.path.islink(os.path.join(root, name)):
+                    total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return total
+
+
+def _write_atomic(cache_dir, out, fill, max_total_bytes=None):
+    """Atomically write a cache result and enforce an optional aggregate directory quota."""
     import tempfile
-    fd, tmp = tempfile.mkstemp(dir=cache_dir)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            fill(f)
-        os.replace(tmp, out)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    os.makedirs(cache_dir, exist_ok=True)
+    with _STORAGE_WRITE_LOCK:
+        used = _directory_size(cache_dir) if max_total_bytes is not None else 0
+        old_size = os.path.getsize(out) if os.path.isfile(out) else 0
+        fd, tmp = tempfile.mkstemp(dir=cache_dir)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                fill(f)
+            if max_total_bytes is not None:
+                projected = used - old_size + os.path.getsize(tmp)
+                if projected > max_total_bytes:
+                    raise StorageLimitError(
+                        f"cache storage quota exceeded ({projected} > {max_total_bytes} bytes); "
+                        "remove unused files from the upload/cache directory or raise the configured limit"
+                    )
+            os.replace(tmp, out)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
-
-def _decompress(path, cache_dir, max_mb):
+def _decompress(path, cache_dir, max_mb, max_total_mb=None):
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
         raise ValueError("max_mb must be a positive integer")
+    if max_total_mb is not None and (not isinstance(max_total_mb, int) or isinstance(max_total_mb, bool) or max_total_mb < 1):
+        raise ValueError("max_total_mb must be a positive integer")
     with open(path, "rb") as fh:
         head = fh.read(6)
     _, op = _opener(head)
@@ -118,7 +151,7 @@ def _decompress(path, cache_dir, max_mb):
         def fill(w):
             with op(path, "rb") as r:
                 _copy_bounded(r, w, max_mb << 20)
-        _write_atomic(cache_dir, out, fill)
+        _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 
@@ -153,7 +186,7 @@ def _tar_slices(path):
     return out or [{"arch": None, "disabled": True, "label": "No native binaries found in this tar archive."}]
 
 
-def _tar_extract(path, entry, cache_dir, max_mb):
+def _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=None):
     import tarfile
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
         raise ValueError("max_mb must be a positive integer")
@@ -178,7 +211,7 @@ def _tar_extract(path, entry, cache_dir, max_mb):
                     raise ValueError(f"could not read archive member: {entry}")
                 with src:
                     _copy_bounded(src, dst, limit, expected_size=m.size)
-            _write_atomic(cache_dir, out, fill)
+            _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 
@@ -270,7 +303,7 @@ def _archive_slices(path):
     return out
 
 
-def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128):
+def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Attach a DMG read-only, enumerate native binaries (or extract one). Returns slice list, or
     the extracted file path when `_extract_entry` is given."""
     import plistlib
@@ -316,7 +349,7 @@ def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128):
                                 def fill(out):
                                     with open(full, "rb") as src:
                                         _copy_bounded(src, out, limit, expected_size=size)
-                                _write_atomic(cache_dir, dst, fill)
+                                _write_atomic(cache_dir, dst, fill, (max_total_mb << 20) if max_total_mb is not None else None)
                             return dst
                         slices.append({"entry": rel, "arch": None,
                                        "label": f"{rel}  ({os.path.getsize(full):,} B)"})
@@ -334,7 +367,7 @@ def _arch_of(b):
         return b.header.cpu_type.__name__.lower()
 
 
-def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
+def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Extract one archive member to a content-addressed cache file; return its path. Guards against
     zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
@@ -342,20 +375,20 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
     import tarfile
     import zipfile
     if entry == DECOMP:
-        out = _decompress(path, cache_dir, max_mb)
+        out = _decompress(path, cache_dir, max_mb, max_total_mb=max_total_mb)
         if out is None:
             raise ValueError("could not decompress this file")
         return out
     # same detection order as slices(): a zip (APK) with "koly" in its trailing comment is a zip
     if not zipfile.is_zipfile(path):
         if _is_dmg(path):
-            out = _dmg_list(path, _extract_entry=entry, cache_dir=cache_dir, max_mb=max_mb)
+            out = _dmg_list(path, _extract_entry=entry, cache_dir=cache_dir, max_mb=max_mb, max_total_mb=max_total_mb)
             if out is None:
                 raise ValueError(f"could not extract {entry} from the disk image")
             return out
         try:
             if tarfile.is_tarfile(path):
-                return _tar_extract(path, entry, cache_dir, max_mb)
+                return _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=max_total_mb)
         except tarfile.TarError:
             pass
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
@@ -376,7 +409,7 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
             def fill(dst):
                 with z.open(entry) as src:
                     _copy_bounded(src, dst, limit, expected_size=info.file_size)
-            _write_atomic(cache_dir, out, fill)
+            _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 
