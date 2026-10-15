@@ -96,7 +96,8 @@ def test_type_recovery():
             print(f"skip type_recovery ({arch}: no clang)")
             continue
         p = Program(open_image(bin)).analyze()
-        sig = lambda n: Decompiler(p, p.functions[p.resolve(n)]).c().splitlines()[0]
+        sig = lambda n: next(ln for ln in Decompiler(p, p.functions[p.resolve(n)]).c().splitlines()
+                             if "(" in ln and ln.rstrip().endswith("{"))   # after any struct decls
         assert "*" in sig("_sum3"), sig("_sum3")              # struct pointer arg
         assert "char *" in sig("_firstbytes"), sig("_firstbytes")  # byte-accessed pointer
         assert sig("_greet").startswith("void "), sig("_greet")    # no value returned
@@ -142,7 +143,8 @@ def test_simd_fp():
             continue
         p = Program(open_image(bin)).analyze()
         c = lambda n: Decompiler(p, p.functions[p.resolve(n)]).c()
-        sig = lambda n: c(n).splitlines()[0]
+        sig = lambda n: next(ln for ln in c(n).splitlines() if "(" in ln and ln.rstrip().endswith("{")
+                             and not ln.startswith(("static ", "typedef ", "struct ")))
         fa = "v" if arch == "arm64" else "xmm"
         ia = "x0" if arch == "arm64" else "rdi"
         assert sig("_fma3") == f"double _fma3(double {fa}0, double {fa}1, double {fa}2) {{", sig("_fma3")
@@ -152,8 +154,8 @@ def test_simd_fp():
         assert sig("_fsum").startswith("float _fsum(float *"), sig("_fsum")
         assert sig("_vadd").startswith("void _vadd(int *"), sig("_vadd")
         assert sig("_vadd").endswith("int64_t " + ("x2" if arch == "arm64" else "rdx") + ") {"), sig("_vadd")
-        # vector body lifted to intrinsics, not left as asm comments
-        assert ("_mm_add_epi32(" if arch == "x86_64" else "vaddq(") in c("_vadd"), c("_vadd")
+        # vector body lifted to lane-typed C (vector extensions), not asm comments or pseudo-calls
+        assert "(u32x4)" in c("_vadd") and "typedef uint32_t u32x4" in c("_vadd"), c("_vadd")
         # times13: index*scale addressing must survive (it was once lifted as `return rdi;`)
         body = c("_times13").splitlines()[1].strip()
         assert body.startswith("return "), body
@@ -546,6 +548,30 @@ def test_overlay_isolation():
     print("ok  overlay isolation + sanitized .rdb load")
 
 
+def test_typelib():
+    """System prototypes type what crosses an API call: a parameter passed straight to strlen is
+    a char *, strdup's result is a char *, and printf takes its fixed format plus the varargs set."""
+    from rdis import typelib
+    typelib._check()
+    src = ("#include <string.h>\n#include <stdio.h>\n"
+           "__attribute__((noinline)) unsigned long len(const char *s){ return strlen(s) + 1; }\n"
+           "__attribute__((noinline)) char *dup(const char *s){ char *d = strdup(s); return d; }\n"
+           "int main(int c, char **v){ printf(\"%lu %s\\n\", len(v[0]), dup(v[0])); return 0; }\n")
+    for arch in ("arm64", "x86_64"):
+        b = compile_c(src, f"tl_{arch}", arch, flags=("-O1",), obj=False)
+        if not b:
+            continue
+        p = Program(open_image(b)).analyze()
+        c = lambda n: Decompiler(p, p.functions[p.resolve(n)]).c()
+        sig = lambda n: next(l for l in c(n).splitlines() if "(" in l and l.rstrip().endswith("{"))
+        assert "char *" in sig("_len"), sig("_len")
+        # dup() tail-calls strdup: it takes and returns strdup's char *, and forwards its argument
+        assert sig("_dup").startswith("char *") and "char *" in sig("_dup").split("(", 1)[1], sig("_dup")
+        assert "strdup(" in c("_dup"), c("_dup")
+        assert "printf(" in c("_main"), c("_main")
+    print("ok  typelib: API prototypes type parameters, results and varargs")
+
+
 def test_resolve_and_xrefs():
     p = Program(open_image("/bin/ls", arch="arm64")).analyze()
     entry = p.resolve("0x%x" % p.image.entry)
@@ -716,6 +742,7 @@ if __name__ == "__main__":
     test_analysis_cache()
     test_ir()
     test_overlay_isolation()
+    test_typelib()
     test_resolve_and_xrefs()
     test_hostile_inputs()
     test_server_guards()

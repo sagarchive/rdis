@@ -12,6 +12,8 @@ import re
 
 from capstone import x86, arm64 as a64
 
+from . import neon, sse
+
 NA = object()
 
 
@@ -139,10 +141,21 @@ def _x86(lf, i, regs):
         if m in ("vzeroupper", "vzeroall", "lfence", "mfence", "sfence", "pause", "cld", "std", "clc"):
             return None
         return NA
+    r = sse.lift(lf, i, regs)           # lane-exact SSE via vector extensions (compilable C)
+    if r is not sse.NA:
+        return r
     # three-operand AVX forms read (src1, src2); legacy SSE forms are dst = dst OP src
     srcs = (lambda: [op(1), op(2)]) if avx and len(ops) >= 3 else (lambda: [op(0), op(-1)])
     if base in _X86_ZERO and len({(o.type, o.reg if o.type == x86.X86_OP_REG else None) for o in ops}) == 1:
         return lf._assign(ops[0], "~0" if base == "pcmpeqd" else "0", i, regs)
+    if base in ("movss", "movsd") and len(ops) == 2 and ops[1].type == x86.X86_OP_MEM:
+        refs = lf.arch.data_refs(i, {})
+        raw = lf._ro_bytes(refs[0], 4 if base == "movss" else 8) if refs else None
+        if raw is not None:                              # constant-pool float / double
+            import math, struct
+            v = struct.unpack("<f" if base == "movss" else "<d", raw)[0]
+            if math.isfinite(v):
+                return lf._assign(ops[0], f"{v!r}f" if base == "movss" else repr(v), i, regs)
     if base in _X86_MOVES and len(ops) >= 2:
         return lf._assign(ops[0], op(-1), i, regs)
     if base in _X86_SCALAR:
@@ -176,13 +189,25 @@ def _x86(lf, i, regs):
         regs["__cmp__"] = ("cmp", [op(0), op(1)])
         return None
     # ---- integer extras
-    if m in ("div", "idiv") and len(ops) == 1:
-        num, d = regs.get("rax", "rax"), op(0)
-        regs["rdx"] = lf._bin(num, "%", d)
-        regs["rax"] = lf._bin(num, "/", d)
+    if m in ("div", "idiv") and len(ops) == 1:          # rax = rdx:rax / src, rdx = remainder
+        bits = (ops[0].size or 8) * 8
+        t = ("int" if m == "idiv" else "uint") + f"{bits}_t"
+        num, d = f"({t}){lf._paren(regs.get('rax', 'rax'))}", f"({t}){lf._paren(op(0))}"
+        regs["rdx"] = f"(int64_t)({num} % {d})"
+        regs["rax"] = f"(int64_t)({num} / {d})"
         return None
-    if m in ("mul", "imul") and len(ops) == 1:          # rdx:rax = rax * src
-        regs["rax"] = lf._bin(regs.get("rax", "rax"), "*", op(0))
+    if m in ("mul", "imul") and len(ops) == 1:          # rdx:rax = rax * src (double width)
+        bits = (ops[0].size or 8) * 8
+        s_ = m == "imul"
+        a, b = lf._paren(regs.get("rax", "rax")), lf._paren(op(0))
+        if bits == 64:
+            w, c = ("__int128", "(int64_t)") if s_ else ("unsigned __int128", "(uint64_t)")
+            regs["rdx"] = f"(int64_t)((({w}){c}{a} * {c}{b}) >> 64)"
+            regs["rax"] = f"(int64_t)({c}{a} * {c}{b})"
+        else:
+            w, c = ("int64_t", f"(int{bits}_t)") if s_ else ("uint64_t", f"(uint{bits}_t)")
+            regs["rdx"] = f"(int64_t)(({w}){c}{a} * {c}{b} >> {bits})"
+            regs["rax"] = f"(int64_t)({c}({c}{a} * {c}{b}))"
         return None
     if m == "imul" and len(ops) == 3:                    # imul dst, src, imm
         return lf._assign(ops[0], lf._bin(op(1), "*", op(2)), i, regs)
@@ -200,13 +225,17 @@ def _x86(lf, i, regs):
         fn = f"__builtin_rotate{'left' if m == 'rol' else 'right'}{bits}"
         return lf._assign(ops[0], f"{fn}(({_uint(bits)})({op(0)}), {op(1)})", i, regs)
     if m in ("bsf", "tzcnt"):
-        return lf._assign(ops[0], f"__builtin_ctzll({op(1)})", i, regs)
+        bits = (ops[0].size or 8) * 8
+        return lf._assign(ops[0], f"__builtin_ctzg(({_uint(bits)}){lf._paren(op(1))}, {bits})", i, regs)
     if m in ("bsr",):
-        return lf._assign(ops[0], f"63 - __builtin_clzll({op(1)})", i, regs)
+        bits = (ops[0].size or 8) * 8
+        return lf._assign(ops[0], f"{bits - 1} - __builtin_clzg(({_uint(bits)}){lf._paren(op(1))})", i, regs)
     if m == "lzcnt":
-        return lf._assign(ops[0], f"__builtin_clzll({op(1)})", i, regs)
+        bits = (ops[0].size or 8) * 8
+        return lf._assign(ops[0], f"__builtin_clzg(({_uint(bits)}){lf._paren(op(1))}, {bits})", i, regs)
     if m == "popcnt":
-        return lf._assign(ops[0], f"__builtin_popcountll({op(1)})", i, regs)
+        bits = (ops[0].size or 8) * 8
+        return lf._assign(ops[0], f"__builtin_popcountg(({_uint(bits)}){lf._paren(op(1))})", i, regs)
     if m == "bswap":
         return lf._assign(ops[0], f"__builtin_bswap64({op(0)})", i, regs)
     if m in ("bt",):
@@ -294,13 +323,29 @@ def _arm(lf, i, regs):
     if m == "extr" and len(ops) == 4:
         return lf._assign(ops[0], f"__extr({op(1)}, {op(2)}, {ops[3].imm})", i, regs)
     if m in _ARM_EXT and len(ops) == 2:
-        return lf._assign(ops[0], _cast(lf, _ARM_EXT[m], op(1)), i, regs)
+        v = _cast(lf, _ARM_EXT[m], op(1))
+        if (i.reg_name(ops[0].reg) or "w")[0] == "x":
+            v = f"(int64_t){v}"           # sxtw x8, w0: a 64-bit value, so later math is 64-bit
+        return lf._assign(ops[0], v, i, regs)
     if m in _ARM_BITS and len(ops) == 2 and not vector:
-        return lf._assign(ops[0], f"{_ARM_BITS[m]}({op(1)})", i, regs)
+        w32 = (i.reg_name(ops[0].reg) or "x")[0] == "w"
+        x = op(1)
+        u = _cast(lf, "(uint32_t)" if w32 else "(uint64_t)", x)
+        expr = {   # width-exact, and defined where the C builtins are not (clz of 0 is the width)
+            "rbit": f"__builtin_bitreverse{32 if w32 else 64}({u})",
+            "clz": f"__builtin_clzg({u}, {32 if w32 else 64})",
+            "cls": f"__builtin_clrsb{'' if w32 else 'll'}({_cast(lf, '(int32_t)' if w32 else '(int64_t)', x)})",
+            "rev": f"__builtin_bswap{32 if w32 else 64}({u})",
+            "rev32": f"__builtin_bswap32({u})" if w32 else
+                     f"__builtin_rotateright64(__builtin_bswap64({u}), 32)",
+            "rev16": f"__builtin_rotateright32(__builtin_bswap32({u}), 16)" if w32 else
+                     f"((({u} & 0x00ff00ff00ff00ffull) << 8) | (({u} >> 8) & 0x00ff00ff00ff00ffull))",
+        }.get(m, f"{_ARM_BITS[m]}({x})")
+        return lf._assign(ops[0], expr, i, regs)
     if m in ("cinc", "cinv", "cneg") and len(ops) == 2:       # cinc d, s, cc
         cond = lf._cc_expr(regs.get("__cmp__"), lf._cc_name(i))
         s = op(1)
-        alt = {"cinc": lf._bin(s, "+", "1"), "cinv": f"~{s}", "cneg": f"-{s}"}[m]
+        alt = {"cinc": lf._bin(s, "+", "1"), "cinv": f"~{lf._paren(s)}", "cneg": lf._neg(s)}[m]
         return lf._assign(ops[0], f"({cond}) ? {alt} : {s}", i, regs)
     if m in ("ccmp", "ccmn") and len(ops) >= 2:
         # conditional compare chains a second test onto the first (a && b / a || b); keep the newest
@@ -310,7 +355,7 @@ def _arm(lf, i, regs):
     if m in ("adc", "sbc", "adcs", "sbcs", "ngc", "ngcs") and len(ops) >= 2:
         c = _carry_arm(lf, regs)
         if m.startswith("ngc"):                          # ngc d, s  =  0 - s - !C
-            return lf._assign(ops[0], f"-{op(1)} - !({c})", i, regs)
+            return lf._assign(ops[0], f"{lf._neg(op(1))} - !({c})", i, regs)
         if m.startswith("adc"):                          # adc: a + b + C
             return lf._assign(ops[0], lf._bin(lf._bin(op(1), "+", op(2)), "+", f"({c})"), i, regs)
         return lf._assign(ops[0], lf._bin(lf._bin(op(1), "-", op(2)), "-", f"!({c})"), i, regs)  # sbc: a - b - !C
@@ -321,6 +366,9 @@ def _arm(lf, i, regs):
     if m == "fcsel" and len(ops) == 3:
         cond = lf._cc_expr(regs.get("__cmp__"), lf._cc_name(i))
         return lf._assign(ops[0], f"({cond}) ? {op(1)} : {op(2)}", i, regs)
+    r = neon.lift(lf, i, regs)          # lane-exact NEON via vector extensions (compilable C)
+    if r is not neon.NA:
+        return r
     if m == "movi" and len(ops) == 2:
         imm = ops[1].imm if ops[1].type == a64.ARM64_OP_IMM else None
         return lf._assign(ops[0], "0" if imm == 0 else f"vdupq_n({imm if imm is not None else op(1)})", i, regs)
@@ -335,7 +383,7 @@ def _arm(lf, i, regs):
                  "fnmadd": f"-({lf._bin(prod, '+', op(3))})", "fnmsub": lf._bin(prod, "-", op(3))}[m]
             return lf._assign(ops[0], e, i, regs)
         if m == "fneg" and len(ops) == 2:
-            return lf._assign(ops[0], f"-{op(1)}", i, regs)
+            return lf._assign(ops[0], lf._neg(op(1)), i, regs)
         if m in _ARM_FFN:
             args = [op(n) for n in range(1, len(ops))]
             return lf._assign(ops[0], f"{_ARM_FFN[m]}({', '.join(args)})", i, regs)

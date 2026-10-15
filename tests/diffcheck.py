@@ -80,7 +80,8 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
             else:
                 calls.append(f'{{ long long o = ({rtype}){fn}({a}), d = ({rtype})dec_{fn}({a});'
                              f' if (o != d) printf("MISMATCH {fn}({shown}) orig=%lld dec=%lld\\n", o, d); }}')
-    harness = PRELUDE + support + "\n" + body + "\n" + "\n\n".join(decs) + \
+    # support (test data) goes after the original source so it can use the source's own types
+    harness = PRELUDE + body + "\n" + support + "\n" + "\n\n".join(decs) + \
         "\n\nint main(void) {\n" + "\n".join("    " + c for c in calls) + '\n    printf("DONE\\n");\n    return 0;\n}\n'
     hfile = os.path.join(tmp, "harness.c")
     open(hfile, "w").write(harness)

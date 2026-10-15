@@ -19,11 +19,12 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
 | Control-flow graph | Graphviz DOT, colored edges | yes (native view) |
-| C pseudo-code | yes: structuring + symbolic lifter (x86/ARM), plus an **IR decompiler** (Ghidra P-code via `pypcode`, or our own dependency-free MIPS/RISC-V frontend) with stack-frame recovery, cross-block constant propagation, conditional-move/trap merging | yes (more mature) |
+| C pseudo-code | structuring + symbolic lifter (x86/ARM) and an **IR decompiler** (Ghidra P-code via `pypcode`, or our own MIPS/RISC-V frontend). **Checked by execution:** 124 `-O2`/`-O3`, vectorized and struct cases recompile and match; 96% / 95% of real arm64 / x86-64 functions compile | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
 | Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
-| Struct/field reconstruction | `p->field_N` for pointer args, `s[i]` for `char *` buffers; IR path emits real `struct` declarations, **merged across calls** that pass the pointer on | yes |
+| Struct/field reconstruction | declared `struct`s with typed fields (width, sign, float, **self-referential pointers** like `next`); IR path merges layouts **across calls** | yes |
+| SIMD | **lane-exact, compilable C** for NEON and SSE via vector extensions (`(u32x4)a + (u32x4)b`, `__builtin_reduce_add`), not pseudo-intrinsics | intrinsics |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
 | Cross-references | to any address/symbol | yes |
@@ -37,30 +38,51 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Android JNI | **`env->FindClass(...)` naming for all 229 JNIEnv slots; `RegisterNatives` tables found and their natives named + typed** | no |
 | Runs on Linux | **yes** | no (macOS only) |
 
-Where rdis is behind: the decompiler is a pragmatic pattern lifter, not a full IR/type-recovery
-pipeline, so its output on heavily optimized code is rougher. The lifter is most complete on
-arm64/x86-64; 32-bit ARM/Thumb decodes and structures correctly but some operand forms still lift to
-a raw-instruction line rather than a C expression. MIPS and RISC-V decompile through the IR
-(tested on Debian's static busybox for mipsel/mips64el/riscv64: 1,200 functions, 0 failures);
-`RDIS_IR=1` routes any ISA through it for comparison. Like every decompiler (Hopper says so too),
-the pseudo-code is a reconstruction, not compilable source.
+How the decompiler is checked, reproducibly:
+
+```sh
+python tests/maturity.py                       # 124 cases: compile, decompile, recompile, run
+python tests/compile_rate.py arm64 40 40       # real /usr/bin functions whose output compiles
+```
+
+API calls are typed from a library of 206 system prototypes (libc, POSIX, CoreFoundation, the
+Objective-C runtime), and Objective-C methods decompile to valid Objective-C. 32-bit ARM/Thumb has
+fewer verified idioms than arm64/x86-64. MIPS and RISC-V decompile through the IR,
+tested on Debian's static busybox (1,200 functions, 0 failures). The pseudo-code is a reconstruction
+of what the machine code computes, not the original source.
 
 ## Install
 
-One codebase, all three OSes (Windows, macOS, Linux):
+rdis needs Python 3.9 or newer and git. It installs into its own virtual environment.
+
+macOS and Linux:
 
 ```sh
-python3 -m venv .venv && source .venv/bin/activate
-pip install .                 # -> rdis (CLI), rdis-gui (web UI), rdis-mcp (agent server)
-pip install '.[desktop]'      # also enables `rdis-gui --desktop` (native window)
+python3 -m venv ~/rdis-env
+source ~/rdis-env/bin/activate
+pip install "git+https://github.com/sagarchive/rdis.git"
+rdis-gui /bin/ls                 # opens http://127.0.0.1:8000
 ```
 
-Or just the libraries for development: `pip install capstone lief`.
-`pip install '.[ir]'` adds Ghidra's P-code semantics (`pypcode`) to the IR decompiler; without it
-MIPS/RISC-V still decompile through rdis's own frontend.
+Windows (PowerShell):
 
-Optional external tools (already present on a Mac with Xcode CLT) unlock extras:
-`swift-demangle`, `c++filt` (demangling), `dot`/viz.js (render CFGs), `lldb` (debugger).
+```powershell
+py -m venv $HOME\rdis-env
+$HOME\rdis-env\Scripts\Activate.ps1
+pip install "git+https://github.com/sagarchive/rdis.git"
+rdis-gui C:\Windows\System32\notepad.exe
+```
+
+If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+Next time, activate the environment again before running `rdis-gui`. To update, run
+`pip install --upgrade "git+https://github.com/sagarchive/rdis.git"`.
+
+From source: `git clone https://github.com/sagarchive/rdis.git && cd rdis`, then `pip install .` inside
+the environment. Extras: `pip install '.[desktop]'` (native window), `pip install '.[ir]'`
+(Ghidra P-code semantics for the IR decompiler).
+
+Optional external tools unlock more: `swift-demangle`, `c++filt` (demangling), `dot` (rendered
+graphs), `lldb` (debugger).
 
 ## CLI
 

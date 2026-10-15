@@ -447,13 +447,21 @@ class Decompiler:
         tree = st.run()
         self.labels = st.labels
         name = self.prog.display(self.func.addr) or f"sub_{self.func.addr:x}"
-        sig = self.lifter.signature(self.func, name)   # first: scans args, resets temp state
+        ident = lift.cname(name)
+        sig = self.lifter.signature(self.func, ident)  # first: scans args, resets temp state
         L = self.lifter
         returns = set() if L._ret_void else {L._canon(L.arch.fret if L._ret_fp else L.arch.ret)}
         live_in, L.live_out, defs = (L.liveness(self.func, returns) if hasattr(L, "liveness")
                                      else liveness(L, self.func, returns))
         L.entry_names, L.def_names = webs(self.func, live_in, L.live_out, defs)
         body = self._tidy(self._emit(tree, 1))         # then: allocates temps/locals
+        mixed = {n for n, k in getattr(L, "_assignkinds", {}).items() if len(k) > 1}
+        hint = self.prog.__dict__.setdefault("_vec_hint", {})
+        if mixed - set(hint.get(self.func.addr, ())):
+            # a register web is written both as a vector and through a scalar view: decompile once
+            # more, now writing its scalar values as vectors (lane 0, upper lanes zero, as on arm64)
+            hint[self.func.addr] = set(hint.get(self.func.addr, ())) | mixed
+            return Decompiler(self.prog, self.func, self.engine).c()
         # count every identifier once; a temp used only by its own definition drops the "vN = "
         counts = Counter(self._IDENT.findall("\n".join(body)))
         dead = {t for t in self.lifter._temps if counts.get(t, 0) == 1}
@@ -469,6 +477,13 @@ class Decompiler:
         decls = [d for d in self.lifter.locals_block() if counts.get(d.split()[-1].rstrip(";").lstrip("*"), 0)]
         decls = (L.register_decls(sig, counts) if hasattr(L, "register_decls")
                  else self._register_decls(sig, counts)) + decls
+        seen, uniq = set(), []
+        for d in decls:                      # a name declared twice (register + local) is an error
+            n = re.sub(r"\[.*$", "", d.rstrip(";")).split()[-1].lstrip("*")
+            if n not in seen:
+                seen.add(n)
+                uniq.append(d)
+        decls = uniq
         tables = self._table_decls(counts)   # static const arrays for recovered lookup tables
         nat = getattr(self.prog, "jni_natives", {}).get(self.func.addr)
         if nat:   # registered via RegisterNatives: show the Java-side method it implements
@@ -478,6 +493,8 @@ class Decompiler:
         if self.engine == "legacy" and self.prog.arch.name not in self.LEGACY:
             tables = tables + [f"/* {self.prog.arch.name}: control flow recovered; instruction "
                                "semantics shown as asm (install pypcode for the IR lifter) */"]
+        if ident != name:
+            tables = tables + [f"/* {name} */"]
         lines = tables + [sig + " {"] + ["    " + d for d in decls] + ([""] if decls else []) + body + ["}"]
         from . import jni
         return jni.name_calls("\n".join(lines))   # (*env)->Fn(…) for JNIEnv dispatch calls
@@ -500,7 +517,9 @@ class Decompiler:
         L, out = self.lifter, []
         for name in sorted((n for n in counts if self._REGVAR.fullmatch(n) and n not in params),
                            key=lambda n: (n[0], [int(x) for x in re.findall(r"\d+", n)])):
-            if name.startswith(("v", "xmm")):
+            if name in getattr(L, "_vecnames", ()):
+                t = "v128"                      # holds a vector (see neon.py)
+            elif name.startswith(("v", "xmm")):
                 t = "double"
             else:
                 t = L._ptrvars.get(name, "int64_t")
@@ -508,7 +527,9 @@ class Decompiler:
         return out
 
     def _label(self, a, pad, out):
-        if a in self.labels:
+        placed = self.__dict__.setdefault("_placed_labels", set())
+        if a in self.labels and a not in placed:
+            placed.add(a)
             out.append(f"{pad[:-4] if len(pad) >= 4 else ''}loc_{a:x}:")
 
     def _emit(self, nodes, depth):
