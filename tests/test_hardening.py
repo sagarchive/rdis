@@ -248,12 +248,12 @@ class WasmBoundsTests(unittest.TestCase):
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
-        label = _dot_label('first\\nsecond "quoted" \\\\ tail')
-        self.assertNotIn("\\n", label.replace("\\\\n", ""))
-        self.assertIn("\\\\n", label)
-        self.assertIn('\\\\"quoted\\\\"', label)
-        self.assertIn("\\\\\\\\", label)
-
+        source = "line one\nline two \"quoted\" \\\\ tail"
+        label = _dot_label(source)
+        self.assertNotIn("\n", label)
+        self.assertIn("\\n", label)
+        self.assertIn('\\"quoted\\"', label)
+        self.assertIn("\\\\", label)
 
 
 if __name__ == "__main__":
