@@ -39,6 +39,6 @@ jobs:
           python -m pip install --force-reinstall dist/*.whl
           rdis --help
           rdis-gui --help
-          printf '%s\\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rdis-mcp
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rdis-mcp
       - name: Run hardening regressions
         run: python -m unittest discover -s tests -p 'test_hardening.py' -v
