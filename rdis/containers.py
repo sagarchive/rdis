@@ -44,6 +44,31 @@ def _opener(head):
     return None, None
 
 
+def _file_digest(path):
+    """SHA-256 the actual file bytes; metadata alone is not a safe cache identity."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_bounded(src, dst, limit, expected_size=None):
+    """Stream at most limit bytes and reject oversized or truncated members."""
+    total = 0
+    while True:
+        chunk = src.read(min(1 << 20, limit - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise ValueError(f"expanded data exceeds the {limit} byte limit")
+        dst.write(chunk)
+    if expected_size is not None and total != expected_size:
+        raise ValueError(f"archive member size mismatch: expected {expected_size} bytes, got {total}")
+    return total
+
+
 def _peek_compressed(path):
     """gzip/xz/bzip2 single file: peek the decompressed header and offer to open it transparently."""
     with open(path, "rb") as fh:
@@ -76,19 +101,23 @@ def _write_atomic(cache_dir, out, fill):
 
 
 def _decompress(path, cache_dir, max_mb):
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
     with open(path, "rb") as fh:
         head = fh.read(6)
     _, op = _opener(head)
     if op is None:
         return None
     os.makedirs(cache_dir, exist_ok=True)
-    st = os.stat(path)   # size+mtime too: a re-written local file must not reuse a stale output
-    tag = hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}|decomp".encode()).hexdigest()[:16]
+    # Include content and the configured cap: same-size/same-mtime rewrites must not reuse output,
+    # and a result produced under a larger limit must not bypass a smaller limit.
+    digest = _file_digest(path)
+    tag = hashlib.sha256(f"{os.path.abspath(path)}|{digest}|{max_mb}|decomp".encode()).hexdigest()[:24]
     out = os.path.join(cache_dir, f"{tag}-{os.path.basename(path).rsplit('.', 1)[0][:48] or 'bin'}")
     if not os.path.exists(out):
         def fill(w):
             with op(path, "rb") as r:
-                w.write(r.read(max_mb << 20))
+                _copy_bounded(r, w, max_mb << 20)
         _write_atomic(cache_dir, out, fill)
     return out
 
@@ -126,18 +155,30 @@ def _tar_slices(path):
 
 def _tar_extract(path, entry, cache_dir, max_mb):
     import tarfile
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
     with tarfile.open(path) as t:
         m = next((m for m in _tar_members(t) if m.name == entry and m.isfile()), None)
         if m is None:
             raise KeyError(f"no such file in the tar archive: {entry}")
-        if m.size > max_mb << 20:
+        limit = max_mb << 20
+        if m.size > limit:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{m.size}".encode()).hexdigest()[:16]
+        # The archive digest avoids stale extraction when a member is replaced with same-size data.
+        tag = hashlib.sha256(
+            f"{os.path.abspath(path)}|{_file_digest(path)}|{entry}|{m.offset_data}|{m.size}|{max_mb}".encode()
+        ).hexdigest()[:24]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "bin"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == m.size):
-            _write_atomic(cache_dir, out, lambda f: f.write(t.extractfile(m).read(max_mb << 20)))
+            def fill(dst):
+                src = t.extractfile(m)
+                if src is None:
+                    raise ValueError(f"could not read archive member: {entry}")
+                with src:
+                    _copy_bounded(src, dst, limit, expected_size=m.size)
+            _write_atomic(cache_dir, out, fill)
     return out
 
 
@@ -305,18 +346,24 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
                 return _tar_extract(path, entry, cache_dir, max_mb)
         except tarfile.TarError:
             pass
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
     with zipfile.ZipFile(path) as z:
         info = z.getinfo(entry)
-        if info.file_size > max_mb << 20:
+        limit = max_mb << 20
+        if info.file_size > limit:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{info.CRC}|{info.file_size}".encode()).hexdigest()[:16]
+        tag = hashlib.sha256(
+            f"{os.path.abspath(path)}|{_file_digest(path)}|{entry}|{info.header_offset}|"
+            f"{info.CRC}|{info.file_size}|{max_mb}".encode()
+        ).hexdigest()[:24]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "lib"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == info.file_size):
-            def fill(f):
+            def fill(dst):
                 with z.open(entry) as src:
-                    f.write(src.read(max_mb << 20))
+                    _copy_bounded(src, dst, limit, expected_size=info.file_size)
             _write_atomic(cache_dir, out, fill)
     return out
 
