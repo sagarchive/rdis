@@ -1239,8 +1239,10 @@ class Lifter:
         t = self._ptr_type(v)
         if t and t not in ("char *", "void *"):
             return f"(char *){v}" if self._atomic(v) else f"(char *)({v})"
-        if re.fullmatch(r"&[\w$.]+", v or ""):
-            return f"(char *){v}"              # &sym + n is bytes past the symbol
+        if (v or "").lstrip().startswith("&"):
+            # Address-of array elements/fields can be compound pointer expressions
+            # (e.g. &p[i]). Integer add/sub after LEA is byte arithmetic, not sizeof(T)-scaled.
+            return f"(char *){v}" if self._atomic(v) else f"(char *)({v})"
         return v
 
     _PTRISH = re.compile(r'^(\(char \*\)|"|&|@")')
