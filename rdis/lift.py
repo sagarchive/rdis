@@ -355,7 +355,22 @@ class Lifter:
         dst = self._canon(i.reg_name(ops[0].reg))
         root = None
         if i.mnemonic in self._DERIVE:
-            for op in ops[1:]:
+            # For arithmetic address formation, only the first source operand is the base.
+            # Treating *any* argument used by an ADD as the root incorrectly marks integer
+            # indices as pointers, e.g. AArch64 jump-table address + switch-key*entry-size.
+            # ORR with the zero register is the common register-copy alias and uses its other input.
+            candidates = ops[1:2]
+            if i.mnemonic == "orr" and len(ops) > 2:
+                first = ops[1]
+                first_name = self._canon(i.reg_name(first.reg)) if first.type == reg_t else None
+                if first_name in ("xzr", "wzr", "zero", "0"):
+                    candidates = ops[2:3]
+            elif i.mnemonic.startswith("add") and len(ops) > 2:
+                first = ops[1]
+                first_name = self._canon(i.reg_name(first.reg)) if first.type == reg_t else None
+                if first_name in ("xzr", "wzr", "zero", "0"):
+                    candidates = ops[2:3]
+            for op in candidates:
                 r = None
                 if op.type == reg_t:
                     r = self._canon(i.reg_name(op.reg))
