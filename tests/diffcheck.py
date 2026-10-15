@@ -132,4 +132,15 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
     if "DONE" not in out:
         last = [ln for ln in r.stderr.splitlines() if ln.startswith("CALL ")][-1:] or ["?"]
         return [f"harness crashed ({arch}, rc={r.returncode}) in {last[0][5:]}  [{hfile}]"]
-    return [ln for ln in out if ln.startswith("MISMATCH")]
+    mismatches = [ln for ln in out if ln.startswith("MISMATCH")]
+    detailed = []
+    for line in mismatches:
+        match = re.match(r"MISMATCH\s+([A-Za-z0-9_]+)\(", line)
+        if match:
+            fn_name = "dec_" + match.group(1)
+            generated = next((d for d in decs
+                              if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
+            if generated:
+                line += " | decompiled body: " + generated.replace("\n", " ; ")[:1500]
+        detailed.append(line)
+    return detailed
