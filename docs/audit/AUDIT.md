@@ -92,3 +92,19 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** valid NEON `CNT` instructions could not be represented as compilable C on the supported toolchain.
 - **Change:** replace the newer builtin with a portable per-byte SWAR popcount helper registered in the generated-C dependency set.
 - **Verification:** subsequent full self-check passed all 20 functions across six differential builds; the suite then stopped at a separate overly strict tail-call assertion, now corrected. Final rerun pending.
+
+
+### RDIS-AUDIT-014 — LEA-derived pointer arithmetic could scale byte offsets by element size
+- **Area:** M5, `rdis/lift.py`
+- **Evidence:** the execution-based x86-64 SIMD corpus showed generated code like `&rdi[rsi_1] + 0x10`; C scales that addition in `int *` units, while the machine instruction adds bytes.
+- **Failure mode:** vector-loop tail pointers can skip or read the wrong elements, changing sums and in-place updates.
+- **Change:** cast computed address-of expressions through `char *` before integer add/sub; add a focused regression and rerun the execution-based corpus.
+- **Verification:** hardening regression passed on Python 3.10/3.12 at commit `8418c2be`; the post-fix maturity result is being rechecked.
+
+### RDIS-AUDIT-015 — Pinned floating-point memory expressions could default to int64_t
+- **Area:** M5, `rdis/lift.py`
+- **Evidence:** the ARM64 vectorized float-reduction case emitted an `int64_t` temporary for an expression containing `*(float *)`; converting intermediate values to integer truncates fractions.
+- **Failure mode:** otherwise compilable pseudo-C returns the wrong numeric result.
+- **Change:** recognize typed float/double pointer loads when inferring a pinned temporary's scalar type; add a regression for both widths.
+- **Verification:** focused regression and the current execution-based maturity rerun are pending.
+
