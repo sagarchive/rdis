@@ -925,16 +925,20 @@ async function showCFG(addr, detail = false) {
   const fit = (retry = true) => {
     // Fit actual graph geometry (nodes, labels and edges), not the outer SVG viewport.
     const target = svg.querySelector("g.graph") || svg;
-    let bb;
-    try { bb = target.getBBox(); } catch { bb = null; }
-    if (!bb || !bb.width || !bb.height) {
+    // Graphviz uses point-based intrinsic SVG dimensions and a viewBox. getBBox() returns user
+    // units, not CSS pixels, so fitting from it can leave a graph clipped by a ~4/3 scale factor.
+    // Reset our CSS transform, measure the graph as actually painted, then fit in viewport pixels.
+    svg.style.transform = "none";
+    let rect, viewport;
+    try { rect = target.getBoundingClientRect(); viewport = g.getBoundingClientRect(); } catch { rect = viewport = null; }
+    if (!rect || !viewport || !rect.width || !rect.height) {
       if (retry) requestAnimationFrame(() => fit(false));
       return;
     }
     const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
-    scale = Math.max(0.015, Math.min(availW / bb.width, availH / bb.height, 1.25));
-    tx = (g.clientWidth - bb.width * scale) / 2 - bb.x * scale;
-    ty = (g.clientHeight - bb.height * scale) / 2 - bb.y * scale;
+    scale = Math.max(0.005, Math.min(availW / rect.width, availH / rect.height, 1.25));
+    tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
+    ty = (g.clientHeight - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
@@ -973,7 +977,7 @@ async function showCFG(addr, detail = false) {
     // external viewer, so the download must be self-contained and retain readable contrast.
     const copy = svg.cloneNode(true);
     const style = getComputedStyle(document.documentElement);
-    const keys = ["--g-node", "--g-edge", "--g-text", "--g-flow", "--accent", "--ok", "--err", "--faint"];
+    const keys = ["--g-node", "--g-edge", "--g-text", "--g-flow", "--accent", "--ok", "--err", "--faint", "--mono"];
     const values = Object.fromEntries(keys.map(k => [k, style.getPropertyValue(k).trim()]));
     const resolve = s => s.replace(/var\((--[\w-]+)(?:\s*,\s*([^)]*))?\)/g, (_, k, fallback) => values[k] || fallback || "currentColor");
     copy.querySelectorAll("*").forEach(el => {
