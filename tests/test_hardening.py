@@ -301,6 +301,8 @@ class CFGLayoutTests(unittest.TestCase):
                 return 0
             def data_refs(self, insn, state):
                 return []
+            def target(self, insn):
+                return None
 
         class FakeProgram:
             arch = FakeArch()
