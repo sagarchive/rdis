@@ -67,6 +67,10 @@ jobs:
           python -m pip install -e .
       - name: Run full product self-check
         run: python tests/test_rdis.py
+      - name: Record reproducible analysis benchmark
+        run: python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3 --output /tmp/rdis-benchmark.json
+      - name: Show benchmark artifact in CI log
+        run: cat /tmp/rdis-benchmark.json
       - name: Run execution-checked decompiler maturity suite
         run: python tests/maturity.py
       - name: Stress multi-visitor isolation and deterministic analysis
