@@ -20,6 +20,10 @@ Status: in progress. This file tracks evidence, not assumptions. Findings must b
 | web shared analysis | Path/size/whole-second mtime key can collide after replacement | Source-confirmed risk; implementation updated | Content fingerprint + options; test replacement and concurrency |
 | web document identity | Document key omitted content and analysis options | Source-confirmed risk; implementation updated | Fingerprint and analysis options in key |
 | MCP cache | Unbounded cache keyed without content identity | Source-confirmed risk; implementation updated | SHA-256/stat/options key and bounded LRU |
+| persistent cache code fingerprint | Manual allowlist omitted modules that affect analysis, allowing stale persisted snapshots after some code changes | Source-confirmed risk; implementation updated | Hash all sorted package Python modules; regression covers additions and edits |
+| WebAssembly framing | Truncated header/section lengths could be tolerated or partially parsed | Source-confirmed risk; implementation updated | Validate header/version, section bounds and truncated LEB128; malformed-input tests |
+| Graphviz labels | Control characters in comments/decoded strings could alter label framing | Source-confirmed risk; implementation updated | Strip control characters before escaping quotes/backslashes; regression test |
+| upload session metadata | Session upload-token dictionary could grow without a per-session bound | Source-confirmed risk; implementation updated | Bound retained upload-token references; aggregate cache-directory disk quotas remain open |
 | public web deployment | Host/origin checks are not authentication; uploads and parsing are attacker-controlled | Needs route-by-route threat review | Validate defaults, authentication assumptions, quotas, timeouts, cleanup and resource bounds |
 | decompiler | Existing compile/recompile tests are useful but not a proof of semantic equivalence | Coverage limitation | Add executable differential corpus and compare observable outputs |
 
