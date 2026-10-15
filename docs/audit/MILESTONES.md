@@ -11,7 +11,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M4 | Disassembly/function/CFG correctness | IN PROGRESS | Per-architecture discovery fixtures pass; precision/recall measured |
 | M5 | IR and decompiler semantics | IN PROGRESS | Execution-based semantic corpus passes; unsupported cases counted |
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
-| M7 | UI, CLI, API, rendering | IN PROGRESS | CFG overview/detail layouts, pointer-centered wheel zoom, graph-geometry fit, Shift+wheel pan, standalone SVG color resolution, keyboard-focusable nodes and accessible controls added; end-to-end browser screenshot/accessibility verification still required |
+| M7 | UI, CLI, API, rendering | IN PROGRESS | CFG overview/detail layouts, pointer-centered wheel zoom, graph-geometry fit, Shift+wheel pan, standalone SVG color resolution, keyboard-focusable nodes and accessible controls added. Playwright desktop/mobile screenshot, bounds and export checks run in CI; inspect artifacts and add a real-binary CFG before closing. Minimap, path tracing, saved layouts and cross-architecture metrics remain open |
 | M8 | Fuzzing and differential tests | IN PROGRESS | Deterministic malformed-WebAssembly mutation smoke test added to CI; sustained fuzz campaign and crash minimization remain open |
 | M9 | Performance and scale | IN PROGRESS | Repeatable single-binary benchmark harness and CI smoke baseline added; fixed-corpus cold/warm and concurrent p50/p95 baselines still required |
 | M10 | Packaging and release | IN PROGRESS | Clean source/wheel/container install and entry points verified |
