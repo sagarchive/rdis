@@ -22,8 +22,10 @@ from .decompile import Decompiler
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24, "max_uploads_per_session": 32}
+       "max_analyses": 24, "max_uploads_per_session": 32, "max_http_workers": 32,
+       "max_parallel_analyses": 4, "analysis_wait_seconds": 60}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
+ANALYSIS_SLOTS = threading.BoundedSemaphore(CFG["max_parallel_analyses"])
 
 # Per-visitor workspaces (cookie `rdis_sid`): one visitor's documents, renames and navigation never
 # leak into another's. Each open document is a lightweight OVERLAY of a shared, immutable analysis,
@@ -77,12 +79,19 @@ def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
         with LOCK:
             shared = ANALYSES.get(key)
         if shared is None:
-            try:
-                shared = _analyze(path, arch, objc, swift, prologues, loader, base)
-            except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+            if not ANALYSIS_SLOTS.acquire(timeout=CFG["analysis_wait_seconds"]):
                 with LOCK:
                     ANALYSES.pop("__gate__:" + key, None)
-                raise
+                raise TimeoutError("analysis capacity is busy; retry after another analysis finishes")
+            try:
+                try:
+                    shared = _analyze(path, arch, objc, swift, prologues, loader, base)
+                except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+                    with LOCK:
+                        ANALYSES.pop("__gate__:" + key, None)
+                    raise
+            finally:
+                ANALYSIS_SLOTS.release()
             with LOCK:
                 ANALYSES[key] = shared
                 ANALYSES.pop("__gate__:" + key, None)   # only after the result is visible
@@ -490,6 +499,11 @@ def _upload(raw, name):
 
 # ---- HTTP ------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        # Slow clients must not pin one of the bounded request workers indefinitely.
+        self.connection.settimeout(15)
+
     def log_message(self, *a):
         pass
 
@@ -586,6 +600,41 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(e)
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Bound concurrent request threads and active analysis work for hostile/slow clients."""
+    daemon_threads = True
+    request_queue_size = 64
+
+    def __init__(self, server_address, RequestHandlerClass, max_workers=None):
+        self._request_slots = threading.BoundedSemaphore(
+            max_workers or CFG["max_http_workers"]
+        )
+        super().__init__(server_address, RequestHandlerClass)
+
+    def process_request(self, request, client_address):
+        if not self._request_slots.acquire(blocking=False):
+            try:
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\\r\\n"
+                    b"Connection: close\\r\\nContent-Length: 0\\r\\n\\r\\n"
+                )
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="rdis.server")
     p.add_argument("binary", nargs="?")
@@ -613,7 +662,7 @@ def main(argv=None):
         _local.session = _get_session("local")
         open_doc(a.binary, arch=a.arch)
     url = f"http://{'127.0.0.1' if a.host == '0.0.0.0' else a.host}:{a.port}"
-    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    srv = BoundedThreadingHTTPServer((a.host, a.port), Handler)
     print(f"rdis: serving {url}  (Ctrl-C to stop)" + (f"  -- opened {a.binary}" if a.binary else
           "\n      drop a binary, app or package on the page, or click Open file"))
     if a.desktop:
