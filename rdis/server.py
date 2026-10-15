@@ -53,15 +53,26 @@ def _get_session(sid):
 
 
 def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
-    """The analyzed Program for a (content, options) key, analyzing once and sharing it across all
-    sessions. Analysis for a given key is serialized so two simultaneous first-opens do not both
-    do the work; different keys analyze in parallel."""
-    try:
-        st = os.stat(path)
-        content = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
-    except OSError:
-        content = path
-    key = f"{content}|{arch}|{loader}|{base}|{int(objc)}{int(swift)}{int(prologues)}"
+    """Share one immutable analysis per exact input bytes and analysis configuration.
+
+    File size and mtime are not identities: files can be replaced while preserving both.
+    Hash the bytes so a stale Program can never be reused just because metadata was preserved.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    identity = {
+        "path": os.path.abspath(path),
+        "sha256": digest.hexdigest(),
+        "arch": arch,
+        "loader": loader,
+        "base": base,
+        "objc": bool(objc),
+        "swift": bool(swift),
+        "prologues": bool(prologues),
+    }
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     with LOCK:
         shared = ANALYSES.get(key)
         if shared is not None:
