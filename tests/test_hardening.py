@@ -2,6 +2,7 @@
 import gzip
 import io
 import os
+import random
 import socket
 import tarfile
 import threading
@@ -106,6 +107,20 @@ class SectionLookupTests(unittest.TestCase):
         self.assertIs(image.section_at(0x1080), late)
         self.assertIs(image.section_at(0x117f), late)
         self.assertIsNone(image.section_at(0x1180))
+
+    def test_randomized_lookup_matches_linear_interval_oracle(self):
+        rng = random.Random(0x52444953)
+        sections = [
+            Section(f"s{i}", rng.randrange(0, 0x50000000), rng.randrange(0, 0x50000000), i, bool(i & 1))
+            for i in range(300)
+        ]
+        image = self._image(sections)
+        for _ in range(1000):
+            address = rng.randrange(0, 0x80000000)
+            matches = [(s.va, i, s) for i, s in enumerate(sections)
+                       if s.size > 0 and s.va <= address < s.va + s.size]
+            expected = max(matches, key=lambda item: (item[0], item[1]))[2] if matches else None
+            self.assertIs(image.section_at(address), expected, f"address={address:#x}")
 
 
 class CacheIdentityTests(unittest.TestCase):
