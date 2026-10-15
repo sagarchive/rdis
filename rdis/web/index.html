@@ -980,7 +980,8 @@ async function showCFG(addr, detail = false) {
       ["style", "fill", "stroke", "color"].forEach(a => { if (el.hasAttribute(a)) el.setAttribute(a, resolve(el.getAttribute(a))); });
     });
     copy.querySelectorAll("style").forEach(el => { el.textContent = resolve(el.textContent); });
-    const graph = copy.querySelector("g.graph");
+    // Measure the live SVG: getBBox() on a detached clone is zero/implementation-dependent.
+    const graph = svg.querySelector("g.graph");
     let bb;
     try { bb = graph ? graph.getBBox() : null; } catch { bb = null; }
     if (bb && bb.width && bb.height) {
