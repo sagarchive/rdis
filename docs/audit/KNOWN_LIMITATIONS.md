@@ -8,7 +8,7 @@
 - ZIP extraction did not explicitly verify copied bytes against declared member size.
 - Section lookup used a fixed-distance early-stop condition for overlapping sections.
 
-The focused hardening suite passed on Python 3.10 and 3.12 on commit 5d84528d (including cache/container/address-map/HTTP/MCP/WASM/rendering and CFG tests). Subsequent commits change the differential harness diagnostics and compatibility macros; their current-head run is pending. The execution-based maturity suite still exposes SIMD semantic mismatches (ARM64 float reduction and x86-64 integer vector sum/update), which remain correctness defects rather than waived tests.
+The focused hardening suite passed on Python 3.10 and 3.12, and the execution-based maturity suite passed 124/124 cases on macOS/Python 3.12 at commit `ce32ca4b`. The newest commits after that successful run update audit documentation only; a fresh current-head CI run remains the final confirmation gate. The 124-case corpus is evidence, not proof of correctness for every ISA or instruction.
 
 ## Not established
 - Whether a current release has a remotely exploitable vulnerability.
