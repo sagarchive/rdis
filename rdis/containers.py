@@ -85,10 +85,16 @@ def _decompress(path, cache_dir, max_mb):
     st = os.stat(path)   # size+mtime too: a re-written local file must not reuse a stale output
     tag = hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}|decomp".encode()).hexdigest()[:16]
     out = os.path.join(cache_dir, f"{tag}-{os.path.basename(path).rsplit('.', 1)[0][:48] or 'bin'}")
+    limit = max(0, int(max_mb)) << 20
     if not os.path.exists(out):
         def fill(w):
             with op(path, "rb") as r:
-                w.write(r.read(max_mb << 20))
+                # Read one byte beyond the cap so an oversized stream is rejected rather than
+                # silently treated as a valid, truncated executable.
+                data = r.read(limit + 1)
+                if len(data) > limit or r.read(1):
+                    raise ValueError(f"decompressed file exceeds the {max_mb} MB limit")
+                w.write(data)
         _write_atomic(cache_dir, out, fill)
     return out
 
@@ -133,11 +139,29 @@ def _tar_extract(path, entry, cache_dir, max_mb):
         if m.size > max_mb << 20:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{m.size}".encode()).hexdigest()[:16]
+        # Include archive content, not just its path/member/size: replacing an archive with a
+        # same-size member must never reuse bytes extracted from the previous version.
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1 << 20), b""):
+                digest.update(chunk)
+        tag = hashlib.sha256(f"{os.path.abspath(path)}|{digest.hexdigest()}|{entry}|{m.size}".encode()).hexdigest()[:20]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "bin"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == m.size):
-            _write_atomic(cache_dir, out, lambda f: f.write(t.extractfile(m).read(max_mb << 20)))
+            limit = max(0, int(max_mb)) << 20
+            def fill(f):
+                stream = t.extractfile(m)
+                if stream is None:
+                    raise ValueError(f"unable to read archive member: {entry}")
+                with stream:
+                    data = stream.read(limit + 1)
+                    if len(data) > limit or stream.read(1):
+                        raise ValueError(f"archive member larger than {max_mb} MB")
+                    if len(data) != m.size:
+                        raise ValueError(f"archive member size mismatch: expected {m.size}, read {len(data)}")
+                    f.write(data)
+            _write_atomic(cache_dir, out, fill)
     return out
 
 
