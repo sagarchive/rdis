@@ -179,22 +179,22 @@ class HttpFramingTests(unittest.TestCase):
 
     def test_chunked_transfer_encoding_is_rejected(self):
         response = self._request(
-            b"POST /api/upload HTTP/1.1\\r\\n"
-            b"Host: 127.0.0.1\\r\\n"
-            b"Content-Type: application/octet-stream\\r\\n"
-            b"Transfer-Encoding: chunked\\r\\n"
-            b"\\r\\n"
+            b"POST /api/upload HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/octet-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
         )
         self.assertIn(b"400 Bad Request", response)
         self.assertIn(b"Transfer-Encoding is not supported", response)
 
     def test_incomplete_content_length_is_rejected(self):
         response = self._request(
-            b"POST /api/upload HTTP/1.1\\r\\n"
-            b"Host: 127.0.0.1\\r\\n"
-            b"Content-Type: application/octet-stream\\r\\n"
-            b"Content-Length: 10\\r\\n"
-            b"\\r\\nabc"
+            b"POST /api/upload HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/octet-stream\r\n"
+            b"Content-Length: 10\r\n"
+            b"\r\nabc"
         )
         self.assertIn(b"400 Bad Request", response)
         self.assertIn(b"incomplete request body", response)
