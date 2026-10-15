@@ -22,7 +22,7 @@ from .decompile import Decompiler
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24, "request_timeout": 15, "max_workers": 64,
+       "max_analyses": 24, "request_timeout": 15, "max_workers": 64, "max_upload_storage_mb": 1024,
        "max_parallel_analyses": 4, "analysis_wait_seconds": 60, "max_uploads_per_session": 32}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
 ANALYSIS_SLOTS = threading.BoundedSemaphore(CFG["max_parallel_analyses"])
@@ -136,7 +136,8 @@ def prog():
 
 
 def _extract(path, entry):
-    return containers.extract(path, entry, CFG["upload_dir"], CFG["max_mb"])
+    return containers.extract(path, entry, CFG["upload_dir"], CFG["max_mb"],
+                              max_total_mb=CFG["max_upload_storage_mb"])
 
 
 class NotFound(LookupError):
@@ -474,6 +475,13 @@ def _upload(raw, name):
     # per-call temp and atomically rename, or two concurrent writers truncate each other's file and
     # a reader sees a torn, partial binary.
     if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
+        used = containers._directory_size(CFG["upload_dir"])
+        limit = CFG["max_upload_storage_mb"] << 20
+        if used + len(raw) > limit:
+            raise containers.StorageLimitError(
+                f"upload/cache storage quota exceeded ({used + len(raw)} > {limit} bytes); "
+                "remove unused files from the upload/cache directory or raise --max-upload-storage-mb"
+            )
         import tempfile
         fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
         try:
@@ -551,7 +559,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _err(self, e):
-        code = 503 if isinstance(e, TimeoutError) else \
+        code = 507 if isinstance(e, containers.StorageLimitError) else \
+               503 if isinstance(e, TimeoutError) else \
                404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
                403 if isinstance(e, PermissionError) else 400
         return self._send(code, json.dumps({"error": f"{e}"}), "application/json")
@@ -646,7 +655,9 @@ def main(argv=None):
     p.add_argument("--no-open", action="store_true")
     p.add_argument("--allow-python", action="store_true", help="enable `py` in the console (local only!)")
     p.add_argument("--upload-dir", default=".rdis_uploads")
-    p.add_argument("--max-mb", type=int, default=128)
+    p.add_argument("--max-mb", type=int, default=128, help="maximum size per uploaded file or extracted member")
+    p.add_argument("--max-upload-storage-mb", type=int, default=1024,
+                   help="aggregate upload and extraction-cache disk quota")
     p.add_argument("--desktop", action="store_true",
                    help="open in a native window (needs the 'desktop' extra: pip install rdis[desktop])")
     p.add_argument("--multi-user", action="store_true",
@@ -654,13 +665,15 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.max_mb < 1:
         p.error("--max-mb must be a positive integer")
+    if a.max_upload_storage_mb < 1:
+        p.error("--max-upload-storage-mb must be a positive integer")
     if not 1 <= a.port <= 65535:
         p.error("--port must be between 1 and 65535")
     loopback = a.host in ("127.0.0.1", "localhost", "::1")
     single = loopback and not a.multi_user   # one shared workspace only for a private local install
     CFG.update(allow_python=a.allow_python and loopback and not a.multi_user,
                allow_paths=loopback and not a.multi_user, persist=single,
-               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb)
+               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb,\n               max_upload_storage_mb=a.max_upload_storage_mb)
     if a.allow_python and not loopback:
         print("rdis: --allow-python ignored on a non-loopback bind (it would be remote code execution)",
               flush=True)
