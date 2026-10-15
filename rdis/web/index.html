@@ -891,7 +891,7 @@ async function showCFG(addr, detail = false) {
       <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
       <button class="ib" id="zsvg" title="Download SVG">⤓</button>
     </div>
-    <div id="glegend"><span><i style="background:var(--ok)"></i>taken</span><span><i style="background:var(--err)"></i>not taken</span><span><i style="background:var(--g-flow)"></i>flow</span></div>
+    <div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span></div>
   </div>`;
   const g = $("#graph");
   if (!d.dot) {  // WebAssembly: no CFG yet
