@@ -271,7 +271,7 @@ def _api_doc(route, q, arg, P):
             return {"name": P.display(f.addr), "addr": hex(f.addr), "rows": render.listing(P, f)}
         if route == "pseudo":
             return {"name": P.display(f.addr), "addr": hex(f.addr), "c": Decompiler(P, f).c()}
-        return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": render.to_dot(P, f)}
+        return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": render.to_dot(P, f, detail=arg("detail", "0") == "1")}
     if route == "hex":
         a = P.resolve(arg("addr") or arg("func"))
         f = P.functions.get(a)
