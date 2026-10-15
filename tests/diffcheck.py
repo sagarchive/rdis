@@ -134,7 +134,7 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
                 generated = next((d for d in decs
                                   if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
                 if generated:
-                    detail += " | decompiled body: " + generated.replace("\n", " ; ")[:2200]
+                    detail += " | decompiled body: " + generated.replace("\n", " ; ")[:7000]
                 try:
                     addr = prog.resolve("_" + fn_name[4:])
                     func = prog.functions.get(addr)
@@ -159,6 +159,6 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
             generated = next((d for d in decs
                               if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
             if generated:
-                line += " | decompiled body: " + generated.replace("\n", " ; ")[:1500]
+                line += " | decompiled body: " + generated.replace("\n", " ; ")[:4000]
         detailed.append(line)
     return detailed
