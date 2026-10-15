@@ -342,6 +342,47 @@ class CFGLayoutTests(unittest.TestCase):
         self.assertIn('ranksep="0.62 equally"', overview)
         self.assertIn("pad=0.22", overview)
 
+    def test_conditional_edges_are_labeled_and_entry_is_highlighted(self):
+        from types import SimpleNamespace
+        from rdis.arch import CJMP
+        from rdis.render import to_dot
+
+        class FakeArch:
+            def kind(self, insn):
+                return CJMP if hasattr(insn, "target") else 0
+            def target(self, insn):
+                return getattr(insn, "target", None)
+            def data_refs(self, insn, state):
+                return []
+
+        class FakeProgram:
+            arch = FakeArch()
+            comments = {}
+            objc = None
+            functions = {}
+            image = SimpleNamespace(imports={})
+
+            def display(self, addr):
+                return ""
+            def call_target(self, insn, state):
+                return getattr(insn, "target", None)
+            def strings(self):
+                return {}
+
+        branch = SimpleNamespace(address=0x1000, mnemonic="jne", op_str="0x2000",
+                                 target=0x2000)
+        other = SimpleNamespace(address=0x2000, mnemonic="ret", op_str="")
+        fallthrough = SimpleNamespace(address=0x3000, mnemonic="ret", op_str="")
+        blocks = {
+            0x1000: SimpleNamespace(shown=[branch], insns=[branch], succs=[0x2000, 0x3000]),
+            0x2000: SimpleNamespace(shown=[other], insns=[other], succs=[]),
+            0x3000: SimpleNamespace(shown=[fallthrough], insns=[fallthrough], succs=[]),
+        }
+        dot = to_dot(FakeProgram(), SimpleNamespace(addr=0x1000, blocks=blocks))
+        self.assertIn('class="entry"', dot)
+        self.assertIn('label="T"', dot)
+        self.assertIn('label="F"', dot)
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
