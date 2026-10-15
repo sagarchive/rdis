@@ -23,7 +23,7 @@ for t in tiers:
                 probs = diffcheck.run(src, arch, [case], opt=opt, support=sup, vectorize=vec)
                 tot += 1
                 if probs:
-                    print(f"FAIL {t:6} {arch:6} {opt} {case[0]:10} {probs[0][:230]}")
+                    print(f"FAIL {t:6} {arch:6} {opt} {case[0]:10} {probs[0][:5000]}")
                 else:
                     ok += 1
 print(f"\nSCORE {ok}/{tot}")
