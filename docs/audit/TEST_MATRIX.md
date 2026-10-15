@@ -14,7 +14,7 @@ This is a coverage plan, not a claim that every case already exists.
 | SIMD | Lane order, saturation, shifts, reductions, conversions | Lane-by-lane equivalence |
 | WASM | Invalid LEB128, section/index mismatch, stack type errors | Explicit validation error, no crash |
 | Metadata | JNI/ObjC/Swift/symbols, missing/partial/versioned metadata | Bounded parsing and explicit uncertainty |
-| HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions | Bounded response, correct status, isolation |
+| HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions, aggregate upload/cache quota | Bounded response, correct status, isolation; quota regressions added |
 | MCP | Valid/invalid tool calls, malformed JSON-RPC, large output, file replacement | Protocol errors and current analysis |
 | Rendering | HTML-like names/comments, huge CFG, Unicode, compact/detail CFG modes, entry highlight and T/F edges | Escaped and bounded output; UI screenshot/accessibility review remains open |
 | CLI/API | Documented commands, invalid args, missing optional tools | Stable schemas and meaningful exit codes |
