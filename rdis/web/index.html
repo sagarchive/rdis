@@ -879,8 +879,8 @@ async function showPseudo(addr) {
 function showDecl(it) { pseudoView(it.decl, it.name, ""); $("#crMode").textContent = "TYPE"; empty(false); }
 
 /* ─────────────── CFG (graph view) ─────────────── */
-async function showCFG(addr) {
-  const d = await api("cfg", {func: addr});
+async function showCFG(addr, detail = false) {
+  const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
   const v = $("#view");
   v.innerHTML = `<div id="graph"><div id="ghud">
       <button class="ib" id="zin" title="Zoom in">＋</button>
@@ -888,6 +888,7 @@ async function showCFG(addr) {
       <span class="z" id="zval">100%</span>
       <button class="ib" id="zfit" title="Zoom to fit">⤢</button>
       <button class="ib" id="z100" title="Reset to 100%">1:1</button>
+      <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
       <button class="ib" id="zsvg" title="Download SVG">⤓</button>
     </div>
     <div id="glegend"><span><i style="background:var(--ok)"></i>taken</span><span><i style="background:var(--err)"></i>not taken</span><span><i style="background:var(--g-flow)"></i>flow</span></div>
@@ -923,14 +924,16 @@ async function showCFG(addr) {
   const apply = () => { svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; $("#zval").textContent = Math.round(scale * 100) + "%"; };
   const fit = (retry = true) => {
     const bb = svg.getBBox();
-    if (!bb.width) { if (retry) requestAnimationFrame(() => fit(false)); return; }  // layout not ready yet
-    scale = Math.min((g.clientWidth - 48) / bb.width, (g.clientHeight - 48) / bb.height, 1.4);
+    if (!bb.width || !bb.height) { if (retry) requestAnimationFrame(() => fit(false)); return; }
+    const availW = Math.max(80, g.clientWidth - 56), availH = Math.max(80, g.clientHeight - 72);
+    // Very large functions need to zoom out further than a fixed minimum allowed.
+    scale = Math.max(0.025, Math.min(availW / bb.width, availH / bb.height, 1.4));
     tx = (g.clientWidth - bb.width * scale) / 2 - bb.x * scale;
     ty = Math.max(16, (g.clientHeight - bb.height * scale) / 2) - bb.y * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
-    const ns = Math.min(4, Math.max(0.08, scale * factor));
+    const ns = Math.min(4, Math.max(0.025, scale * factor));
     tx = cx - (cx - tx) * (ns / scale); ty = cy - (cy - ty) * (ns / scale);
     scale = ns; apply();
   };
@@ -952,6 +955,9 @@ async function showCFG(addr) {
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
+  $("#gdetail").onclick = () => showCFG(addr, !detail);
+  $("#gdetail").classList.toggle("on", detail);
+  $("#gdetail").setAttribute("aria-pressed", String(detail));
   $("#zsvg").onclick = () => { const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([svg.outerHTML], {type: "image/svg+xml"}));
     a.download = `${d.name || "cfg"}.svg`; a.click(); };
