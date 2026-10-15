@@ -7,6 +7,7 @@ import io
 import os
 import tarfile
 import tempfile
+import zipfile
 import unittest
 
 from rdis import containers
@@ -51,6 +52,46 @@ class PrecisionRegressionTests(unittest.TestCase):
 
             write_archive(b"MACH")
             second = containers._tar_extract(archive, "lib/sample.so", cache_dir, 1)
+            with open(second, "rb") as stream:
+                self.assertEqual(stream.read(), b"MACH")
+            self.assertNotEqual(first, second)
+
+    def test_zip_extraction_cache_tracks_archive_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = os.path.join(tmp, "package.zip")
+            cache_dir = os.path.join(tmp, "cache")
+
+            def write_archive(payload):
+                with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zf:
+                    zf.writestr("lib/sample.so", payload)
+
+            write_archive(b"ELF!")
+            first = containers.extract(archive, "lib/sample.so", cache_dir, 1)
+            with open(first, "rb") as stream:
+                self.assertEqual(stream.read(), b"ELF!")
+            write_archive(b"MACH")
+            second = containers.extract(archive, "lib/sample.so", cache_dir, 1)
+            with open(second, "rb") as stream:
+                self.assertEqual(stream.read(), b"MACH")
+            self.assertNotEqual(first, second)
+
+    def test_compressed_cache_tracks_bytes_not_only_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "payload.gz")
+            cache_dir = os.path.join(tmp, "cache")
+
+            def write_compressed(payload):
+                with gzip.open(source, "wb", mtime=0) as stream:
+                    stream.write(payload)
+
+            write_compressed(b"ELF!")
+            first = containers._decompress(source, cache_dir, 1)
+            old_stat = os.stat(source)
+            write_compressed(b"MACH")
+            os.utime(source, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+            second = containers._decompress(source, cache_dir, 1)
+            with open(first, "rb") as stream:
+                self.assertEqual(stream.read(), b"ELF!")
             with open(second, "rb") as stream:
                 self.assertEqual(stream.read(), b"MACH")
             self.assertNotEqual(first, second)
