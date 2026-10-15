@@ -7,26 +7,47 @@ Run:  python -m rdis.mcp_server
 Register in an MCP client as command `python` args `["-m","rdis.mcp_server"]` (cwd = this repo),
 or wrap with the venv's python. One binary is held open per session, keyed by path.
 """
-import json, sys, traceback
+import hashlib, json, os, sys, threading, traceback
+from collections import OrderedDict
 
 from .loader import open_image
-from .analysis import Program
 from . import cache, render
 from .decompile import Decompiler
 
-_CACHE = {}  # path -> Program
+_CACHE_MAX = 16
+_CACHE = OrderedDict()  # (absolute path, content digest, options) -> Program
+_CACHE_LOCK = threading.RLock()
 
 
 def _prog(path, arch=None, loader=None, base=None):
-    key = (path, arch, loader, base)
-    if key not in _CACHE:
-        opts = {}
-        if loader:
-            opts["loader"] = loader
-        if base is not None:
-            opts["base"] = base
-        _CACHE[key] = cache.analyze(open_image(path, arch=arch, **opts))
-    return _CACHE[key]
+    # Path and stat metadata alone are not reliable: a binary may be replaced in place while
+    # preserving size and mtime. The digest also prevents an old Program from being reused.
+    absolute = os.path.abspath(os.fspath(path))
+    digest = hashlib.sha256()
+    with open(absolute, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    key = (absolute, digest.hexdigest(), arch, loader, base)
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+        if cached is not None:
+            _CACHE.move_to_end(key)
+            return cached
+    opts = {}
+    if loader:
+        opts["loader"] = loader
+    if base is not None:
+        opts["base"] = base
+    result = cache.analyze(open_image(absolute, arch=arch, **opts))
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+        if cached is not None:
+            _CACHE.move_to_end(key)
+            return cached
+        _CACHE[key] = result
+        while len(_CACHE) > _CACHE_MAX:
+            _CACHE.popitem(last=False)
+    return result
 
 
 # ---- tool implementations ------------------------------------------------
