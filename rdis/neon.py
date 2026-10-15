@@ -49,6 +49,17 @@ def preamble(used):
     for t in sorted(used):
         if t in TYPEDEFS:
             out.append(f"typedef {TYPEDEFS[t]} {t} __attribute__((vector_size(16)));")
+    if "u8x16" in used:
+        # Keep CNT portable across Clang versions: __builtin_elementwise_popcount is not
+        # available in older Apple Clang releases. This is the standard per-byte SWAR algorithm.
+        out += [
+            "static inline u8x16 rdis_popcount_u8x16(u8x16 x) {",
+            "    x = x - ((x >> 1) & (u8x16){85,85,85,85,85,85,85,85,85,85,85,85,85,85,85,85});",
+            "    x = (x & (u8x16){51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51}) +",
+            "        ((x >> 2) & (u8x16){51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51});",
+            "    return (x + (x >> 4)) & (u8x16){15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15};",
+            "}",
+        ]
     return out + [""]
 
 
@@ -281,7 +292,7 @@ def lift(lf, i, regs):
         a = _view(lf, val(1), t)
         e = {"neg": f"-{a}", "fneg": f"-{a}", "mvn": f"~{a}", "not": f"~{a}",
              "abs": f"__builtin_elementwise_abs({a})", "fabs": f"__builtin_elementwise_abs({a})",
-             "cnt": f"__builtin_elementwise_popcount({a})"}[m]
+             "cnt": f"rdis_popcount_u8x16({a})"}[m]
         return assign(_out(lf, e, t, n, half))
     if m in ("bsl", "bit", "bif") and len(ops) == 3:
         t = T(8)
