@@ -75,6 +75,24 @@ def _write_atomic(cache_dir, out, fill):
             os.unlink(tmp)
 
 
+def _copy_limited(source, destination, limit, label, expected_size=None):
+    """Copy in bounded chunks and reject overflow or a mismatch with container metadata."""
+    total = 0
+    while True:
+        # Ask for at most one byte beyond the remaining allowance so bombs are detected without
+        # materializing a whole decompressed member in memory.
+        chunk = source.read(min(1 << 20, max(1, limit - total + 1)))
+        if not chunk:
+            break
+        if total + len(chunk) > limit:
+            raise ValueError(f"{label} exceeds the {limit} byte limit")
+        destination.write(chunk)
+        total += len(chunk)
+    if expected_size is not None and total != expected_size:
+        raise ValueError(f"{label} size mismatch: expected {expected_size}, read {total}")
+    return total
+
+
 def _decompress(path, cache_dir, max_mb):
     with open(path, "rb") as fh:
         head = fh.read(6)
@@ -95,12 +113,7 @@ def _decompress(path, cache_dir, max_mb):
     if not os.path.exists(out):
         def fill(w):
             with op(path, "rb") as r:
-                # Read one byte beyond the cap so an oversized stream is rejected rather than
-                # silently treated as a valid, truncated executable.
-                data = r.read(limit + 1)
-                if len(data) > limit or r.read(1):
-                    raise ValueError(f"decompressed file exceeds the {max_mb} MB limit")
-                w.write(data)
+                _copy_limited(r, w, limit, f"decompressed file (max {max_mb} MB)")
         _write_atomic(cache_dir, out, fill)
     return out
 
@@ -161,12 +174,8 @@ def _tar_extract(path, entry, cache_dir, max_mb):
                 if stream is None:
                     raise ValueError(f"unable to read archive member: {entry}")
                 with stream:
-                    data = stream.read(limit + 1)
-                    if len(data) > limit or stream.read(1):
-                        raise ValueError(f"archive member larger than {max_mb} MB")
-                    if len(data) != m.size:
-                        raise ValueError(f"archive member size mismatch: expected {m.size}, read {len(data)}")
-                    f.write(data)
+                    _copy_limited(stream, f, limit, f"archive member {entry!r} (max {max_mb} MB)",
+                                  expected_size=m.size)
             _write_atomic(cache_dir, out, fill)
     return out
 
@@ -355,12 +364,8 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
             limit = max(0, int(max_mb)) << 20
             def fill(f):
                 with z.open(entry) as src:
-                    data = src.read(limit + 1)
-                    if len(data) > limit or src.read(1):
-                        raise ValueError(f"archive member larger than {max_mb} MB")
-                    if len(data) != info.file_size:
-                        raise ValueError(f"archive member size mismatch: expected {info.file_size}, read {len(data)}")
-                    f.write(data)
+                    _copy_limited(src, f, limit, f"archive member {entry!r} (max {max_mb} MB)",
+                                  expected_size=info.file_size)
             _write_atomic(cache_dir, out, fill)
     return out
 
