@@ -1031,7 +1031,7 @@ function themeGraph(svg) {
     .edge path { stroke-width: 1.6; fill: none; }
     .edge polygon { stroke: none; }
     .node { cursor: pointer; }
-    .node:hover polygon { stroke: var(--accent); }
+    .node:hover polygon, .node:focus-visible polygon { stroke: var(--accent); stroke-width: 2.4; }
     .node.entry polygon { stroke: var(--accent); stroke-width: 2; }
     .node.cur polygon { stroke: var(--accent); stroke-width: 2.6; }
     .edge path[stroke="green"], .edge [stroke="green"] { stroke: var(--ok) !important; }
