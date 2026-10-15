@@ -9,10 +9,12 @@ import tarfile
 import tempfile
 import zipfile
 import unittest
+from unittest.mock import patch
 
 from rdis import containers
 from rdis.arch import make
 from rdis.loader import Image, Section
+from rdis import mcp_server, server
 
 
 class PrecisionRegressionTests(unittest.TestCase):
@@ -96,6 +98,52 @@ class PrecisionRegressionTests(unittest.TestCase):
             with open(second, "rb") as stream:
                 self.assertEqual(stream.read(), b"MACH")
             self.assertNotEqual(first, second)
+
+    def test_web_shared_analysis_misses_on_same_metadata_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "sample.bin")
+            with open(source, "wb") as stream:
+                stream.write(b"AAAA")
+            initial = os.stat(source)
+            server.ANALYSES.clear()
+            with patch.object(server, "_analyze", side_effect=[object(), object()]) as analyze:
+                server._shared_analysis(source, "x86_64", False, False, False, "raw", 0)
+                with open(source, "wb") as stream:
+                    stream.write(b"BBBB")
+                os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+                server._shared_analysis(source, "x86_64", False, False, False, "raw", 0)
+                self.assertEqual(analyze.call_count, 2)
+            server.ANALYSES.clear()
+
+    def test_mcp_cache_misses_on_same_metadata_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "sample.bin")
+            with open(source, "wb") as stream:
+                stream.write(b"AAAA")
+            initial = os.stat(source)
+            mcp_server._CACHE.clear()
+            with patch.object(mcp_server, "open_image", return_value=object()), \\
+                 patch.object(mcp_server.cache, "analyze", side_effect=[object(), object()]) as analyze:
+                mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
+                with open(source, "wb") as stream:
+                    stream.write(b"BBBB")
+                os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+                mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
+                self.assertEqual(analyze.call_count, 2)
+            mcp_server._CACHE.clear()
+
+    def test_mcp_function_limit_is_validated_and_bounded(self):
+        class FakeProgram:
+            names = {i: f"fn_{i}" for i in range(20)}
+            functions = {i: object() for i in range(20)}
+            def display(self, address):
+                return self.names[address]
+
+        with patch.object(mcp_server, "_prog", return_value=FakeProgram()):
+            self.assertEqual(len(mcp_server.t_list_functions("ignored", limit=100000)["functions"]), 20)
+            self.assertEqual(mcp_server.t_list_functions("ignored", limit=-1)["functions"], [])
+            with self.assertRaises(ValueError):
+                mcp_server.t_list_functions("ignored", limit="all")
 
 
 if __name__ == "__main__":
