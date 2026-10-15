@@ -14,7 +14,7 @@ This is a coverage plan, not a claim that every case already exists.
 | SIMD | Lane order, saturation, shifts, reductions, conversions | Lane-by-lane equivalence |
 | WASM | Invalid LEB128, section/index mismatch, stack type errors, 259 deterministic malformed/mutated inputs | Explicit validation error; malformed inputs must not leak low-level parser exceptions |
 | Metadata | JNI/ObjC/Swift/symbols, missing/partial/versioned metadata | Bounded parsing and explicit uncertainty |
-| HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions, aggregate upload/cache quota | Bounded response, correct status, isolation; quota regressions added |
+| HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions, aggregate upload/cache quota | Bounded response, correct status and isolation; quota regressions and 20-visitor stress test passed in CI |
 | MCP | Valid/invalid tool calls, malformed JSON-RPC, large output, file replacement | Protocol errors and current analysis |
 | Rendering | HTML-like names/comments, huge CFG, Unicode, compact/detail CFG modes, entry highlight and T/F edges | Escaped and bounded output; UI screenshot/accessibility review remains open |
 | CLI/API | Documented commands, invalid args, missing optional tools | Stable schemas and meaningful exit codes |
