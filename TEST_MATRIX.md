@@ -11,7 +11,7 @@
 | WebAssembly | Truncated header, section size, LEB128 length | Malformed framing regressions added |
 | Graphviz | Control characters, quotes, backslashes in labels | Escaping regression added |
 | Upload/session state | Token metadata growth under repeated uploads | Per-session bound and regression added; aggregate disk quota still pending |
-| HTTP concurrency | Session isolation, deterministic concurrent analysis, slow/over-capacity clients | Multi-visitor stress test added to CI; current-head run pending |
+| HTTP concurrency | Session isolation, deterministic concurrent analysis, slow/over-capacity clients | Multi-visitor stress test passed on the code-equivalent revision; documentation-only head is queued for CI |
 | Debugger | Quotes, backslashes and control characters in scalar command arguments | Unit regression added; LLDB integration not exercised in CI |
 | Decompiler | Cross-architecture executable differential corpus | Existing tests need full run and independent baseline |
 | Web security | session isolation, auth assumptions, quotas, escaping | Audit pending |
