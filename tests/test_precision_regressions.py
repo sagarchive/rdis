@@ -11,7 +11,7 @@ import zipfile
 import unittest
 from unittest.mock import patch
 
-from rdis import cache, containers
+from rdis import cache, containers, render
 from rdis.arch import make
 from rdis.loader import Image, Section
 from rdis import mcp_server, server
@@ -27,6 +27,13 @@ class PrecisionRegressionTests(unittest.TestCase):
         image = Image("fixture", "raw", make("x86_64"), 0, 0, sections, {}, {}, lambda va, n: b"", lambda va: 0)
         self.assertEqual(image.section_at(0x28000000).name, "long")
         self.assertIsNone(image.section_at(0x31000000))
+
+    def test_graphviz_labels_strip_control_characters_and_escape_quotes(self):
+        label = render._dot_label('one\\ntwo\\x00"\\\\tail')
+        self.assertNotIn("\\n", label)
+        self.assertNotIn("\\x00", label)
+        self.assertIn('\\\\"', label)
+        self.assertIn('\\\\\\\\', label)
 
     def test_decompression_rejects_oversized_output_instead_of_truncating(self):
         with tempfile.TemporaryDirectory() as tmp:
