@@ -68,3 +68,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** multi-line comments or metadata could break the generated DOT label and cause graph rendering failures.
 - **Change:** escape CR/LF as Graphviz newline sequences; add a regression test for newline, quote and backslash handling.
 - **Verification:** regression test added; CI result pending.
+
+### RDIS-AUDIT-011 — Maturity suite could report semantic failures with exit code zero
+
+- **Area:** M5/M10, `tests/maturity.py`
+- **Evidence:** the script printed a `SCORE ok/total` but did not exit non-zero when `ok != total`.
+- **Failure mode:** CI or automation could treat a failed execution-checked decompilation suite as a successful command.
+- **Change:** exit with status 1 whenever any case fails.
+- **Verification:** macOS CI now runs the product self-check and maturity suite; results pending.
