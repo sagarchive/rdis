@@ -46,9 +46,9 @@ jobs:
           import re
           from pathlib import Path
           html = Path("rdis/web/index.html").read_text()
-          scripts = re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>', html, re.S | re.I)
+          scripts = re.findall(r'<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>', html, re.S | re.I)
           assert scripts, "no inline application script found"
-          Path("/tmp/rdis-inline.js").write_text("\\n".join(scripts))
+          Path("/tmp/rdis-inline.js").write_text("\n".join(scripts))
           PY
           node --check /tmp/rdis-inline.js
       - name: Run hardening regressions
