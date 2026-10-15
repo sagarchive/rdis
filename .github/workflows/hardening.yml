@@ -63,7 +63,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install real browser test dependencies
-        run: npm install --no-save --no-package-lock playwright @viz-js/viz
+        run: npm install --no-save --no-package-lock playwright
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Test CFG rendering, fit, zoom, accessibility and SVG export
