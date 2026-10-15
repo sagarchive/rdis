@@ -22,8 +22,10 @@ from .decompile import Decompiler
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24, "request_timeout": 30, "max_workers": 64}
+       "max_analyses": 24, "request_timeout": 15, "max_workers": 64,
+       "max_parallel_analyses": 4, "analysis_wait_seconds": 60, "max_uploads_per_session": 32}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
+ANALYSIS_SLOTS = threading.BoundedSemaphore(CFG["max_parallel_analyses"])
 
 # Per-visitor workspaces (cookie `rdis_sid`): one visitor's documents, renames and navigation never
 # leak into another's. Each open document is a lightweight OVERLAY of a shared, immutable analysis,
@@ -83,12 +85,19 @@ def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
         with LOCK:
             shared = ANALYSES.get(key)
         if shared is None:
-            try:
-                shared = _analyze(path, arch, objc, swift, prologues, loader, base)
-            except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+            if not ANALYSIS_SLOTS.acquire(timeout=CFG["analysis_wait_seconds"]):
                 with LOCK:
                     ANALYSES.pop("__gate__:" + key, None)
-                raise
+                raise TimeoutError("analysis capacity is busy; retry after another analysis finishes")
+            try:
+                try:
+                    shared = _analyze(path, arch, objc, swift, prologues, loader, base)
+                except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+                    with LOCK:
+                        ANALYSES.pop("__gate__:" + key, None)
+                    raise
+            finally:
+                ANALYSIS_SLOTS.release()
             with LOCK:
                 ANALYSES[key] = shared
                 ANALYSES.pop("__gate__:" + key, None)   # only after the result is visible
@@ -474,7 +483,11 @@ def _upload(raw, name):
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
-    session()["uploads"][digest[:16]] = {"path": path, "name": safe}
+    uploads = session()["uploads"]
+    uploads[digest[:16]] = {"path": path, "name": safe}
+    # Token metadata is small but user-controlled upload repetition must not grow it forever.
+    while len(uploads) > CFG["max_uploads_per_session"]:
+        uploads.pop(next(iter(uploads)))
     return {"token": digest[:16], "name": safe, "size": len(raw), "sha256": digest, "slices": slices(path)}
 
 
@@ -538,7 +551,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _err(self, e):
-        code = 404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
+        code = 503 if isinstance(e, TimeoutError) else \
+               404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
                403 if isinstance(e, PermissionError) else 400
         return self._send(code, json.dumps({"error": f"{e}"}), "application/json")
 
