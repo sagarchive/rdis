@@ -99,7 +99,7 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Evidence:** the execution-based x86-64 SIMD corpus showed generated code like `&rdi[rsi_1] + 0x10`; C scales that addition in `int *` units, while the machine instruction adds bytes.
 - **Failure mode:** vector-loop tail pointers can skip or read the wrong elements, changing sums and in-place updates.
 - **Change:** cast computed address-of expressions through `char *` before integer add/sub; add a focused regression and rerun the execution-based corpus.
-- **Verification:** hardening regression passed on Python 3.10/3.12 at commit `8418c2be`; the post-fix maturity result is being rechecked.
+- **Verification:** the post-fix execution-based maturity suite passed 124/124 cases on macOS/Python 3.12 at commit `ce32ca4b`; focused hardening tests also passed on Python 3.10/3.12.
 
 ### RDIS-AUDIT-015 — Pinned floating-point memory expressions could default to int64_t
 - **Area:** M5, `rdis/lift.py`
