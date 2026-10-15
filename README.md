@@ -192,6 +192,10 @@ plugins.register_tool("name", fn, "help")             # extra MCP/CLI tool
 
 See `rdis/raw.py` for a complete loader plugin (headerless blobs).
 
+**Trust boundary:** plugins are arbitrary Python code and are executed when discovered/imported. Only
+place code you trust in `./plugins` or the directory named by `RDIS_PLUGINS`; do not point it at an
+upload directory or any location writable by untrusted users. Plugin registration is not a sandbox.
+
 ## Tests
 
 ```sh
