@@ -81,4 +81,7 @@ jobs:
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then cat /tmp/rdis-server.log; exit 1; fi
-          python tests/concurrency_test.py http://127.0.0.1:8781
+          if ! python tests/concurrency_test.py http://127.0.0.1:8781; then
+            cat /tmp/rdis-server.log
+            exit 1
+          fi
