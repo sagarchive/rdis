@@ -56,12 +56,17 @@ def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
     """The analyzed Program for a (content, options) key, analyzing once and sharing it across all
     sessions. Analysis for a given key is serialized so two simultaneous first-opens do not both
     do the work; different keys analyze in parallel."""
-    try:
-        st = os.stat(path)
-        content = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
-    except OSError:
-        content = path
-    key = f"{content}|{arch}|{loader}|{base}|{int(objc)}{int(swift)}{int(prologues)}"
+    # Metadata-only keys collide when a binary is rewritten without changing size or whole-second
+    # mtime. Hash the bytes as well as retaining the canonical path (Program/image and sidecar
+    # state are path-bound), then include every option that can affect analysis.
+    absolute = os.path.abspath(path)
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    st = os.stat(path)
+    content = f"{absolute}|{st.st_size}|{st.st_mtime_ns}|{digest.hexdigest()}"
+    key = f"{content}|{arch}|{loader}|{base}|{int(objc)}|{int(swift)}|{int(prologues)}"
     with LOCK:
         shared = ANALYSES.get(key)
         if shared is not None:
@@ -156,7 +161,12 @@ def _open_program(path, arch=None, objc=True, swift=True, prologues=True, loader
     p.display_name = disp
     if CFG["persist"] and CFG["single_user"]:
         p.load(p.rdb_path())             # reattach saved renames/comments (single-user local only)
-    p._doc_key = hashlib.sha1(f"{path}|{arch}|{loader}".encode()).hexdigest()[:10]
+    # Document identity must distinguish different content and all analysis-affecting options;
+    # otherwise opening the same file at a different base/options silently overwrites the tab.
+    p._doc_key = hashlib.sha1(
+        f"{os.path.abspath(path)}|{digest.hexdigest()}|{arch}|{loader}|{base}|"
+        f"{int(objc)}|{int(swift)}|{int(prologues)}".encode()
+    ).hexdigest()[:12]
     return p
 
 
