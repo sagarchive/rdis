@@ -291,6 +291,17 @@ class WasmBoundsTests(unittest.TestCase):
 
 
 
+class DebuggerSafetyTests(unittest.TestCase):
+    def test_lldb_quote_escapes_scalars_and_rejects_controls(self):
+        from rdis.debug import _lldb_quote
+
+        value = "a" + chr(92) + 'b"c'
+        quoted = _lldb_quote(value)
+        self.assertEqual(quoted, '"' + "a" + chr(92) * 2 + "b" + chr(92) + '"c' + '"')
+        with self.assertRaisesRegex(ValueError, "control character"):
+            _lldb_quote("symbol" + chr(10) + "run quit")
+
+
 class CFGLayoutTests(unittest.TestCase):
     def test_overview_cfg_is_compact_and_detail_mode_preserves_more_instructions(self):
         from types import SimpleNamespace
