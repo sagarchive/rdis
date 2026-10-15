@@ -135,10 +135,19 @@ rdis-gui --multi-user                        # or force per-visitor sessions on 
 Each visitor gets their own cookie session and their own documents, renames and navigation — nothing
 is shared between people. When several open the **same** binary it is analyzed **once** and the heavy
 read-only data is shared, so memory scales; each person's edits stay private. A public bind also
-disables server-path opening and the `py` console command. Verified with a 20-visitor concurrency
-stress test (`tests/concurrency_test.py`): no cross-session leaks, no races, deterministic output.
-Works in current Chrome, Firefox, Safari and Edge (the CFG uses viz.js/WASM and degrades to a notice
-if it can't load).
+disables server-path opening and the `py` console command.
+
+**Security boundary:** cookie sessions are isolation, not authentication. A public bind accepts
+unauthenticated uploads and asks native parsers to inspect untrusted files; per-file upload limits
+do not provide aggregate disk, CPU or memory quotas. Do **not** expose this server directly to the
+internet as a multi-tenant service. Put it behind a trusted reverse proxy that enforces authentication,
+request/time/resource limits and network policy, and keep the process least-privileged. The optional
+`--multi-user` mode assumes the operator has already secured the proxy and does not itself provide
+login or authorization.
+
+The existing 20-visitor concurrency stress test (`tests/concurrency_test.py`) covers the tested
+session workload, not every possible interleaving or hostile request. Works in current Chrome,
+Firefox, Safari and Edge (the CFG uses viz.js/WASM and degrades to a notice if it can't load).
 
 ## Library
 
