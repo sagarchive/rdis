@@ -8,7 +8,7 @@
 - ZIP extraction did not explicitly verify copied bytes against declared member size.
 - Section lookup used a fixed-distance early-stop condition for overlapping sections.
 
-The focused hardening suite passed on Python 3.10 and 3.12, and the execution-based maturity suite passed 124/124 cases on macOS/Python 3.12 at commit `ce32ca4b`. The newest commits after that successful run update audit documentation only; a fresh current-head CI run remains the final confirmation gate. The 124-case corpus is evidence, not proof of correctness for every ISA or instruction.
+The focused hardening suite (including aggregate quota and deterministic malformed-WebAssembly smoke tests), full product self-check, execution-based maturity suite (124/124), and 20-visitor isolation/determinism stress test passed on macOS/Python 3.12 and Python 3.10/3.12 at commit `b0008467`. Subsequent commits improve unknown-target CFG labeling and add corresponding regressions/docs; current-head CI is rerunning. The 124-case corpus is evidence, not proof of correctness for every ISA or instruction.
 
 ## Not established
 - Whether a current release has a remotely exploitable vulnerability.
