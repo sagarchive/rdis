@@ -84,3 +84,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** any executable-section address constant could be mistaken for the jump-table storage base; int32 offsets were then added to the wrong base and accepted merely because the result was in an executable section.
 - **Change:** only consider actual indexed loads with scale 4; separate table storage address from branch-relative target base; require all recovered targets to remain within the owning function's address interval.
 - **Verification:** the full macOS differential suite is rerunning after this fix; closure depends on all relevant execution tests passing.
+
+### RDIS-AUDIT-013 — NEON CNT relied on a Clang-version-specific builtin
+
+- **Area:** M5, `rdis/neon.py`
+- **Evidence:** the macOS ARM64 execution-checked suite failed to compile generated C because `__builtin_elementwise_popcount` was unavailable in the runner's Apple Clang.
+- **Failure mode:** valid NEON `CNT` instructions could not be represented as compilable C on the supported toolchain.
+- **Change:** replace the newer builtin with a portable per-byte SWAR popcount helper registered in the generated-C dependency set.
+- **Verification:** subsequent full self-check passed all 20 functions across six differential builds; the suite then stopped at a separate overly strict tail-call assertion, now corrected. Final rerun pending.
