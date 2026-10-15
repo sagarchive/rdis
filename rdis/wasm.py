@@ -19,6 +19,8 @@ _MAX_LOCALS = 50000  # per-function local count cap (engines enforce the same): 
 def _uleb(data, p):
     r = s = 0
     while True:
+        if p >= len(data):
+            raise ValueError("truncated unsigned LEB128")
         if s >= 7 * _LEB_MAX:
             raise ValueError("LEB128 too long")
         b = data[p]
@@ -32,6 +34,8 @@ def _uleb(data, p):
 def _sleb(data, p):
     r = s = 0
     while True:
+        if p >= len(data):
+            raise ValueError("truncated signed LEB128")
         if s >= 7 * _LEB_MAX:
             raise ValueError("LEB128 too long")
         b = data[p]
