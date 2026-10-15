@@ -473,26 +473,50 @@ class Program:
         interpreting them as table bases can turn adjacent function code into fake switch cases."""
         if bound is None or not (0 < bound[1] + 1 <= 8192):
             return
+        # Relative offsets are not necessarily relative to the table itself. On AArch64, clang
+        # commonly loads int32 offsets from [table + index*4] and adds them to a separate ADR base
+        # before BR. Recover that target base from the ADD feeding the indirect branch.
+        target_reg = (self._canon_reg(i.reg_name(i.operands[-1].reg))
+                      if i.operands and i.operands[-1].type == self._REG else None)
+        target_base = None
+        if target_reg:
+            for insn in reversed(b.insns):
+                if insn.address >= i.address or not insn.operands or insn.operands[0].type != self._REG:
+                    continue
+                if self._canon_reg(insn.reg_name(insn.operands[0].reg)) != target_reg:
+                    continue
+                if not insn.mnemonic.startswith("add"):
+                    continue
+                for op in insn.operands[1:]:
+                    if op.type == self._REG:
+                        source_reg = self._canon_reg(insn.reg_name(op.reg))
+                        if source_reg in base:
+                            target_base = base[source_reg]
+                            break
+                if target_base is not None:
+                    break
+        if target_base is None:
+            return
         candidates = []
         for insn in b.insns:
             for mem in (o for o in insn.operands if o.type == self._MEM and o.mem.index):
                 breg = self._canon_reg(insn.reg_name(mem.mem.base)) if mem.mem.base else None
-                tbl = base.get(breg)
-                if tbl is None or self.image.section_at(tbl) is None:
+                table_addr = base.get(breg)
+                if table_addr is None or self.image.section_at(table_addr) is None:
                     continue
                 scale = mem.mem.scale if self.x86_like else (
                     1 << mem.shift.value if mem.shift.type == 1 else 1
                 )
                 if scale == 4:
                     index = self._canon_reg(insn.reg_name(mem.mem.index))
-                    candidates.append((tbl, index))
-        for tbl, index in candidates:
+                    candidates.append((table_addr, index))
+        for table_addr, index in candidates:
             cases = {}
             for value in range(bound[1] + 1):
-                raw = self.image.read(tbl + value * 4, 4)
+                raw = self.image.read(table_addr + value * 4, 4)
                 if len(raw) < 4:
                     break
-                target = tbl + int.from_bytes(raw, "little", signed=True)
+                target = target_base + int.from_bytes(raw, "little", signed=True)
                 # A recovered case must belong to this function's address range. Merely landing
                 # in any executable section is insufficient: it can accidentally absorb the next
                 # function and generate a plausible but semantically unrelated CFG.
