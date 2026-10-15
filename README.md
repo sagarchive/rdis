@@ -115,9 +115,12 @@ rdis-gui /path/to/binary --desktop           # native window (needs the [desktop
 
 Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter) · disassembly with
 clickable call targets · inspector (binary info, sections, cross-references). The top toggle
-switches **Assembly / Pseudo-code / CFG / Hex**. Double-click a function to rename it; double-click an
-instruction address to comment. Renames and comments save to `<binary>.rdb` next to the binary and
-reload automatically.
+switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview so branches and
+loops are visible at a glance; use **Detail** for more instructions per block, **Fit** for large
+functions, click a block to inspect it, and double-click to jump to its listing. Conditional edges
+are labeled **T/F**, the entry block is highlighted, and SVG export preserves the graph.
+Double-click a function to rename it; double-click an instruction address to comment. Renames and
+comments save to `<binary>.rdb` next to the binary and reload automatically.
 
 Drop any file on the page: native binaries (Mach-O/ELF/PE/`.so`/`.dylib`) open directly;
 **APK/IPA/AAR/JAR/ZIP**, **DMG** images and **tar** archives show a loader dialog listing the native
