@@ -115,6 +115,29 @@ class AggregateStorageQuotaTests(unittest.TestCase):
                     rdis_server._upload(b"b", "second.bin")
                 self.assertEqual(len(os.listdir(td)), 1)
 
+    def test_concurrent_duplicate_uploads_share_one_quota_entry(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        with tempfile.TemporaryDirectory() as td:
+            payload = b"a" * (1 << 20)
+            def upload():
+                rdis_server._local.session = {"docs": {}, "cur": None, "uploads": {}}
+                return rdis_server._upload(payload, "same.bin")
+            with mock.patch.dict(rdis_server.CFG, {"upload_dir": td, "max_mb": 2,
+                                                   "max_upload_storage_mb": 1}), \
+                 mock.patch.object(rdis_server, "slices", return_value=[]):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    results = list(pool.map(lambda _: upload(), range(2)))
+            self.assertEqual(results[0]["sha256"], results[1]["sha256"])
+            self.assertEqual(len(os.listdir(td)), 1)
+
+    def test_invalid_aggregate_storage_limits_are_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            for invalid in (0, -1, True, 1.5):
+                with self.subTest(max_total_mb=invalid):
+                    with self.assertRaisesRegex(ValueError, "max_total_mb"):
+                        containers.extract("missing.zip", "member", td, max_total_mb=invalid)
+
 
 class SectionLookupTests(unittest.TestCase):
     def _image(self, sections):
