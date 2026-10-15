@@ -16,8 +16,7 @@ def _lldb_quote(value):
     value = str(value)
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
         raise ValueError("LLDB argument contains a control character")
-    return '"' + value.replace("\\\\", "\\\\\\\\").replace('"', '\\\\"') + '"'
-
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 def _lldb():
     exe = shutil.which("lldb")
