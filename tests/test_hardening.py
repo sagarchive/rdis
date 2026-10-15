@@ -291,6 +291,19 @@ class WasmBoundsTests(unittest.TestCase):
 
 
 
+class PointerArithmeticTests(unittest.TestCase):
+    def test_computed_element_address_uses_byte_arithmetic(self):
+        from rdis.lift import Lifter
+
+        lifter = object.__new__(Lifter)
+        lifter._argtypes = {}
+        lifter._ptrvars = {}
+        lifter._temptype = {}
+        lifter._localname = {}
+        lifter._localtype = {}
+        self.assertEqual(lifter._byte_ptr("&rdi[rsi_1]"), "(char *)&rdi[rsi_1]")
+
+
 class DebuggerSafetyTests(unittest.TestCase):
     def test_lldb_quote_escapes_scalars_and_rejects_controls(self):
         from rdis.debug import _lldb_quote
