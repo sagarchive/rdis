@@ -158,7 +158,7 @@ class WasmModule:
         elif sid == 7:  # export
             count, p = _uleb(data, p)
             for _ in range(count):
-                nm, p = _name(data, p)
+                nm, p = _name(data, p, end)
                 kind = data[p]
                 idx, p = _uleb(data, p + 1)
                 self.exports.append({"name": nm, "kind": _EXPORT_KIND.get(kind, "?"), "index": idx})
