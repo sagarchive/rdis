@@ -122,14 +122,14 @@ class PrecisionRegressionTests(unittest.TestCase):
                 stream.write(b"AAAA")
             initial = os.stat(source)
             mcp_server._CACHE.clear()
-            with patch.object(mcp_server, "open_image", return_value=object()), \\
-                 patch.object(mcp_server.cache, "analyze", side_effect=[object(), object()]) as analyze:
-                mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
-                with open(source, "wb") as stream:
-                    stream.write(b"BBBB")
-                os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
-                mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
-                self.assertEqual(analyze.call_count, 2)
+            with patch.object(mcp_server, "open_image", return_value=object()):
+                with patch.object(mcp_server.cache, "analyze", side_effect=[object(), object()]) as analyze:
+                    mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
+                    with open(source, "wb") as stream:
+                        stream.write(b"BBBB")
+                    os.utime(source, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+                    mcp_server._prog(source, arch="x86_64", loader="raw", base=0)
+                    self.assertEqual(analyze.call_count, 2)
             mcp_server._CACHE.clear()
 
     def test_mcp_function_limit_is_validated_and_bounded(self):
