@@ -106,5 +106,5 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Evidence:** the ARM64 vectorized float-reduction case emitted an `int64_t` temporary for an expression containing `*(float *)`; converting intermediate values to integer truncates fractions.
 - **Failure mode:** otherwise compilable pseudo-C returns the wrong numeric result.
 - **Change:** recognize typed float/double pointer loads when inferring a pinned temporary's scalar type; add a regression for both widths.
-- **Verification:** focused regression and the current execution-based maturity rerun are pending.
+- **Verification:** focused regression and the execution-based maturity suite passed at commit `ce32ca4b`; the maturity scoreboard was 124/124.
 
