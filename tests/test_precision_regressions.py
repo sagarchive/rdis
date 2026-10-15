@@ -11,7 +11,7 @@ import zipfile
 import unittest
 from unittest.mock import patch
 
-from rdis import cache, containers, render
+from rdis import cache, containers, debug, render
 from rdis.arch import make
 from rdis.loader import Image, Section
 from rdis import mcp_server, server
@@ -34,6 +34,14 @@ class PrecisionRegressionTests(unittest.TestCase):
         self.assertNotIn(chr(0), label)
         self.assertIn(chr(92) + '"', label)
         self.assertIn(chr(92) * 2, label)
+
+    def test_debugger_arguments_are_quoted_and_controls_rejected(self):
+        value = "a" + chr(92) + 'b"c'
+        quoted = debug._lldb_quote(value)
+        expected = '"' + "a" + chr(92) * 2 + "b" + chr(92) + '"c' + '"'
+        self.assertEqual(quoted, expected)
+        with self.assertRaisesRegex(ValueError, "control character"):
+            debug._lldb_quote("symbol" + chr(10) + "run quit")
 
     def test_decompression_rejects_oversized_output_instead_of_truncating(self):
         with tempfile.TemporaryDirectory() as tmp:
