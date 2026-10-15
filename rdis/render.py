@@ -118,7 +118,7 @@ def _dot_label(s, limit=90):
     escaped or the label terminates early and the node box renders with text spilling outside it."""
     if len(s) > limit:
         s = s[:limit - 1] + "…"
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
 
 
 def _cfg_block_label(prog, b, limit=64, max_lines=42):
