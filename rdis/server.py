@@ -676,7 +676,8 @@ def main(argv=None):
     single = loopback and not a.multi_user   # one shared workspace only for a private local install
     CFG.update(allow_python=a.allow_python and loopback and not a.multi_user,
                allow_paths=loopback and not a.multi_user, persist=single,
-               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb,\n               max_upload_storage_mb=a.max_upload_storage_mb)
+               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb,
+               max_upload_storage_mb=a.max_upload_storage_mb)
     if a.allow_python and not loopback:
         print("rdis: --allow-python ignored on a non-loopback bind (it would be remote code execution)",
               flush=True)
