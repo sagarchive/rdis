@@ -7,26 +7,40 @@ Run:  python -m rdis.mcp_server
 Register in an MCP client as command `python` args `["-m","rdis.mcp_server"]` (cwd = this repo),
 or wrap with the venv's python. One binary is held open per session, keyed by path.
 """
-import json, sys, traceback
+import hashlib, json, os, sys, traceback
+from collections import OrderedDict
 
 from .loader import open_image
 from .analysis import Program
 from . import cache, render
 from .decompile import Decompiler
 
-_CACHE = {}  # path -> Program
+_CACHE = OrderedDict()  # bounded LRU: (path, content fingerprint, options) -> Program
+_CACHE_MAX = 8
 
 
 def _prog(path, arch=None, loader=None, base=None):
-    key = (path, arch, loader, base)
-    if key not in _CACHE:
-        opts = {}
-        if loader:
-            opts["loader"] = loader
-        if base is not None:
-            opts["base"] = base
-        _CACHE[key] = cache.analyze(open_image(path, arch=arch, **opts))
-    return _CACHE[key]
+    absolute = os.path.abspath(path)
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    stat = os.stat(path)
+    key = (absolute, stat.st_size, stat.st_mtime_ns, digest.hexdigest(), arch, loader, base)
+    if key in _CACHE:
+        _CACHE.move_to_end(key)
+        return _CACHE[key]
+    opts = {}
+    if loader:
+        opts["loader"] = loader
+    if base is not None:
+        opts["base"] = base
+    program = cache.analyze(open_image(path, arch=arch, **opts))
+    _CACHE[key] = program
+    _CACHE.move_to_end(key)
+    while len(_CACHE) > _CACHE_MAX:
+        _CACHE.popitem(last=False)
+    return program
 
 
 # ---- tool implementations ------------------------------------------------
