@@ -18,6 +18,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
+      - name: Build wheel and verify bundled UI
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir /tmp/rdis-wheel
+          python - <<'PY'
+          import glob, zipfile
+          wheels = glob.glob("/tmp/rdis-wheel/rdis-*.whl")
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as wheel:
+              names = set(wheel.namelist())
+          assert "rdis/web/index.html" in names, "wheel is missing the browser UI"
+          PY
+      - name: CLI smoke tests
+        run: |
+          rdis --help
+          rdis-gui --help
       - name: Focused regression tests
         run: python -m unittest discover -s tests -p 'test_precision_regressions.py' -v
       - name: Full project self-check
