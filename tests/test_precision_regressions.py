@@ -81,8 +81,9 @@ class PrecisionRegressionTests(unittest.TestCase):
             cache_dir = os.path.join(tmp, "cache")
 
             def write_compressed(payload):
-                with gzip.open(source, "wb", mtime=0) as stream:
-                    stream.write(payload)
+                with open(source, "wb") as raw:
+                    with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as stream:
+                        stream.write(payload)
 
             write_compressed(b"ELF!")
             first = containers._decompress(source, cache_dir, 1)
