@@ -69,3 +69,13 @@ jobs:
         run: python tests/test_rdis.py
       - name: Run execution-checked decompiler maturity suite
         run: python tests/maturity.py
+      - name: Stress multi-visitor isolation and deterministic analysis
+        run: |
+          rdis-gui --multi-user --host 127.0.0.1 --port 8781 --no-open >/tmp/rdis-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8781/ >/dev/null; then break; fi
+            sleep 1
+          done
+          python tests/concurrency_test.py http://127.0.0.1:8781
