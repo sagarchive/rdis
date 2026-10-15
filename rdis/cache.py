@@ -21,12 +21,23 @@ _KINDS = ["call", "jmp", "tail", "data"]
 
 
 def _code_hash():
-    h = hashlib.sha1(str(FORMAT).encode())
+    """Fingerprint every package module that can affect cached analysis.
+
+    A hand-maintained partial list silently preserves stale caches when a relevant module (for
+    example a metadata parser or architecture lifter) changes. Hash sorted module names and bytes
+    so additions/removals and edits both invalidate prior snapshots deterministically.
+    """
+    h = hashlib.sha256()
+    h.update(f"rdis-cache-format:{FORMAT}\\0".encode())
     here = os.path.dirname(__file__)
-    for m in ("analysis.py", "arch.py", "loader.py", "jni.py", "cache.py"):
-        with open(os.path.join(here, m), "rb") as f:
-            h.update(f.read())
-    return h.hexdigest()[:12]
+    for name in sorted(os.listdir(here)):
+        if not name.endswith(".py"):
+            continue
+        h.update(name.encode("utf-8") + b"\\0")
+        with open(os.path.join(here, name), "rb") as source:
+            for chunk in iter(lambda: source.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()[:20]
 
 
 def _key(path, opts):
