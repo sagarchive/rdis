@@ -11,6 +11,14 @@ Static analysis stays in the rest of rdis; this is only for live inspection.
 import shutil, subprocess, tempfile, os
 
 
+def _lldb_quote(value):
+    """Quote one untrusted scalar as a single LLDB command argument."""
+    value = str(value)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("LLDB argument contains a control character")
+    return '"' + value.replace("\\\\", "\\\\\\\\").replace('"', '\\\\"') + '"'
+
+
 def _lldb():
     exe = shutil.which("lldb")
     if exe:
@@ -27,7 +35,7 @@ class Debugger:
 
     def script(self, commands, timeout=60):
         """Run a list of lldb commands in batch mode and return combined output."""
-        lines = [f"target create {self.path!r}"] + list(commands) + ["quit"]
+        lines = [f"target create {_lldb_quote(self.path)}"] + list(commands) + ["quit"]
         with tempfile.NamedTemporaryFile("w", suffix=".lldb", delete=False) as f:
             f.write("\n".join(lines) + "\n")
             src = f.name
@@ -47,8 +55,8 @@ class Debugger:
         """
         cmds = []
         if stop_at:
-            cmds.append(f"breakpoint set --name {stop_at}")
-        cmds.append("run " + " ".join(args or []))
+            cmds.append(f"breakpoint set --name {_lldb_quote(stop_at)}")
+        cmds.append("run " + " ".join(_lldb_quote(arg) for arg in (args or [])))
         cmds += show or []
         return self.script(cmds, timeout)
 
@@ -56,9 +64,13 @@ class Debugger:
         return self.run(stop_at=stop_at, show=["register read"])
 
     def disassemble_live(self, stop_at="main", count=10):
+        count = max(1, min(int(count), 256))
         return self.run(stop_at=stop_at, show=[f"disassemble --count {count} --pc"])
 
     def memory(self, expr, count=16, stop_at="main"):
+        count = max(1, min(int(count), 4096))
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in str(expr)):
+            raise ValueError("LLDB expression contains a control character")
         return self.run(stop_at=stop_at, show=[f"memory read --count {count} {expr}"])
 
     def backtrace(self, stop_at="main"):
