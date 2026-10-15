@@ -475,22 +475,25 @@ def _upload(raw, name):
     # per-call temp and atomically rename, or two concurrent writers truncate each other's file and
     # a reader sees a torn, partial binary.
     if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
-        used = containers._directory_size(CFG["upload_dir"])
-        limit = CFG["max_upload_storage_mb"] << 20
-        if used + len(raw) > limit:
-            raise containers.StorageLimitError(
-                f"upload/cache storage quota exceeded ({used + len(raw)} > {limit} bytes); "
-                "remove unused files from the upload/cache directory or raise --max-upload-storage-mb"
-            )
-        import tempfile
-        fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(raw)
-            os.replace(tmp, path)   # atomic on the same filesystem
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
+        # Share the cache writer lock so parallel uploads and archive extractions cannot
+        # independently pass the quota check and oversubscribe the same directory.
+        with containers._STORAGE_WRITE_LOCK:
+            used = containers._directory_size(CFG["upload_dir"])
+            limit = CFG["max_upload_storage_mb"] << 20
+            if used + len(raw) > limit:
+                raise containers.StorageLimitError(
+                    f"upload/cache storage quota exceeded ({used + len(raw)} > {limit} bytes); "
+                    "remove unused files from the upload/cache directory or raise --max-upload-storage-mb"
+                )
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(raw)
+                os.replace(tmp, path)   # atomic on the same filesystem
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
     uploads = session()["uploads"]
     uploads[digest[:16]] = {"path": path, "name": safe}
     # Token metadata is small but user-controlled upload repetition must not grow it forever.
