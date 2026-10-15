@@ -22,7 +22,7 @@ from .decompile import Decompiler
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24}
+       "max_analyses": 24, "max_uploads_per_session": 32}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
 
 # Per-visitor workspaces (cookie `rdis_sid`): one visitor's documents, renames and navigation never
@@ -478,7 +478,13 @@ def _upload(raw, name):
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
-    session()["uploads"][digest[:16]] = {"path": path, "name": safe}
+    uploads = session()["uploads"]
+    uploads[digest[:16]] = {"path": path, "name": safe}
+    # A session may keep opening new files indefinitely; bound token metadata as well as document
+    # tabs. Evict the oldest token reference only (the shared content-addressed file may still be
+    # referenced by another session or open document).
+    while len(uploads) > CFG["max_uploads_per_session"]:
+        uploads.pop(next(iter(uploads)))
     return {"token": digest[:16], "name": safe, "size": len(raw), "sha256": digest, "slices": slices(path)}
 
 
