@@ -12,7 +12,7 @@ This is a coverage plan, not a claim that every case already exists.
 | CFG | Branches, loops, jump tables, indirect edges, tail calls, exceptions | Edge accuracy and deterministic output |
 | IR | Width/sign, overflow, flags, memory, unsupported opcode | Equivalent semantics or explicit unsupported state |
 | SIMD | Lane order, saturation, shifts, reductions, conversions | Lane-by-lane equivalence |
-| WASM | Invalid LEB128, section/index mismatch, stack type errors | Explicit validation error, no crash |
+| WASM | Invalid LEB128, section/index mismatch, stack type errors, 259 deterministic malformed/mutated inputs | Explicit validation error; malformed inputs must not leak low-level parser exceptions |
 | Metadata | JNI/ObjC/Swift/symbols, missing/partial/versioned metadata | Bounded parsing and explicit uncertainty |
 | HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions, aggregate upload/cache quota | Bounded response, correct status, isolation; quota regressions added |
 | MCP | Valid/invalid tool calls, malformed JSON-RPC, large output, file replacement | Protocol errors and current analysis |
