@@ -74,8 +74,11 @@ jobs:
           rdis-gui --multi-user --host 127.0.0.1 --port 8781 --no-open >/tmp/rdis-server.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8781/ >/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:8781/ >/dev/null; then ready=1; break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
             sleep 1
           done
+          if [ "$ready" -ne 1 ]; then cat /tmp/rdis-server.log; exit 1; fi
           python tests/concurrency_test.py http://127.0.0.1:8781
