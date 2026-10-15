@@ -11,7 +11,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M4 | Disassembly/function/CFG correctness | IN PROGRESS | Per-architecture discovery fixtures pass; precision/recall measured |
 | M5 | IR and decompiler semantics | IN PROGRESS | Execution-based semantic corpus passes; unsupported cases counted |
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
-| M7 | UI, CLI, API, rendering | IN PROGRESS | End-to-end workflows, escaping and schema tests pass |
+| M7 | UI, CLI, API, rendering | IN PROGRESS | CFG overview/detail layouts, conditional-edge labels, entry-block highlight and large-graph fit added; end-to-end browser verification still required |
 | M8 | Fuzzing and differential tests | IN PROGRESS | Fuzz campaign triaged; all crashes minimized into regression tests |
 | M9 | Performance and scale | PLANNED | Reproducible baseline and before/after results recorded |
 | M10 | Packaging and release | IN PROGRESS | Clean source/wheel/container install and entry points verified |
