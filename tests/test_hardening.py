@@ -89,6 +89,25 @@ class ContainerHardeningTests(unittest.TestCase):
                         containers._decompress(source, os.path.join(td, "cache"), invalid)
 
 
+class MalformedInputFuzzSmokeTests(unittest.TestCase):
+    def test_deterministic_webassembly_mutations_never_leak_low_level_exceptions(self):
+        import random
+        from rdis.wasm import WasmModule
+
+        rng = random.Random(0x52444953)
+        valid_header = b"\\0asm\\x01\\0\\0\\0"
+        corpus = [b"", b"\\0asm", valid_header]
+        for n in range(256):
+            payload = bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 96)))
+            corpus.append((valid_header + payload) if n % 2 == 0 else payload)
+        for index, payload in enumerate(corpus):
+            with self.subTest(case=index):
+                try:
+                    WasmModule(payload)
+                except ValueError:
+                    pass
+
+
 class AggregateStorageQuotaTests(unittest.TestCase):
     def test_atomic_extraction_cache_rejects_aggregate_overflow_and_cleans_temp(self):
         with tempfile.TemporaryDirectory() as td:
