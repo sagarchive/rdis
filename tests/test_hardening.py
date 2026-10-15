@@ -523,6 +523,7 @@ class BrowserCFGSourceTests(unittest.TestCase):
         html = (Path(__file__).resolve().parents[1] / "rdis" / "web" / "index.html").read_text()
         self.assertIn('svg.querySelector("g.graph")', html)
         self.assertIn('zoomAt(Math.pow(1.0018, -delta)', html)
+        self.assertIn('Math.max(0.005, scale * factor)', html)
         self.assertIn('Shift+wheel to pan', html)
         self.assertIn('new XMLSerializer().serializeToString(copy)', html)
         self.assertIn('const resolve = s => s.replace(/var\\(', html)
