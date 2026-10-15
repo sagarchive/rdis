@@ -474,10 +474,10 @@ def _upload(raw, name):
     # content-addressed, so identical uploads from different visitors share one file. Write to a
     # per-call temp and atomically rename, or two concurrent writers truncate each other's file and
     # a reader sees a torn, partial binary.
-    if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
-        # Share the cache writer lock so parallel uploads and archive extractions cannot
-        # independently pass the quota check and oversubscribe the same directory.
-        with containers._STORAGE_WRITE_LOCK:
+    # Serialize the existence check, quota calculation and atomic write together: concurrent
+    # duplicate uploads must not count the same content twice or bypass the shared quota.
+    with containers._STORAGE_WRITE_LOCK:
+        if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
             used = containers._directory_size(CFG["upload_dir"])
             limit = CFG["max_upload_storage_mb"] << 20
             if used + len(raw) > limit:
