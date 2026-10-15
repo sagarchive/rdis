@@ -95,8 +95,8 @@ class MalformedInputFuzzSmokeTests(unittest.TestCase):
         from rdis.wasm import WasmModule
 
         rng = random.Random(0x52444953)
-        valid_header = b"\\0asm\\x01\\0\\0\\0"
-        corpus = [b"", b"\\0asm", valid_header]
+        valid_header = b"\0asm\x01\0\0\0"
+        corpus = [b"", b"\0asm", valid_header]
         for n in range(256):
             payload = bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 96)))
             corpus.append((valid_header + payload) if n % 2 == 0 else payload)
