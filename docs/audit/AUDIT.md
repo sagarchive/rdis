@@ -52,3 +52,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** slow/incomplete requests could occupy handler threads; ambiguous/chunked framing was not an explicitly supported contract.
 - **Change:** add a socket timeout, reject Transfer-Encoding and duplicate/malformed/missing Content-Length, detect incomplete bodies, validate port/upload limit, and cap concurrent handler workers with a 503 response under saturation.
 - **Verification:** runtime HTTP negative tests and concurrency stress tests remain pending.
+
+### RDIS-AUDIT-009 — WebAssembly parser had unbounded/truncated section reads
+
+- **Area:** M2/M4, `rdis/wasm.py`
+- **Evidence:** LEB128/name helpers indexed or sliced without validating input bounds; section sizes could extend past the module; malformed sections were silently swallowed.
+- **Failure mode:** truncated input could raise low-level exceptions or be accepted as a partial module without a visible parse warning.
+- **Change:** add header/section bounds checks, bounded LEB128/name reads, bounded constant-expression scanning, common non-function import descriptor skipping, and recorded section errors.
+- **Verification:** malformed-header/section/LEB/name regression tests added; CI result pending.
