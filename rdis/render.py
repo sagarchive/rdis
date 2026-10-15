@@ -163,8 +163,14 @@ def to_dot(prog, func, detail=False):
         taken = prog.arch.target(last)
         k = prog.arch.kind(last)
         for s in b.succs:
-            color = "green" if k == CJMP and s == taken else "red" if k == CJMP else "blue"
-            label = ' label="T"' if k == CJMP and s == taken else ' label="F"' if k == CJMP else ""
+            branch_known = k == CJMP and taken is not None and taken in b.succs
+            if branch_known:
+                color = "green" if s == taken else "red"
+                label = ' label="T"' if s == taken else ' label="F"'
+            elif k == CJMP:
+                color, label = "gray", ""  # do not claim taken/not-taken when the target is unresolved
+            else:
+                color, label = "blue", ""
             back = " constraint=false" if s <= a else ""   # loop edge: don't distort the ranks
             out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{label}{back}];')
     return "\n".join(out + ["}"])
