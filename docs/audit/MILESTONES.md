@@ -1,4 +1,4 @@
-# RDIS Precision Engineering Milestones
+# RDIS Engineering Milestones
 
 Milestones are not complete until their acceptance gates have reproducible evidence. This PR is an initial hardening tranche; it does not claim the full programme is complete.
 
