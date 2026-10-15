@@ -94,6 +94,13 @@ class StorageLimitError(ValueError):
 _STORAGE_WRITE_LOCK = threading.Lock()
 
 
+def _validate_total_limit(max_total_mb):
+    if max_total_mb is not None and (
+        not isinstance(max_total_mb, int) or isinstance(max_total_mb, bool) or max_total_mb < 1
+    ):
+        raise ValueError("max_total_mb must be a positive integer")
+
+
 def _directory_size(path):
     total = 0
     if not os.path.isdir(path):
@@ -190,6 +197,7 @@ def _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=None):
     import tarfile
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
         raise ValueError("max_mb must be a positive integer")
+    _validate_total_limit(max_total_mb)
     with tarfile.open(path) as t:
         m = next((m for m in _tar_members(t) if m.name == entry and m.isfile()), None)
         if m is None:
@@ -306,6 +314,7 @@ def _archive_slices(path):
 def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Attach a DMG read-only, enumerate native binaries (or extract one). Returns slice list, or
     the extracted file path when `_extract_entry` is given."""
+    _validate_total_limit(max_total_mb)
     import plistlib
     import subprocess
     try:
@@ -372,6 +381,7 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=Non
     zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
     if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
         raise ValueError("max_mb must be a positive integer")
+    _validate_total_limit(max_total_mb)
     import tarfile
     import zipfile
     if entry == DECOMP:
