@@ -7,7 +7,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M0 | Baseline, inventory, evidence discipline | IN PROGRESS | Clean-environment test baseline recorded |
 | M1 | Cache/document identity and concurrency | IN PROGRESS | Exact-content invalidation and concurrency tests pass |
 | M2 | Binary/container safety and address mapping | IN PROGRESS | Bounded extraction and address interval tests pass |
-| M3 | Web/MCP/debugger/plugin trust boundaries | IN PROGRESS | Threat model and negative security tests pass |
+| M3 | Web/MCP/debugger/plugin trust boundaries | IN PROGRESS | Bounded workers/analyses, request timeouts and configurable aggregate upload/extraction quota added; cleanup/retention and deployment security review remain open |
 | M4 | Disassembly/function/CFG correctness | IN PROGRESS | Per-architecture discovery fixtures pass; precision/recall measured |
 | M5 | IR and decompiler semantics | IN PROGRESS | Execution-based semantic corpus passes; unsupported cases counted |
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
