@@ -13,7 +13,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
 | M7 | UI, CLI, API, rendering | IN PROGRESS | CFG overview/detail layouts, T/F labels only when branch targets are known, unresolved-edge styling, entry-block highlight and large-graph fit added; end-to-end browser verification still required |
 | M8 | Fuzzing and differential tests | IN PROGRESS | Deterministic malformed-WebAssembly mutation smoke test added to CI; sustained fuzz campaign and crash minimization remain open |
-| M9 | Performance and scale | PLANNED | Reproducible baseline and before/after results recorded |
+| M9 | Performance and scale | IN PROGRESS | Repeatable single-binary benchmark harness and CI smoke baseline added; fixed-corpus cold/warm and concurrent p50/p95 baselines still required |
 | M10 | Packaging and release | IN PROGRESS | Clean source/wheel/container install and entry points verified |
 
 ## M0 — Baseline
