@@ -618,6 +618,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     """Cap simultaneous request handlers so slow clients cannot spawn unlimited threads."""
     daemon_threads = True
     block_on_close = False
+    request_queue_size = 64  # align the kernel accept backlog with the bounded worker pool
 
     def __init__(self, server_address, handler_class, max_workers=64):
         if max_workers < 1:
