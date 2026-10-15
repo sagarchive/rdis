@@ -595,8 +595,8 @@ class Lifter:
                 self.__dict__.setdefault("_temptype", {})[name] = t
         return name
 
-    _FLT = re.compile(r"\(\(f32x4\)|\b\d+\.\d*(?:e[-+]?\d+)?f\b|\(float\)")
-    _DBL = re.compile(r"\(\(f64x2\)|(?<![\w.])\d+\.\d+(?:e[-+]?\d+)?(?![\w])|\(double\)")
+    _FLT = re.compile(r"\(\(f32x4\)|\b\d+\.\d*(?:e[-+]?\d+)?f\b|\(float\)|\*\(\s*float\s*\*")
+    _DBL = re.compile(r"\(\(f64x2\)|(?<![\w.])\d+\.\d+(?:e[-+]?\d+)?(?![\w])|\(double\)|\*\(\s*double\s*\*")
     _TEMP = re.compile(r"\bt\d+\b")
 
     def _scalar_type(self, expr):
