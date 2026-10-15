@@ -419,6 +419,8 @@ class Program:
         set of registers holding constant addresses, so a table load sees a bound set a block
         earlier. State is reset at a join (a block with >1 predecessor) and after calls."""
         preds = Counter(s for b in func.blocks.values() for s in b.succs)
+        starts = sorted(self.functions)
+        func_end = next((a for a in starts if a > func.addr), None)
         bound, base, jt_targets = None, {}, []
         for addr in sorted(func.blocks):
             b = func.blocks[addr]
@@ -435,7 +437,7 @@ class Program:
                     if i.operands and i.operands[0].type == self._REG:
                         base[self._canon_reg(i.reg_name(i.operands[0].reg))] = r
                 if k == IJMP:
-                    self._jump_table(b, i, base, bound, jt_targets)
+                    self._jump_table(func, func_end, b, i, base, bound, jt_targets)
                 else:
                     self._value_table(i, base, bound)
         return jt_targets
@@ -465,33 +467,44 @@ class Program:
             signed = "ldrs" in i.mnemonic or (self.x86_like and i.mnemonic.startswith("movs"))
             self.value_tables[i.address] = (tbl, scale, bound[1] + 1, signed)
 
-    def _jump_table(self, b, i, base, bound, jt_targets):
-        """Computed goto through int32 offsets relative to the table base (the common clang/gcc
-        form). Reads the offsets, records the switch, and queues the case bodies for discovery."""
-        # a jump table may sit inside the code section (embedded after the branch); the strong
-        # guard is that every recovered offset lands on code, checked below.
-        cand = [a for a in base.values() if self.image.section_at(a)]
-        if not cand or bound is None or not (0 < bound[1] + 1 <= 8192):
+    def _jump_table(self, func, func_end, b, i, base, bound, jt_targets):
+        """Recover an int32-relative jump table only from the actual indexed load feeding
+        this indirect branch. Arbitrary address constants in the block are not table candidates:
+        interpreting them as table bases can turn adjacent function code into fake switch cases."""
+        if bound is None or not (0 < bound[1] + 1 <= 8192):
             return
-        tbl, cases = cand[-1], {}
-        for v in range(bound[1] + 1):
-            raw = self.image.read(tbl + v * 4, 4)
-            if len(raw) < 4:
-                return
-            t = tbl + int.from_bytes(raw, "little", signed=True)
-            if not self.image.is_code(t):
-                return
-            cases[v] = t
-        # the switch value is what indexes the table: find the load from `tbl` in this block and
-        # take its index register; fall back to the compared register.
-        index = self._canon_reg(i.reg_name(bound[0].reg)) if bound[0].type == self._REG else None
-        for j in b.insns:
-            mem = next((o for o in j.operands if o.type == self._MEM), None)
-            if mem is not None and mem.mem.index:        # the table-indexing load gives the real key
-                index = self._canon_reg(j.reg_name(mem.mem.index))
-                break
-        self.jump_tables[i.address] = {"base": tbl, "cases": cases, "index": index}
-        jt_targets.extend(cases.values())
+        candidates = []
+        for insn in b.insns:
+            for mem in (o for o in insn.operands if o.type == self._MEM and o.mem.index):
+                breg = self._canon_reg(insn.reg_name(mem.mem.base)) if mem.mem.base else None
+                tbl = base.get(breg)
+                if tbl is None or self.image.section_at(tbl) is None:
+                    continue
+                scale = mem.mem.scale if self.x86_like else (
+                    1 << mem.shift.value if mem.shift.type == 1 else 1
+                )
+                if scale == 4:
+                    index = self._canon_reg(insn.reg_name(mem.mem.index))
+                    candidates.append((tbl, index))
+        for tbl, index in candidates:
+            cases = {}
+            for value in range(bound[1] + 1):
+                raw = self.image.read(tbl + value * 4, 4)
+                if len(raw) < 4:
+                    break
+                target = tbl + int.from_bytes(raw, "little", signed=True)
+                # A recovered case must belong to this function's address range. Merely landing
+                # in any executable section is insufficient: it can accidentally absorb the next
+                # function and generate a plausible but semantically unrelated CFG.
+                if (not self.image.is_code(target) or target < func.addr or
+                        (func_end is not None and target >= func_end)):
+                    break
+                cases[value] = target
+            if len(cases) != bound[1] + 1:
+                continue
+            self.jump_tables[i.address] = {"base": tbl, "cases": cases, "index": index}
+            jt_targets.extend(cases.values())
+            return
 
     def _split(self, start, insns, delays=()):
         leaders = {start}
