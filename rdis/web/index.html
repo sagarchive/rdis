@@ -883,13 +883,13 @@ async function showCFG(addr, detail = false) {
   const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
   const v = $("#view");
   v.innerHTML = `<div id="graph"><div id="ghud">
-      <button class="ib" id="zin" title="Zoom in">＋</button>
-      <button class="ib" id="zout" title="Zoom out">－</button>
+      <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
+      <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
-      <button class="ib" id="zfit" title="Zoom to fit">⤢</button>
-      <button class="ib" id="z100" title="Reset to 100%">1:1</button>
+      <button class="ib" id="zfit" aria-label="Fit graph to view" title="Zoom to fit">⤢</button>
+      <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
       <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
-      <button class="ib" id="zsvg" title="Download SVG">⤓</button>
+      <button class="ib" id="zsvg" aria-label="Download graph as SVG" title="Download SVG">⤓</button>
     </div>
     <div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>
   </div>`;
@@ -904,7 +904,7 @@ async function showCFG(addr, detail = false) {
     crumbs(d.name, d.addr, "");
     return;
   }
-  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · double-click a node for listing</div>`);
+  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing</div>`);
   let svg;
   try {
     S.viz = S.viz || await Viz.instance();
@@ -923,13 +923,18 @@ async function showCFG(addr, detail = false) {
   let scale = 1, tx = 0, ty = 0;
   const apply = () => { svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; $("#zval").textContent = Math.round(scale * 100) + "%"; };
   const fit = (retry = true) => {
-    const bb = svg.getBBox();
-    if (!bb.width || !bb.height) { if (retry) requestAnimationFrame(() => fit(false)); return; }
-    const availW = Math.max(80, g.clientWidth - 56), availH = Math.max(80, g.clientHeight - 72);
-    // Very large functions need to zoom out further than a fixed minimum allowed.
-    scale = Math.max(0.025, Math.min(availW / bb.width, availH / bb.height, 1.4));
+    // Fit actual graph geometry (nodes, labels and edges), not the outer SVG viewport.
+    const target = svg.querySelector("g.graph") || svg;
+    let bb;
+    try { bb = target.getBBox(); } catch { bb = null; }
+    if (!bb || !bb.width || !bb.height) {
+      if (retry) requestAnimationFrame(() => fit(false));
+      return;
+    }
+    const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
+    scale = Math.max(0.015, Math.min(availW / bb.width, availH / bb.height, 1.25));
     tx = (g.clientWidth - bb.width * scale) / 2 - bb.x * scale;
-    ty = Math.max(16, (g.clientHeight - bb.height * scale) / 2) - bb.y * scale;
+    ty = (g.clientHeight - bb.height * scale) / 2 - bb.y * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
@@ -943,13 +948,18 @@ async function showCFG(addr, detail = false) {
     pan = {x: e.clientX, y: e.clientY, tx, ty}; g.classList.add("panning"); g.setPointerCapture(e.pointerId); };
   g.onpointermove = e => { if (!pan) return; tx = pan.tx + e.clientX - pan.x; ty = pan.ty + e.clientY - pan.y; apply(); };
   g.onpointerup = g.onpointercancel = () => { pan = null; g.classList.remove("panning"); };
-  // wheel = pan the graph (natural scrolling); ⌘/Ctrl+wheel = zoom at the cursor
+  // Wheel zooms around the pointer; drag pans. Shift+wheel pans for trackpads and keyboards.
   g.onwheel = e => {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const r = g.getBoundingClientRect();
-      zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
-    } else { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+    if (e.shiftKey) {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) tx -= e.deltaX;
+      else ty -= e.deltaY;
+      apply();
+      return;
+    }
+    const r = g.getBoundingClientRect();
+    const delta = Math.max(-240, Math.min(240, e.deltaY + e.deltaX));
+    zoomAt(Math.pow(1.0018, -delta), e.clientX - r.left, e.clientY - r.top);
   };
   $("#zin").onclick = () => zoomAt(1.25, g.clientWidth / 2, g.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
