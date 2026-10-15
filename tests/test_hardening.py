@@ -125,6 +125,30 @@ class SectionLookupTests(unittest.TestCase):
             self.assertIs(image.section_at(address), expected, f"address={address:#x}")
 
 
+
+class ServerCacheIdentityTests(unittest.TestCase):
+    def test_shared_analysis_invalidates_same_path_same_size_and_mtime(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "binary.bin")
+            with open(path, "wb") as f:
+                f.write(b"AAAA")
+            original_stat = os.stat(path)
+            old_cache = rdis_server.ANALYSES.copy()
+            rdis_server.ANALYSES.clear()
+            try:
+                with mock.patch.object(rdis_server, "_analyze", side_effect=lambda *args: object()) as analyze:
+                    first = rdis_server._shared_analysis(path, "arm64", True, True, True, "raw", 0)
+                    with open(path, "wb") as f:
+                        f.write(b"BBBB")
+                    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+                    second = rdis_server._shared_analysis(path, "arm64", True, True, True, "raw", 0)
+                self.assertIsNot(first, second)
+                self.assertEqual(analyze.call_count, 2)
+            finally:
+                rdis_server.ANALYSES.clear()
+                rdis_server.ANALYSES.update(old_cache)
+
+
 class CacheIdentityTests(unittest.TestCase):
     def setUp(self):
         self.old_cache = mcp_server._CACHE.copy()
