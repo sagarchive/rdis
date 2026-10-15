@@ -117,6 +117,15 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
                                   if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
                 if generated:
                     detail += " | decompiled body: " + generated.replace("\n", " ; ")[:2200]
+                try:
+                    addr = prog.resolve("_" + fn_name[4:])
+                    func = prog.functions.get(addr)
+                    if func:
+                        asm = "; ".join(f"{ins.address:#x} {ins.mnemonic} {ins.op_str}"
+                                        for block in func.blocks.values() for ins in block.insns)
+                        detail += " | original instructions: " + asm[:2600]
+                except Exception:
+                    pass
         return [f"decompiled C did not compile ({arch}): " + detail + f"  [{hfile}]"]
     r = subprocess.run(runner + [hbin], capture_output=True, text=True, timeout=8)
     out = r.stdout.splitlines()
