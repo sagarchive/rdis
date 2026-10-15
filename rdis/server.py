@@ -557,7 +557,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _err(self, e):
-        code = 404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
+        code = 503 if isinstance(e, TimeoutError) else \
+               404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
                403 if isinstance(e, PermissionError) else 400
         return self._send(code, json.dumps({"error": f"{e}"}), "application/json")
 
