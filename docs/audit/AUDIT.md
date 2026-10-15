@@ -76,3 +76,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** CI or automation could treat a failed execution-checked decompilation suite as a successful command.
 - **Change:** exit with status 1 whenever any case fails.
 - **Verification:** macOS CI now runs the product self-check and maturity suite; results pending.
+
+### RDIS-AUDIT-012 — Jump-table recovery could absorb adjacent function code
+
+- **Area:** M4/M5, `rdis/analysis.py`
+- **Evidence:** macOS execution-checked regression run produced a decompiled `sw(int)` function containing `strsum`'s loop, a pointer-typed switch key, and labels whose targets were not emitted. The original instruction trace showed an indexed table load and a separate ADR-relative target base.
+- **Failure mode:** any executable-section address constant could be mistaken for the jump-table storage base; int32 offsets were then added to the wrong base and accepted merely because the result was in an executable section.
+- **Change:** only consider actual indexed loads with scale 4; separate table storage address from branch-relative target base; require all recovered targets to remain within the owning function's address interval.
+- **Verification:** the full macOS differential suite is rerunning after this fix; closure depends on all relevant execution tests passing.
