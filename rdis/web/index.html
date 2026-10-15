@@ -882,7 +882,7 @@ function showDecl(it) { pseudoView(it.decl, it.name, ""); $("#crMode").textConte
 async function showCFG(addr, detail = false) {
   const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
   const v = $("#view");
-  v.innerHTML = `<div id="graph"><div id="ghud">
+  v.innerHTML = `<div id="graph" role="application" aria-label="Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."><div id="ghud">
       <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
       <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
@@ -999,10 +999,18 @@ async function showCFG(addr, detail = false) {
   // node interactions
   svg.querySelectorAll("g.node").forEach(n => {
     n.style.cursor = "pointer";
+    const title = n.querySelector("title");
+    n.setAttribute("tabindex", "0");
+    n.setAttribute("role", "button");
+    n.setAttribute("aria-label", "Basic block " + (title?.textContent || ""));
     n.onclick = () => { const t = n.querySelector("title"); if (!t) return;
       svg.querySelectorAll(".node.cur").forEach(x => markNode(x, false));
       markNode(n, true);
       S.sel = t.textContent; inspectAddr(S.sel); statusCursor(S.sel); };
+    n.onkeydown = e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); n.click(); }
+      else if (e.key === "Enter" && e.shiftKey && title) go(title.textContent, {mode: "listing"});
+    };
     n.ondblclick = () => { const t = n.querySelector("title"); if (t) go(t.textContent, {mode: "listing"}); };
     n.oncontextmenu = e => { e.preventDefault(); const t = n.querySelector("title"); if (t) { S.sel = t.textContent; navMenu(e, S.sel, ""); } };
   });
