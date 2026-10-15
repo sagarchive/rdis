@@ -42,9 +42,8 @@ try {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
   page.on("pageerror", e => { throw e; });
-  const viz = fs.readFileSync("node_modules/@viz-js/viz/lib/viz-standalone.js", "utf8");
-  await page.route("https://cdn.jsdelivr.net/npm/@viz-js/viz@3.2.4/lib/viz-standalone.js", route =>
-    route.fulfill({ status: 200, contentType: "application/javascript", body: viz }));
+  // Exercise the same pinned viz.js CDN resource that the real UI uses.
+  // The browser CI job has network access; no alternate renderer is substituted.
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
     const endpoint = url.pathname.split("/").pop();
