@@ -21,6 +21,18 @@ PRELUDE = """#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+/* Clang releases before the generic bit-count builtins: preserve the zero fallback
+   argument and width semantics used by the decompiler's C output. */
+#if !__has_builtin(__builtin_clzg)
+#define __builtin_clzg(x, fallback) ((x) == 0 ? (fallback) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#endif
+#if !__has_builtin(__builtin_ctzg)
+#define __builtin_ctzg(x, fallback) ((x) == 0 ? (fallback) : __builtin_ctzll((unsigned long long)(x)))
+#endif
 typedef void *id;
 typedef void *SEL;
 """
