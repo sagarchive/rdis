@@ -11,7 +11,7 @@ import zipfile
 import unittest
 from unittest.mock import patch
 
-from rdis import containers
+from rdis import cache, containers
 from rdis.arch import make
 from rdis.loader import Image, Section
 from rdis import mcp_server, server
@@ -154,6 +154,28 @@ class PrecisionRegressionTests(unittest.TestCase):
             self.assertEqual(mcp_server.t_list_functions("ignored", limit=-1)["functions"], [])
             with self.assertRaises(ValueError):
                 mcp_server.t_list_functions("ignored", limit="all")
+
+    def test_persistent_cache_hash_includes_new_and_changed_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = os.path.join(tmp, "cache.py")
+            with open(module, "w") as stream:
+                stream.write("# fixture cache module")
+            with open(os.path.join(tmp, "analysis.py"), "w") as stream:
+                stream.write("version = 1")
+            previous = cache.__file__
+            try:
+                cache.__file__ = module
+                first = cache._code_hash()
+                with open(os.path.join(tmp, "objc.py"), "w") as stream:
+                    stream.write("version = 1")
+                second = cache._code_hash()
+                with open(os.path.join(tmp, "objc.py"), "w") as stream:
+                    stream.write("version = 2")
+                third = cache._code_hash()
+                self.assertNotEqual(first, second)
+                self.assertNotEqual(second, third)
+            finally:
+                cache.__file__ = previous
 
 
 if __name__ == "__main__":
