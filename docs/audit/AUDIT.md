@@ -37,3 +37,18 @@ Change: prefix maximum interval ends allow termination only when all earlier sec
 
 ## Open gaps
 Full suite/runtime baseline, complete line-level review, architecture semantic coverage, web quota/cleanup tests, penetration testing, sustained fuzzing, performance baselines and independent reproduction of README claims remain open.
+### RDIS-AUDIT-007 — Persistent cache version identity omitted the entry point and several analysis modules
+
+- **Area:** M1, `rdis/cache.py`
+- **Evidence:** cache key options omitted `image.entry`; code fingerprint previously covered only a small subset of modules that can influence the saved Program snapshot.
+- **Failure mode:** different entry-point configurations or changes in analysis/metadata-related code could leave old snapshots eligible for reuse.
+- **Change:** include the image entry point in cache options and expand the code fingerprint to analysis, architecture, loader, raw loader, JNI, Objective-C, Swift, demangling, type library, plugins, and cache code.
+- **Verification:** focused cache-option tests and full cache restore tests remain to be added/run.
+
+### RDIS-AUDIT-008 — HTTP request handling lacked a request timeout and explicit framing rejection
+
+- **Area:** M3, `rdis/server.py`
+- **Evidence:** request bodies were read using Content-Length without an explicit socket timeout; Transfer-Encoding was not rejected.
+- **Failure mode:** slow/incomplete requests could occupy handler threads; ambiguous/chunked framing was not an explicitly supported contract.
+- **Change:** add a socket timeout, reject Transfer-Encoding and duplicate/malformed/missing Content-Length, detect incomplete bodies, validate port/upload limit, and cap concurrent handler workers with a 503 response under saturation.
+- **Verification:** runtime HTTP negative tests and concurrency stress tests remain pending.
