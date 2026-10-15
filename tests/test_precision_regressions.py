@@ -53,6 +53,9 @@ class PrecisionRegressionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "truncated WebAssembly section"):
             WasmModule(b"\0asm\x01\0\0\0\x01\x05\x60")
 
+        with self.assertRaisesRegex(ValueError, "truncated unsigned LEB128"):
+            WasmModule(b"\0asm\x01\0\0\0\x01\x80")
+
     def test_tar_extraction_cache_tracks_archive_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive = os.path.join(tmp, "package.tar")
