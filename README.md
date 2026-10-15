@@ -51,6 +51,10 @@ fewer verified idioms than arm64/x86-64. MIPS and RISC-V decompile through the I
 tested on Debian's static busybox (1,200 functions, 0 failures). The pseudo-code is a reconstruction
 of what the machine code computes, not the original source.
 
+## Engineering audit
+
+The source audit and milestone programme live in [`docs/audit/`](docs/audit/MILESTONES.md). The dossier tracks findings with evidence labels, defines acceptance gates for M0–M10, documents the threat model and test matrix, and distinguishes completed work from items still requiring runtime verification. See [known audit limitations](docs/audit/KNOWN_LIMITATIONS.md) before interpreting any unverified finding.
+
 ## Install
 
 rdis needs Python 3.9 or newer and git. It installs into its own virtual environment.
