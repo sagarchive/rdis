@@ -82,8 +82,14 @@ def _decompress(path, cache_dir, max_mb):
     if op is None:
         return None
     os.makedirs(cache_dir, exist_ok=True)
-    st = os.stat(path)   # size+mtime too: a re-written local file must not reuse a stale output
-    tag = hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}|decomp".encode()).hexdigest()[:16]
+    st = os.stat(path)
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    tag = hashlib.sha256(
+        f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}|{digest.hexdigest()}|decomp".encode()
+    ).hexdigest()[:20]
     out = os.path.join(cache_dir, f"{tag}-{os.path.basename(path).rsplit('.', 1)[0][:48] or 'bin'}")
     limit = max(0, int(max_mb)) << 20
     if not os.path.exists(out):
@@ -334,13 +340,27 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
         if info.file_size > max_mb << 20:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{info.CRC}|{info.file_size}".encode()).hexdigest()[:16]
+        # CRC-32 is useful for corruption detection, but is not a unique content identity.
+        # Include the archive digest so replacement at the same path cannot reuse stale bytes.
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1 << 20), b""):
+                digest.update(chunk)
+        tag = hashlib.sha256(
+            f"{os.path.abspath(path)}|{digest.hexdigest()}|{entry}|{info.CRC}|{info.file_size}".encode()
+        ).hexdigest()[:20]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "lib"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == info.file_size):
+            limit = max(0, int(max_mb)) << 20
             def fill(f):
                 with z.open(entry) as src:
-                    f.write(src.read(max_mb << 20))
+                    data = src.read(limit + 1)
+                    if len(data) > limit or src.read(1):
+                        raise ValueError(f"archive member larger than {max_mb} MB")
+                    if len(data) != info.file_size:
+                        raise ValueError(f"archive member size mismatch: expected {info.file_size}, read {len(data)}")
+                    f.write(data)
             _write_atomic(cache_dir, out, fill)
     return out
 
