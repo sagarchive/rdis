@@ -74,7 +74,7 @@ class WasmModule:
         self.start = None
         if len(data) < 8:
             raise ValueError("truncated WebAssembly header")
-        if data[:4] != b"\\0asm":
+        if data[:4] != b"\0asm":
             raise ValueError("not a WebAssembly module")
         self.version = struct.unpack_from("<I", data, 4)[0]
         if self.version != 1:
