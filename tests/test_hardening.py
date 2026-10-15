@@ -527,6 +527,10 @@ class BrowserCFGSourceTests(unittest.TestCase):
         self.assertIn('new XMLSerializer().serializeToString(copy)', html)
         self.assertIn('const resolve = s => s.replace(/var\\(', html)
         self.assertIn('aria-label="Fit graph to view"', html)
+        self.assertIn('role="region" aria-label="Control-flow graph.', html)
+        self.assertIn('n.setAttribute("tabindex", "0")', html)
+        self.assertIn('n.setAttribute("role", "button")', html)
+        self.assertIn('e.key === "Enter" && e.shiftKey', html)
         self.assertIn('replace(/[^a-zA-Z0-9._-]+/g, "_")', html)
 
 
