@@ -291,6 +291,45 @@ class WasmBoundsTests(unittest.TestCase):
 
 
 
+class CFGLayoutTests(unittest.TestCase):
+    def test_overview_cfg_is_compact_and_detail_mode_preserves_more_instructions(self):
+        from types import SimpleNamespace
+        from rdis.render import to_dot
+
+        class FakeArch:
+            def kind(self, insn):
+                return 0
+            def data_refs(self, insn, state):
+                return []
+
+        class FakeProgram:
+            arch = FakeArch()
+            comments = {}
+            objc = None
+            functions = {}
+            image = SimpleNamespace(imports={})
+
+            def display(self, addr):
+                return ""
+
+            def call_target(self, insn, state):
+                return None
+
+            def strings(self):
+                return {}
+
+        instructions = [SimpleNamespace(address=0x1000 + i * 4, mnemonic="mov",
+                                        op_str=f"r0, #{i}") for i in range(20)]
+        block = SimpleNamespace(addr=0x1000, shown=instructions, insns=instructions, succs=[])
+        func = SimpleNamespace(addr=0x1000, blocks={0x1000: block})
+        prog = FakeProgram()
+        overview = to_dot(prog, func)
+        detail = to_dot(prog, func, detail=True)
+        self.assertLess(overview.count(r"\\l"), detail.count(r"\\l"))
+        self.assertIn("ranksep=\\"0.62 equally\\"", overview)
+        self.assertIn("pad=0.22", overview)
+
+
 class RenderingSafetyTests(unittest.TestCase):
     def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
         source = "line one\nline two \"quoted\" \\\\ tail"
