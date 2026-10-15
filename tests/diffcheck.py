@@ -28,10 +28,16 @@ PRELUDE = """#include <stdint.h>
 /* Clang releases before the generic bit-count builtins: preserve the zero fallback
    argument and width semantics used by the decompiler's C output. */
 #if !__has_builtin(__builtin_clzg)
-#define __builtin_clzg(x, fallback) ((x) == 0 ? (fallback) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#define RDIS_CLZG_ONE(x) ((x) == 0 ? (int)(sizeof(x) * CHAR_BIT) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#define RDIS_CLZG_TWO(x, fallback) ((x) == 0 ? (fallback) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#define RDIS_CLZG_PICK(_1, _2, NAME, ...) NAME
+#define __builtin_clzg(...) RDIS_CLZG_PICK(__VA_ARGS__, RDIS_CLZG_TWO, RDIS_CLZG_ONE)(__VA_ARGS__)
 #endif
 #if !__has_builtin(__builtin_ctzg)
-#define __builtin_ctzg(x, fallback) ((x) == 0 ? (fallback) : __builtin_ctzll((unsigned long long)(x)))
+#define RDIS_CTZG_ONE(x) ((x) == 0 ? (int)(sizeof(x) * CHAR_BIT) : __builtin_ctzll((unsigned long long)(x)))
+#define RDIS_CTZG_TWO(x, fallback) ((x) == 0 ? (fallback) : __builtin_ctzll((unsigned long long)(x)))
+#define RDIS_CTZG_PICK(_1, _2, NAME, ...) NAME
+#define __builtin_ctzg(...) RDIS_CTZG_PICK(__VA_ARGS__, RDIS_CTZG_TWO, RDIS_CTZG_ONE)(__VA_ARGS__)
 #endif
 typedef void *id;
 typedef void *SEL;
