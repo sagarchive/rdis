@@ -12,7 +12,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M5 | IR and decompiler semantics | IN PROGRESS | Execution-based semantic corpus passes; unsupported cases counted |
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
 | M7 | UI, CLI, API, rendering | IN PROGRESS | CFG overview/detail layouts, conditional-edge labels, entry-block highlight and large-graph fit added; end-to-end browser verification still required |
-| M8 | Fuzzing and differential tests | IN PROGRESS | Fuzz campaign triaged; all crashes minimized into regression tests |
+| M8 | Fuzzing and differential tests | IN PROGRESS | Deterministic malformed-WebAssembly mutation smoke test added to CI; sustained fuzz campaign and crash minimization remain open |
 | M9 | Performance and scale | PLANNED | Reproducible baseline and before/after results recorded |
 | M10 | Packaging and release | IN PROGRESS | Clean source/wheel/container install and entry points verified |
 
