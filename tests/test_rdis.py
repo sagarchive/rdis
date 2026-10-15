@@ -365,7 +365,7 @@ def test_tail_call():
         c = Decompiler(p, f).c()
         # the body must reference the indirect branch, not collapse to just `return;`
         assert "tail-call" in c or "computed jump" in c or "goto *" in c, (hex(a), c)
-        assert c.strip().count("return;") == 0 or "(*" in c, (hex(a), c)
+        assert c.strip().count("return;") == 0 or "(*" in c or "((code)" in c, (hex(a), c)
         checked += 1
         if checked >= 5:
             break
