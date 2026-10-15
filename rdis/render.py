@@ -157,13 +157,14 @@ def to_dot(prog, func, detail=False):
         body = _cfg_block_label(prog, b, limit=line_limit, max_lines=line_count)
         attrs = f'label="{body}" id="n{a:#x}"'
         if a == entry:
-            attrs += ' root=true penwidth=2'   # entry block stands out
+            attrs += ' class="entry" root=true penwidth=2 color="#d9974f"'   # entry block stands out
         out.append(f'  "{a:#x}" [{attrs}];')
         last = b.insns[-1]
         taken = prog.arch.target(last)
         k = prog.arch.kind(last)
         for s in b.succs:
             color = "green" if k == CJMP and s == taken else "red" if k == CJMP else "blue"
+            label = ' label="T"' if k == CJMP and s == taken else ' label="F"' if k == CJMP else ""
             back = " constraint=false" if s <= a else ""   # loop edge: don't distort the ranks
-            out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{back}];')
+            out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{label}{back}];')
     return "\n".join(out + ["}"])
