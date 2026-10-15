@@ -77,6 +77,16 @@ class PrecisionRegressionTests(unittest.TestCase):
                 self.assertEqual(stream.read(), b"MACH")
             self.assertNotEqual(first, second)
 
+    def test_zip_oversize_rejection_leaves_no_partial_cache_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = os.path.join(tmp, "oversized.zip")
+            cache_dir = os.path.join(tmp, "cache")
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("lib/sample.so", b"one byte")
+            with self.assertRaisesRegex(ValueError, "larger than"):
+                containers.extract(archive, "lib/sample.so", cache_dir, 0)
+            self.assertEqual(os.listdir(cache_dir), [])
+
     def test_compressed_cache_tracks_bytes_not_only_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "payload.gz")
