@@ -114,12 +114,16 @@ def disassemble(prog, func):
 
 
 def _dot_label(s, limit=90):
-    """Escape one line of text for a Graphviz quoted (record) label. Backslash and quote must be
-    escaped or the label terminates early and the node box renders with text spilling outside it."""
+    """Escape one line of text for a Graphviz quoted label.
+
+    Remove control characters before escaping DOT metacharacters. User comments and binary-derived
+    strings can contain line breaks or NULs; these must not alter the DOT grammar or create
+    surprising extra lines/nodes in a rendered graph.
+    """
+    s = "".join(ch if ord(ch) >= 32 and ord(ch) != 127 else " " for ch in str(s))
     if len(s) > limit:
         s = s[:limit - 1] + "…"
     return s.replace("\\", "\\\\").replace('"', '\\"')
-
 
 def _cfg_block_label(prog, b, limit=64, max_lines=42):
     """Left-justified basic-block body for a CFG node: `addr  mnemonic operands  ; target`.
