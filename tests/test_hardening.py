@@ -13,6 +13,7 @@ from unittest import mock
 
 from rdis import containers, server as rdis_server
 from rdis.loader import Image, Section
+from rdis.wasm import WasmModule, _name, _uleb
 from rdis import mcp_server
 
 
@@ -213,6 +214,35 @@ class HttpFramingTests(unittest.TestCase):
         )
         self.assertIn(b"400 Bad Request", response)
         self.assertIn(b"incomplete request body", response)
+
+
+class WasmBoundsTests(unittest.TestCase):
+    def test_truncated_header_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "header"):
+            WasmModule(b"\\0asm\\x01")
+
+    def test_section_length_cannot_extend_past_module(self):
+        # Valid magic/version, section 1 claims five bytes but only one byte follows.
+        data = b"\\0asm\\x01\\0\\0\\0\\x01\\x05\\x60"
+        with self.assertRaisesRegex(ValueError, "exceeds module bounds"):
+            WasmModule(data)
+
+    def test_truncated_section_length_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "LEB128"):
+            WasmModule(b"\\0asm\\x01\\0\\0\\0\\x01")
+
+    def test_leb_and_name_helpers_reject_truncated_inputs(self):
+        with self.assertRaisesRegex(ValueError, "LEB128"):
+            _uleb(b"", 0)
+        with self.assertRaisesRegex(ValueError, "name"):
+            _name(b"\\x05ab", 0)
+
+    def test_malformed_section_is_reported_not_silently_discarded(self):
+        # Type-section vector count has an unterminated LEB128.
+        data = b"\\0asm\\x01\\0\\0\\0\\x01\\x01\\x80"
+        module = WasmModule(data)
+        self.assertTrue(any("truncated unsigned LEB128" in error for error in module.errors))
+
 
 
 if __name__ == "__main__":
