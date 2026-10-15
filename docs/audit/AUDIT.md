@@ -51,7 +51,7 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Evidence:** request bodies were read using Content-Length without an explicit socket timeout; Transfer-Encoding was not rejected.
 - **Failure mode:** slow/incomplete requests could occupy handler threads; ambiguous/chunked framing was not an explicitly supported contract.
 - **Change:** add a socket timeout, reject Transfer-Encoding and duplicate/malformed/missing Content-Length, detect incomplete bodies, validate port/upload limit, and cap concurrent handler workers with a 503 response under saturation.
-- **Verification:** runtime HTTP negative tests and concurrency stress tests remain pending.
+- **Verification:** HTTP guards and the 20-visitor isolation/determinism stress test passed in GitHub Actions on macOS/Python 3.12 at commit `b0008467`; Python 3.10/3.12 hardening jobs also passed.
 
 ### RDIS-AUDIT-009 — WebAssembly parser had unbounded/truncated section reads
 
