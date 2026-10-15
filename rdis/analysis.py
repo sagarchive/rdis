@@ -393,7 +393,7 @@ class Program:
             constant read-only data bounded by a preceding compare (an optimized `switch` returning
             a value, a character-class table, etc.).
         self.jump_tables[ijmp_addr]  = {"base", "cases": {case_value: target}} -- a computed goto
-            through a table of int32 offsets relative to the table base.
+            through a table of int32 offsets relative to a code base (often an ADR target) recorded by the branch sequence.
         Jump-table case bodies are added to the owning function (rebuilt with them as extra seeds).
         """
         self.value_tables, self.jump_tables = {}, {}
