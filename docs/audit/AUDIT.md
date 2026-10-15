@@ -108,3 +108,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Change:** recognize typed float/double pointer loads when inferring a pinned temporary's scalar type; add a regression for both widths.
 - **Verification:** focused regression and the execution-based maturity suite passed at commit `ce32ca4b`; the maturity scoreboard was 124/124.
 
+
+
+### RDIS-AUDIT-016 — Upload and extraction cache had no aggregate disk quota
+- **Area:** M2/M3, `rdis/server.py`, `rdis/containers.py`
+- **Evidence:** per-file/member caps did not bound the combined bytes retained by repeated uploads and extracted members.
+- **Failure mode:** repeated valid requests could exhaust the service's writable disk.
+- **Change:** add `--max-upload-storage-mb` (default 1024 MiB), preflight upload writes, enforce the same aggregate limit on atomic extraction-cache writes, serialize quota checks, and return HTTP 507 when storage is exhausted.
+- **Verification:** aggregate upload/cache quota regressions added; current-head CI run pending. Retention/cleanup policy for stale files remains an open follow-up.
