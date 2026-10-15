@@ -53,7 +53,7 @@ of what the machine code computes, not the original source.
 
 ## Engineering audit
 
-The source audit and milestone programme live in [`docs/audit/`](docs/audit/MILESTONES.md). The dossier tracks findings with evidence labels, defines acceptance gates for M0–M10, documents the threat model and test matrix, and distinguishes completed work from items still requiring runtime verification. See [known audit limitations](docs/audit/KNOWN_LIMITATIONS.md) before interpreting any unverified finding.
+The source audit and milestone programme live in [`docs/audit/`](docs/audit/MILESTONES.md). The dossier tracks findings with evidence labels, defines acceptance gates for M0–M10, documents the threat model and test matrix, and distinguishes completed work from items still requiring runtime verification. The [competitor-informed graph and analysis roadmap](docs/audit/COMPETITIVE_RESEARCH.md) compares RDIS with Hopper, IDA, Ghidra and Binary Ninja using official documentation. See [known audit limitations](docs/audit/KNOWN_LIMITATIONS.md) before interpreting any unverified finding.
 
 ## Install
 
