@@ -301,12 +301,22 @@ def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128):
                     if magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe",
                                  b"\x7fELF") or magic[:2] == b"MZ":
                         if _extract_entry == rel:
-                            if os.path.getsize(full) > max_mb << 20:
+                            size = os.path.getsize(full)
+                            limit = max_mb << 20
+                            if size > limit:
                                 raise ValueError(f"disk image member larger than {max_mb} MB")
-                            dst = os.path.join(cache_dir,
-                                               hashlib.sha1((path + rel).encode()).hexdigest()[:16] + "-" + fn)
+                            # The image can be replaced while retaining its path; bind the extraction
+                            # cache to the image bytes and member identity, and write atomically.
+                            tag = hashlib.sha256(
+                                f"{os.path.abspath(path)}|{_file_digest(path)}|{rel}|{size}|{max_mb}".encode()
+                            ).hexdigest()[:24]
+                            dst = os.path.join(cache_dir, tag + "-" + fn)
                             os.makedirs(cache_dir, exist_ok=True)
-                            shutil.copy(full, dst)
+                            if not (os.path.exists(dst) and os.path.getsize(dst) == size):
+                                def fill(out):
+                                    with open(full, "rb") as src:
+                                        _copy_bounded(src, out, limit, expected_size=size)
+                                _write_atomic(cache_dir, dst, fill)
                             return dst
                         slices.append({"entry": rel, "arch": None,
                                        "label": f"{rel}  ({os.path.getsize(full):,} B)"})
@@ -327,6 +337,8 @@ def _arch_of(b):
 def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
     """Extract one archive member to a content-addressed cache file; return its path. Guards against
     zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
     import tarfile
     import zipfile
     if entry == DECOMP:
