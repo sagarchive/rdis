@@ -968,9 +968,33 @@ async function showCFG(addr, detail = false) {
   $("#gdetail").onclick = () => showCFG(addr, !detail);
   $("#gdetail").classList.toggle("on", detail);
   $("#gdetail").setAttribute("aria-pressed", String(detail));
-  $("#zsvg").onclick = () => { const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([svg.outerHTML], {type: "image/svg+xml"}));
-    a.download = `${d.name || "cfg"}.svg`; a.click(); };
+  $("#zsvg").onclick = () => {
+    // Resolve theme variables in a cloned SVG; CSS custom properties are not defined in an
+    // external viewer, so the download must be self-contained and retain readable contrast.
+    const copy = svg.cloneNode(true);
+    const style = getComputedStyle(document.documentElement);
+    const keys = ["--g-node", "--g-edge", "--g-text", "--g-flow", "--accent", "--ok", "--err", "--faint"];
+    const values = Object.fromEntries(keys.map(k => [k, style.getPropertyValue(k).trim()]));
+    const resolve = s => s.replace(/var\((--[\w-]+)(?:\s*,\s*([^)]*))?\)/g, (_, k, fallback) => values[k] || fallback || "currentColor");
+    copy.querySelectorAll("*").forEach(el => {
+      ["style", "fill", "stroke", "color"].forEach(a => { if (el.hasAttribute(a)) el.setAttribute(a, resolve(el.getAttribute(a))); });
+    });
+    copy.querySelectorAll("style").forEach(el => { el.textContent = resolve(el.textContent); });
+    const graph = copy.querySelector("g.graph");
+    let bb;
+    try { bb = graph ? graph.getBBox() : null; } catch { bb = null; }
+    if (bb && bb.width && bb.height) {
+      copy.setAttribute("viewBox", [bb.x - 12, bb.y - 12, bb.width + 24, bb.height + 24].join(" "));
+      copy.setAttribute("width", String(Math.ceil(bb.width + 24)));
+      copy.setAttribute("height", String(Math.ceil(bb.height + 24)));
+    }
+    copy.removeAttribute("style");
+    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const blob = new Blob([new XMLSerializer().serializeToString(copy)], {type: "image/svg+xml;charset=utf-8"});
+    const url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = (d.name || "cfg").replace(/[^a-zA-Z0-9._-]+/g, "_") + ".svg"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   // node interactions
   svg.querySelectorAll("g.node").forEach(n => {
     n.style.cursor = "pointer";
