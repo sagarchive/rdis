@@ -110,7 +110,8 @@ class WasmModule:
         if sid == 1:    # type: vec of func types
             count, p = _uleb(data, p)
             for _ in range(count):
-                assert data[p] == 0x60
+                if p >= end or data[p] != 0x60:
+                    raise ValueError("invalid function type form")
                 p += 1
                 np, p = _uleb(data, p)
                 params = [_VALTYPE.get(data[p + i], "?") for i in range(np)]
