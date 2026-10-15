@@ -475,6 +475,46 @@ class CFGLayoutTests(unittest.TestCase):
         self.assertIn('label="T"', dot)
         self.assertIn('label="F"', dot)
 
+    def test_unresolved_conditional_target_is_not_mislabeled_as_not_taken(self):
+        from types import SimpleNamespace
+        from rdis.arch import CJMP
+        from rdis.render import to_dot
+
+        class FakeArch:
+            def kind(self, insn):
+                return CJMP if getattr(insn, "conditional", False) else 0
+            def target(self, insn):
+                return getattr(insn, "target", None)
+            def data_refs(self, insn, state):
+                return []
+
+        class FakeProgram:
+            arch = FakeArch()
+            comments = {}
+            objc = None
+            functions = {}
+            image = SimpleNamespace(imports={})
+            def display(self, addr):
+                return ""
+            def call_target(self, insn, state):
+                return getattr(insn, "target", None)
+            def strings(self):
+                return {}
+
+        branch = SimpleNamespace(address=0x1000, mnemonic="b.cond", op_str="?",
+                                 conditional=True, target=None)
+        ret1 = SimpleNamespace(address=0x2000, mnemonic="ret", op_str="")
+        ret2 = SimpleNamespace(address=0x3000, mnemonic="ret", op_str="")
+        blocks = {
+            0x1000: SimpleNamespace(shown=[branch], insns=[branch], succs=[0x2000, 0x3000]),
+            0x2000: SimpleNamespace(shown=[ret1], insns=[ret1], succs=[]),
+            0x3000: SimpleNamespace(shown=[ret2], insns=[ret2], succs=[]),
+        }
+        dot = to_dot(FakeProgram(), SimpleNamespace(addr=0x1000, blocks=blocks))
+        self.assertIn("color=gray", dot)
+        self.assertNotIn('label="T"', dot)
+        self.assertNotIn('label="F"', dot)
+
 
 class RenderingSafetyTests(unittest.TestCase):
     def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
