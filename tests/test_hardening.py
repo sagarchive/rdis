@@ -525,7 +525,7 @@ class BrowserCFGSourceTests(unittest.TestCase):
         self.assertIn('zoomAt(Math.pow(1.0018, -delta)', html)
         self.assertIn('Shift+wheel to pan', html)
         self.assertIn('new XMLSerializer().serializeToString(copy)', html)
-        self.assertIn('const resolve = s => s.replace(/var\\\\(', html)
+        self.assertIn('const resolve = s => s.replace(/var\\(', html)
         self.assertIn('aria-label="Fit graph to view"', html)
         self.assertIn('replace(/[^a-zA-Z0-9._-]+/g, "_")', html)
 
