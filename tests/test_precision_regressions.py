@@ -85,7 +85,7 @@ class PrecisionRegressionTests(unittest.TestCase):
                 zf.writestr("lib/sample.so", b"one byte")
             with self.assertRaisesRegex(ValueError, "larger than"):
                 containers.extract(archive, "lib/sample.so", cache_dir, 0)
-            self.assertEqual(os.listdir(cache_dir), [])
+            self.assertFalse(os.path.exists(cache_dir))
 
     def test_compressed_cache_tracks_bytes_not_only_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
