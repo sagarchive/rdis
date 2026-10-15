@@ -14,6 +14,7 @@ from unittest import mock
 from rdis import containers, server as rdis_server
 from rdis.loader import Image, Section
 from rdis.wasm import WasmModule, _name, _uleb
+from rdis.render import _dot_label
 from rdis import mcp_server
 
 
@@ -242,6 +243,16 @@ class WasmBoundsTests(unittest.TestCase):
         data = b"\0asm\x01\0\0\0\x01\x01\x80"
         module = WasmModule(data)
         self.assertTrue(any("truncated unsigned LEB128" in error for error in module.errors))
+
+
+
+class RenderingSafetyTests(unittest.TestCase):
+    def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
+        label = _dot_label('first\\nsecond "quoted" \\\\ tail')
+        self.assertNotIn("\\n", label.replace("\\\\n", ""))
+        self.assertIn("\\\\n", label)
+        self.assertIn('\\\\"quoted\\\\"', label)
+        self.assertIn("\\\\\\\\", label)
 
 
 
