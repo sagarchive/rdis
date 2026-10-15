@@ -110,6 +110,13 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
         detail = " | ".join(errs)
         if context:
             detail += " | generated function(s): " + ", ".join(dict.fromkeys(context))
+            match = re.search(r"\\b(dec_[A-Za-z0-9_]+)\\s*\\(", context[0])
+            if match:
+                fn_name = match.group(1)
+                generated = next((d for d in decs
+                                  if re.search(rf"\\b{re.escape(fn_name)}\\s*\\(", d)), "")
+                if generated:
+                    detail += " | decompiled body: " + generated.replace("\\n", " ; ")[:2200]
         return [f"decompiled C did not compile ({arch}): " + detail + f"  [{hfile}]"]
     r = subprocess.run(runner + [hbin], capture_output=True, text=True, timeout=8)
     out = r.stdout.splitlines()
