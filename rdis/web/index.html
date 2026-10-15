@@ -989,7 +989,8 @@ function themeGraph(svg) {
     .edge polygon { stroke: none; }
     .node { cursor: pointer; }
     .node:hover polygon { stroke: var(--accent); }
-    .node.cur polygon { stroke: var(--accent); stroke-width: 2.2; }
+    .node.entry polygon { stroke: var(--accent); stroke-width: 2; }
+    .node.cur polygon { stroke: var(--accent); stroke-width: 2.6; }
     .edge path[stroke="green"], .edge [stroke="green"] { stroke: var(--ok) !important; }
     .edge polygon[fill="green"] { fill: var(--ok) !important; }
     .edge path[stroke="red"], .edge [stroke="red"] { stroke: var(--err) !important; }
@@ -1013,6 +1014,7 @@ function retintGraph(svg) {
   svg.querySelectorAll(".node polygon, .node path").forEach(el => {
     el.setAttribute("fill", "var(--g-node)"); el.setAttribute("stroke", "var(--g-edge)");
   });
+  svg.querySelectorAll(".node.entry polygon").forEach(el => el.setAttribute("stroke", "var(--accent)"));
   svg.querySelectorAll("g.graph > text").forEach(el => el.setAttribute("fill", "var(--faint)"));
   svg.querySelectorAll("g.node text").forEach(el => el.setAttribute("fill", "var(--g-text)"));
 }
