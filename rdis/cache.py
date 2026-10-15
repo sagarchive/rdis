@@ -23,7 +23,10 @@ _KINDS = ["call", "jmp", "tail", "data"]
 def _code_hash():
     h = hashlib.sha1(str(FORMAT).encode())
     here = os.path.dirname(__file__)
-    for m in ("analysis.py", "arch.py", "loader.py", "jni.py", "cache.py"):
+    # Cached Program snapshots include discovered functions/names/metadata. Changes to any
+    # module that influences those results must invalidate the persistent snapshot.
+    for m in ("analysis.py", "arch.py", "loader.py", "raw.py", "jni.py", "objc.py",
+              "swift.py", "demangle.py", "typelib.py", "plugins.py", "cache.py"):
         with open(os.path.join(here, m), "rb") as f:
             h.update(f.read())
     return h.hexdigest()[:12]
@@ -138,7 +141,7 @@ def _restore(image, data, objc, swift):
 def analyze(image, objc=True, swift=True, prologues=True, store=True):
     """Program(image).analyze(...), served from / saved to the analysis cache when possible."""
     opts = {"objc": objc, "swift": swift, "prologues": prologues, "arch": image.arch.name,
-            "base": image.base, "format": image.format}
+            "base": image.base, "entry": image.entry, "format": image.format}
     path = None
     try:
         path = os.path.join(_dir(), _key(image.path, opts) + ".json.gz")
