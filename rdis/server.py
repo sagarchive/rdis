@@ -22,7 +22,7 @@ from .decompile import Decompiler
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24}
+       "max_analyses": 24, "request_timeout": 30, "max_workers": 64}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
 
 # Per-visitor workspaces (cookie `rdis_sid`): one visitor's documents, renames and navigation never
@@ -480,6 +480,11 @@ def _upload(raw, name):
 
 # ---- HTTP ------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    # Prevent slow clients from occupying request threads indefinitely while sending headers/bodies.
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(CFG["request_timeout"])
+
     def log_message(self, *a):
         pass
 
@@ -558,15 +563,22 @@ class Handler(BaseHTTPRequestHandler):
         bad = self._forbidden(post=True)
         if bad:
             return self._send(403, json.dumps({"error": bad}), "application/json")
-        try:
-            n = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            n = -1
-        if n < 0:   # rfile.read(-1) would block until the client hangs up, buffering all it sends
-            return self._send(400, json.dumps({"error": "bad Content-Length"}), "application/json")
+        # This server deliberately supports Content-Length framing only. Reject ambiguous/chunked
+        # requests instead of interpreting a missing length as an empty body.
+        if self.headers.get("Transfer-Encoding") is not None:
+            return self._send(400, json.dumps({"error": "Transfer-Encoding is not supported"}), "application/json")
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal():
+            return self._send(400, json.dumps({"error": "exactly one valid Content-Length is required"}), "application/json")
+        n = int(lengths[0])
         if n > (CFG["max_mb"] << 20) + 1024:
             return self._send(413, json.dumps({"error": "payload too large"}), "application/json")
-        raw = self.rfile.read(n)
+        try:
+            raw = self.rfile.read(n)
+        except (TimeoutError, OSError):
+            return self._send(408, json.dumps({"error": "request body timed out"}), "application/json")
+        if len(raw) != n:
+            return self._send(400, json.dumps({"error": "incomplete request body"}), "application/json")
         route = u.path[5:]
         try:
             body = {} if route == "upload" else json.loads(raw or b"{}")
@@ -574,6 +586,41 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(result), "application/json")
         except Exception as e:
             return self._err(e)
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Cap simultaneous request handlers so slow clients cannot spawn unlimited threads."""
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, server_address, handler_class, max_workers=64):
+        if max_workers < 1:
+            raise ValueError("max_workers must be positive")
+        self._worker_slots = threading.BoundedSemaphore(max_workers)
+        super().__init__(server_address, handler_class)
+
+    def process_request(self, request, client_address):
+        if not self._worker_slots.acquire(blocking=False):
+            try:
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Connection: close\r\nContent-Length: 0\r\n\r\n"
+                )
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
 
 
 def main(argv=None):
@@ -591,6 +638,10 @@ def main(argv=None):
     p.add_argument("--multi-user", action="store_true",
                    help="per-visitor cookie sessions even on loopback (for a shared instance behind a proxy)")
     a = p.parse_args(argv)
+    if a.max_mb < 1:
+        p.error("--max-mb must be a positive integer")
+    if not 1 <= a.port <= 65535:
+        p.error("--port must be between 1 and 65535")
     loopback = a.host in ("127.0.0.1", "localhost", "::1")
     single = loopback and not a.multi_user   # one shared workspace only for a private local install
     CFG.update(allow_python=a.allow_python and loopback and not a.multi_user,
@@ -603,7 +654,7 @@ def main(argv=None):
         _local.session = _get_session("local")
         open_doc(a.binary, arch=a.arch)
     url = f"http://{'127.0.0.1' if a.host == '0.0.0.0' else a.host}:{a.port}"
-    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    srv = BoundedThreadingHTTPServer((a.host, a.port), Handler, max_workers=CFG["max_workers"])
     print(f"rdis: serving {url}  (Ctrl-C to stop)" + (f"  -- opened {a.binary}" if a.binary else
           "\n      drop a binary, app or package on the page, or click Open file"))
     if a.desktop:
