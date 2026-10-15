@@ -2,13 +2,15 @@
 import gzip
 import io
 import os
+import socket
 import tarfile
+import threading
 import tempfile
 import unittest
 import zipfile
 from unittest import mock
 
-from rdis import containers
+from rdis import containers, server as rdis_server
 from rdis.loader import Image, Section
 from rdis import mcp_server
 
@@ -142,6 +144,60 @@ class CacheIdentityTests(unittest.TestCase):
                         f.write(str(i).encode())
                     mcp_server._prog(path)
             self.assertEqual(len(mcp_server._CACHE), mcp_server._CACHE_MAX)
+
+
+class HttpFramingTests(unittest.TestCase):
+    def setUp(self):
+        self.old_cfg = dict(rdis_server.CFG)
+        rdis_server.CFG.update(single_user=True, request_timeout=2, max_workers=4)
+        self.httpd = rdis_server.BoundedThreadingHTTPServer(("127.0.0.1", 0), rdis_server.Handler, max_workers=4)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=2)
+        rdis_server.CFG.clear()
+        rdis_server.CFG.update(self.old_cfg)
+
+    def _request(self, raw):
+        with socket.create_connection(self.httpd.server_address, timeout=2) as sock:
+            sock.settimeout(2)
+            sock.sendall(raw)
+            sock.shutdown(socket.SHUT_WR)
+            response = bytearray()
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                response.extend(chunk)
+            return bytes(response)
+
+    def test_chunked_transfer_encoding_is_rejected(self):
+        response = self._request(
+            b"POST /api/upload HTTP/1.1\\r\\n"
+            b"Host: 127.0.0.1\\r\\n"
+            b"Content-Type: application/octet-stream\\r\\n"
+            b"Transfer-Encoding: chunked\\r\\n"
+            b"\\r\\n"
+        )
+        self.assertIn(b"400 Bad Request", response)
+        self.assertIn(b"Transfer-Encoding is not supported", response)
+
+    def test_incomplete_content_length_is_rejected(self):
+        response = self._request(
+            b"POST /api/upload HTTP/1.1\\r\\n"
+            b"Host: 127.0.0.1\\r\\n"
+            b"Content-Type: application/octet-stream\\r\\n"
+            b"Content-Length: 10\\r\\n"
+            b"\\r\\nabc"
+        )
+        self.assertIn(b"400 Bad Request", response)
+        self.assertIn(b"incomplete request body", response)
 
 
 if __name__ == "__main__":
