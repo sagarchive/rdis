@@ -24,6 +24,8 @@ Status: in progress. This file tracks evidence, not assumptions. Findings must b
 | WebAssembly framing | Truncated header/section lengths could be tolerated or partially parsed | Source-confirmed risk; implementation updated | Validate header/version, section bounds and truncated LEB128; malformed-input tests |
 | Graphviz labels | Control characters in comments/decoded strings could alter label framing | Source-confirmed risk; implementation updated | Strip control characters before escaping quotes/backslashes; regression test |
 | upload session metadata | Session upload-token dictionary could grow without a per-session bound | Source-confirmed risk; implementation updated | Bound retained upload-token references; aggregate cache-directory disk quotas remain open |
+| HTTP worker exhaustion | Thread-per-request server and unbounded parallel analyses could amplify slow-client or unique-binary load | Source-confirmed risk; implementation updated | 32 request workers, 15-second socket timeout, four concurrent analyses, capacity responses; stress test in CI |
+| debugger command construction | Path, breakpoint symbol and run arguments were interpolated into LLDB command text | Source-confirmed risk; implementation updated | Quote scalar arguments and reject control characters; constrain disassembly/memory counts |
 | public web deployment | Host/origin checks are not authentication; uploads and parsing are attacker-controlled | Needs route-by-route threat review | Validate defaults, authentication assumptions, quotas, timeouts, cleanup and resource bounds |
 | decompiler | Existing compile/recompile tests are useful but not a proof of semantic equivalence | Coverage limitation | Add executable differential corpus and compare observable outputs |
 
