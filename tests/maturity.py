@@ -27,3 +27,5 @@ for t in tiers:
                 else:
                     ok += 1
 print(f"\nSCORE {ok}/{tot}")
+if ok != tot:
+    sys.exit(1)
