@@ -15,7 +15,7 @@ The focused hardening suite passed on Python 3.10 and 3.12, and the execution-ba
 - Whether every instruction lifter, loader or metadata parser is semantically correct.
 - Whether published maturity/concurrency figures reproduce cleanly.
 - Whether every supported OS/Python/dependency combination works.
-- Whether public deployment has sufficient aggregate disk quotas, analysis deadlines, request timeouts and cleanup.
+- Whether quota-pressure cleanup/retention policies and deployment-specific analysis deadlines are sufficient; aggregate upload/extraction storage now has a configurable cap.
 - Whether all rendering contexts are correctly escaped.
 - Whether architecture support meets an external accuracy target.
 
