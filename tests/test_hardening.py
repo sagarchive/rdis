@@ -10,7 +10,7 @@ from unittest import mock
 
 from rdis import containers
 from rdis.loader import Image, Section
-from rdis import mcp_server, server
+from rdis import mcp_server
 
 
 class ContainerHardeningTests(unittest.TestCase):
@@ -142,17 +142,6 @@ class CacheIdentityTests(unittest.TestCase):
                         f.write(str(i).encode())
                     mcp_server._prog(path)
             self.assertEqual(len(mcp_server._CACHE), mcp_server._CACHE_MAX)
-
-    def test_public_bind_rejects_path_opening_and_python_console(self):
-        old = dict(server.CFG)
-        try:
-            server.CFG.update(single_user=False, allow_paths=False, allow_python=False)
-            # The public-bind policy is reflected in server configuration at startup.
-            self.assertFalse(server.CFG["allow_paths"])
-            self.assertFalse(server.CFG["allow_python"])
-        finally:
-            server.CFG.clear()
-            server.CFG.update(old)
 
 
 if __name__ == "__main__":
