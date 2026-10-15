@@ -43,6 +43,16 @@ class PrecisionRegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exceeds"):
                 containers._decompress(source, os.path.join(tmp, "cache"), 0)
 
+    def test_wasm_rejects_truncated_headers_and_section_framing(self):
+        from rdis.wasm import WasmModule
+
+        with self.assertRaisesRegex(ValueError, "header"):
+            WasmModule(b"\\0asm")
+        with self.assertRaisesRegex(ValueError, "version"):
+            WasmModule(b"\\0asm\\x02\\0\\0\\0")
+        with self.assertRaisesRegex(ValueError, "truncated WebAssembly section"):
+            WasmModule(b"\\0asm\\x01\\0\\0\\0\\x01\\x05\\x60")
+
     def test_tar_extraction_cache_tracks_archive_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             archive = os.path.join(tmp, "package.tar")
