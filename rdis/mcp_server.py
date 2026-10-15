@@ -7,7 +7,7 @@ Run:  python -m rdis.mcp_server
 Register in an MCP client as command `python` args `["-m","rdis.mcp_server"]` (cwd = this repo),
 or wrap with the venv's python. One binary is held open per session, keyed by path.
 """
-import hashlib, json, os, sys, traceback
+import hashlib, json, os, sys
 from collections import OrderedDict
 
 from .loader import open_image
@@ -45,6 +45,11 @@ def _prog(path, arch=None, loader=None, base=None):
 
 # ---- tool implementations ------------------------------------------------
 def t_list_functions(path, arch=None, limit=1000, **k):
+    # MCP clients can supply arbitrary numeric values; keep responses bounded and avoid
+    # surprising negative slicing semantics.
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be an integer")
+    limit = max(0, min(limit, 10000))
     p = _prog(path, arch, **k)
     items = [{"addr": hex(a), "name": p.display(a) or n}
              for a, n in sorted(p.names.items()) if a in p.functions]
@@ -167,7 +172,7 @@ def _handle(req):
             text = json.dumps(result, indent=2)
             return {"content": [{"type": "text", "text": text}]}
         except Exception as e:
-            return {"content": [{"type": "text", "text": f"error: {e}\n{traceback.format_exc()}"}],
+            return {"content": [{"type": "text", "text": f"error: {type(e).__name__}: {e}"}],
                     "isError": True}
     raise ValueError(f"unknown method: {m}")
 
