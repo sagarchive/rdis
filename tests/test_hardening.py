@@ -516,6 +516,20 @@ class CFGLayoutTests(unittest.TestCase):
         self.assertNotIn('label="F"', dot)
 
 
+class BrowserCFGSourceTests(unittest.TestCase):
+    def test_cfg_fit_zoom_export_and_controls_are_regression_gated(self):
+        from pathlib import Path
+
+        html = (Path(__file__).resolve().parents[1] / "rdis" / "web" / "index.html").read_text()
+        self.assertIn('svg.querySelector("g.graph")', html)
+        self.assertIn('zoomAt(Math.pow(1.0018, -delta)', html)
+        self.assertIn('Shift+wheel to pan', html)
+        self.assertIn('new XMLSerializer().serializeToString(copy)', html)
+        self.assertIn('const resolve = s => s.replace(/var\\\\(', html)
+        self.assertIn('aria-label="Fit graph to view"', html)
+        self.assertIn('replace(/[^a-zA-Z0-9._-]+/g, "_")', html)
+
+
 class RenderingSafetyTests(unittest.TestCase):
     def test_dot_label_escapes_newlines_quotes_and_backslashes(self):
         source = "line one\nline two \"quoted\" \\\\ tail"
