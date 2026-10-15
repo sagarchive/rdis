@@ -89,6 +89,33 @@ class ContainerHardeningTests(unittest.TestCase):
                         containers._decompress(source, os.path.join(td, "cache"), invalid)
 
 
+class AggregateStorageQuotaTests(unittest.TestCase):
+    def test_atomic_extraction_cache_rejects_aggregate_overflow_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as td:
+            first = os.path.join(td, "first.bin")
+            second = os.path.join(td, "second.bin")
+            containers._write_atomic(td, first, lambda stream: stream.write(b"abc"),
+                                     max_total_bytes=3)
+            with self.assertRaisesRegex(containers.StorageLimitError, "quota exceeded"):
+                containers._write_atomic(td, second, lambda stream: stream.write(b"x"),
+                                         max_total_bytes=3)
+            self.assertTrue(os.path.isfile(first))
+            self.assertFalse(os.path.exists(second))
+            self.assertEqual(sorted(os.listdir(td)), ["first.bin"])
+
+    def test_uploads_respect_aggregate_disk_quota(self):
+        with tempfile.TemporaryDirectory() as td:
+            local_session = {"docs": {}, "cur": None, "uploads": {}}
+            with mock.patch.object(rdis_server._local, "session", local_session, create=True), \
+                 mock.patch.dict(rdis_server.CFG, {"upload_dir": td, "max_mb": 2,
+                                                   "max_upload_storage_mb": 1}), \
+                 mock.patch.object(rdis_server, "slices", return_value=[]):
+                rdis_server._upload(b"a" * (1 << 20), "first.bin")
+                with self.assertRaisesRegex(containers.StorageLimitError, "quota exceeded"):
+                    rdis_server._upload(b"b", "second.bin")
+                self.assertEqual(len(os.listdir(td)), 1)
+
+
 class SectionLookupTests(unittest.TestCase):
     def _image(self, sections):
         image = Image.__new__(Image)
