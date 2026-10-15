@@ -9,7 +9,7 @@ Milestones are not complete until their acceptance gates have reproducible evide
 | M2 | Binary/container safety and address mapping | IN PROGRESS | Bounded extraction and address interval tests pass |
 | M3 | Web/MCP/debugger/plugin trust boundaries | IN PROGRESS | Threat model and negative security tests pass |
 | M4 | Disassembly/function/CFG correctness | IN PROGRESS | Per-architecture discovery fixtures pass; precision/recall measured |
-| M5 | IR and decompiler semantics | PLANNED | Execution-based semantic corpus passes; unsupported cases counted |
+| M5 | IR and decompiler semantics | IN PROGRESS | Execution-based semantic corpus passes; unsupported cases counted |
 | M6 | Type recovery/platform metadata | PLANNED | Versioned metadata and ambiguity tests pass |
 | M7 | UI, CLI, API, rendering | IN PROGRESS | End-to-end workflows, escaping and schema tests pass |
 | M8 | Fuzzing and differential tests | IN PROGRESS | Fuzz campaign triaged; all crashes minimized into regression tests |
