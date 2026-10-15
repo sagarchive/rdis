@@ -66,6 +66,7 @@ python3 -m venv ~/rdis-env
 source ~/rdis-env/bin/activate
 pip install "git+https://github.com/sagarchive/rdis.git"
 rdis-gui                         # opens http://127.0.0.1:8000, then drop a binary on the page
+rdis-gui --max-mb 128 --max-upload-storage-mb 1024  # per-file/member cap + aggregate cache quota
 ```
 
 Windows (PowerShell):
