@@ -16,7 +16,7 @@ This is a coverage plan, not a claim that every case already exists.
 | Metadata | JNI/ObjC/Swift/symbols, missing/partial/versioned metadata | Bounded parsing and explicit uncertainty |
 | HTTP | Oversized/incomplete body, invalid JSON, Host/Origin, concurrent sessions, aggregate upload/cache quota | Bounded response, correct status and isolation; quota regressions and 20-visitor stress test passed in CI |
 | MCP | Valid/invalid tool calls, malformed JSON-RPC, large output, file replacement | Protocol errors and current analysis |
-| Rendering | HTML-like names/comments, huge CFG, Unicode, compact/detail CFG modes, entry highlight and T/F edges | Escaped and bounded output; UI screenshot/accessibility review remains open |
+| Rendering | HTML-like names/comments, huge CFG, Unicode, compact/detail CFG modes, entry highlight, known-target T/F edges and unresolved conditional targets | Escaped and bounded output; UI screenshot/accessibility review remains open |
 | CLI/API | Documented commands, invalid args, missing optional tools | Stable schemas and meaningful exit codes |
 | Packaging | Source/wheel/Docker, optional extras | Entry points/assets work |
 | Performance | Small/medium/large, cold/warm, concurrent | Time/RSS recorded; no unexplained regression |
