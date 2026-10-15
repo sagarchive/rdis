@@ -29,11 +29,12 @@ class PrecisionRegressionTests(unittest.TestCase):
         self.assertIsNone(image.section_at(0x31000000))
 
     def test_graphviz_labels_strip_control_characters_and_escape_quotes(self):
-        label = render._dot_label('one\ntwo\x00"\\tail')
-        self.assertNotIn("\n", label)
-        self.assertNotIn("\x00", label)
-        self.assertIn('\\"', label)
-        self.assertIn('\\\\', label)
+        label = render._dot_label("one" + chr(10) + "two" + chr(0) + '"' + chr(92) + "tail")
+        self.assertNotIn(chr(10), label)
+        self.assertNotIn(chr(0), label)
+        self.assertIn(chr(92) + '"', label)
+        self.assertIn(chr(92) * 2, label)
+
     def test_decompression_rejects_oversized_output_instead_of_truncating(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "one.gz")
