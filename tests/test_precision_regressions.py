@@ -47,11 +47,11 @@ class PrecisionRegressionTests(unittest.TestCase):
         from rdis.wasm import WasmModule
 
         with self.assertRaisesRegex(ValueError, "header"):
-            WasmModule(b"\\0asm")
+            WasmModule(b"\0asm")
         with self.assertRaisesRegex(ValueError, "version"):
-            WasmModule(b"\\0asm\\x02\\0\\0\\0")
+            WasmModule(b"\0asm\x02\0\0\0")
         with self.assertRaisesRegex(ValueError, "truncated WebAssembly section"):
-            WasmModule(b"\\0asm\\x01\\0\\0\\0\\x01\\x05\\x60")
+            WasmModule(b"\0asm\x01\0\0\0\x01\x05\x60")
 
     def test_tar_extraction_cache_tracks_archive_content(self):
         with tempfile.TemporaryDirectory() as tmp:
