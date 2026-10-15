@@ -291,6 +291,16 @@ class WasmBoundsTests(unittest.TestCase):
 
 
 
+class FloatingTemporaryTests(unittest.TestCase):
+    def test_pinned_float_memory_expressions_keep_floating_type(self):
+        from rdis.lift import Lifter
+
+        lifter = object.__new__(Lifter)
+        lifter._temptype = {}
+        self.assertEqual(lifter._scalar_type("v0 + *(float *)p * v1"), "float")
+        self.assertEqual(lifter._scalar_type("v0 + *(double *)p * v1"), "double")
+
+
 class PointerArithmeticTests(unittest.TestCase):
     def test_computed_element_address_uses_byte_arithmetic(self):
         from rdis.lift import Lifter
