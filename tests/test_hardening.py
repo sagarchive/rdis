@@ -530,6 +530,7 @@ class BrowserCFGSourceTests(unittest.TestCase):
         self.assertIn('role="region" aria-label="Control-flow graph.', html)
         self.assertIn('n.setAttribute("tabindex", "0")', html)
         self.assertIn('n.setAttribute("role", "button")', html)
+        self.assertIn('.node:focus-visible polygon', html)
         self.assertIn('e.key === "Enter" && e.shiftKey', html)
         self.assertIn('replace(/[^a-zA-Z0-9._-]+/g, "_")', html)
 
