@@ -1,0 +1,10 @@
+.git
+.venv
+.rdis_uploads
+.rdis_db
+*.rdb
+*.rdb.json
+__pycache__
+*.py[cod]
+.DS_Store
+.rdis_cache

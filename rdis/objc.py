@@ -2,6 +2,10 @@
 from dataclasses import dataclass, field
 
 RELATIVE = 0x80000000  # method_list_t uses 32-bit relative offsets (iOS 14+/macOS 11+)
+# The counts and section sizes below come straight from the (attacker-controlled) file: a list header
+# claiming 0xFFFFFFFF methods would build billions of objects. Real lists are far smaller.
+_MAX_LIST = 1 << 16
+_MAX_SECT = 1 << 26
 
 _SIMPLE = {"c": "char", "i": "int", "s": "short", "l": "long", "q": "long long", "C": "unsigned char",
            "I": "unsigned int", "S": "unsigned short", "L": "unsigned long", "Q": "unsigned long long",
@@ -179,7 +183,7 @@ class ObjC:
 
     def _ptrs(self, sect):
         s = self.sections.get(sect)
-        return [self.im.ptr(s.va + o) for o in range(0, s.size, 8)] if s else []
+        return [self.im.ptr(s.va + o) for o in range(0, min(s.size, _MAX_SECT), 8)] if s else []
 
     def _class_name_at(self, slot):
         """Name of the class a pointer slot refers to, local or imported via bind."""
@@ -208,7 +212,7 @@ class ObjC:
     def _methods(self, ml, is_class):
         if not ml:
             return []
-        flags, count = self.u32(ml), self.u32(ml + 4)
+        flags, count = self.u32(ml), min(self.u32(ml + 4), _MAX_LIST)
         out = []
         if flags & RELATIVE:
             for n in range(count):
@@ -227,7 +231,7 @@ class ObjC:
     def _ivars(self, il):
         if not il:
             return []
-        size, count = self.u32(il) or 32, self.u32(il + 4)
+        size, count = self.u32(il) or 32, min(self.u32(il + 4), _MAX_LIST)
         out = []
         for n in range(count):
             e = il + 8 + n * size
@@ -239,7 +243,7 @@ class ObjC:
     def _props(self, pl):
         if not pl:
             return []
-        size, count = self.u32(pl) or 16, self.u32(pl + 4)
+        size, count = self.u32(pl) or 16, min(self.u32(pl + 4), _MAX_LIST)
         return [(self.cstr(self.im.ptr(pl + 8 + n * size)), self.cstr(self.im.ptr(pl + 8 + n * size + 8)))
                 for n in range(count)]
 
@@ -263,16 +267,16 @@ class ObjC:
 
     def _refs(self):
         s = self.sections.get("__objc_selrefs")
-        for o in range(0, s.size if s else 0, 8):
+        for o in range(0, min(s.size, _MAX_SECT) if s else 0, 8):
             self.selrefs[s.va + o] = self.cstr(self.im.ptr(s.va + o))
         for name in ("__objc_classrefs", "__objc_superrefs"):
             s = self.sections.get(name)
-            for o in range(0, s.size if s else 0, 8):
+            for o in range(0, min(s.size, _MAX_SECT) if s else 0, 8):
                 self.classrefs[s.va + o] = self._class_name_at(s.va + o)
         s = self.sections.get("__cfstring")
-        for o in range(0, s.size if s else 0, 32):
+        for o in range(0, min(s.size, _MAX_SECT) if s else 0, 32):
             e = s.va + o
-            data, length, flags = self.im.ptr(e + 16), self.im.ptr(e + 24), self.u32(e + 8)
+            data, length, flags = self.im.ptr(e + 16), min(self.im.ptr(e + 24), _MAX_LIST), self.u32(e + 8)
             if flags & 0x10 == 0 or flags == 0x7c8:  # 0x7d0 = UTF-16 literal
                 self.cfstrings[e] = self.cstr(data, max(length + 1, 1))
             else:
@@ -284,7 +288,7 @@ class ObjC:
         if not s:
             return
         a, start, regs = s.va, s.va, {}
-        while a < s.va + s.size:
+        while a < s.va + min(s.size, _MAX_SECT):
             i = self.im.arch.decode(self.im.read(a, 4), a)
             if i is None or i.mnemonic == "brk":
                 a += 4

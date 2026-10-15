@@ -13,6 +13,7 @@ dependencies = ["capstone>=5.0", "lief>=0.14"]
 
 [project.optional-dependencies]
 desktop = ["pywebview>=5.0"]  # native window around the local UI; browser is used without it
+ir = ["pypcode>=3.0"]         # Ghidra P-code semantics for the IR decompiler (any ISA)
 
 [project.scripts]
 rdis = "rdis.__main__:main"            # CLI: disassemble / decompile / inspect

@@ -11,7 +11,7 @@ import json, sys, traceback
 
 from .loader import open_image
 from .analysis import Program
-from . import render
+from . import cache, render
 from .decompile import Decompiler
 
 _CACHE = {}  # path -> Program
@@ -25,7 +25,7 @@ def _prog(path, arch=None, loader=None, base=None):
             opts["loader"] = loader
         if base is not None:
             opts["base"] = base
-        _CACHE[key] = Program(open_image(path, arch=arch, **opts)).analyze()
+        _CACHE[key] = cache.analyze(open_image(path, arch=arch, **opts))
     return _CACHE[key]
 
 
@@ -163,8 +163,18 @@ def main():
         raw = raw.strip()
         if not raw:
             continue
-        req = json.loads(raw)
-        if req.get("method", "").startswith("notifications/"):
+        try:   # one malformed line must not kill the server (JSON-RPC: reply with an error)
+            req = json.loads(raw)
+        except ValueError as e:
+            req, bad = {}, {"code": -32700, "message": f"parse error: {e}"}
+        else:
+            bad = None if isinstance(req, dict) else {"code": -32600, "message": "invalid request"}
+            req = req if isinstance(req, dict) else {}
+        if bad:
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": bad}) + "\n")
+            sys.stdout.flush()
+            continue
+        if str(req.get("method") or "").startswith("notifications/"):
             continue  # no response expected
         try:
             result = _handle(req)

@@ -1,0 +1,1145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>rdis</title>
+<link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 96 96%22%3E%3Crect width=%2296%22 height=%2296%22 rx=%2221.3%22 fill=%22%231a1a1d%22/%3E%3Cg fill=%22%23f5f5f7%22%3E%3Crect x=%2217%22 y=%2217%22 width=%2218%22 height=%2218%22 rx=%223.5%22/%3E%3Crect x=%2239%22 y=%2217%22 width=%2218%22 height=%2218%22 rx=%223.5%22/%3E%3Crect x=%2217%22 y=%2239%22 width=%2218%22 height=%2218%22 rx=%223.5%22/%3E%3Crect x=%2217%22 y=%2261%22 width=%2218%22 height=%2218%22 rx=%223.5%22/%3E%3C/g%3E%3Crect x=%2261%22 y=%2217%22 width=%2218%22 height=%2218%22 rx=%223.5%22 fill=%22%23f0a35a%22/%3E%3C/svg%3E">
+<meta name="description" content="rdis disassembles and decompiles Mach-O, ELF, PE and WebAssembly for x86, ARM, MIPS and RISC-V in your browser, on macOS, Linux and Windows.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: Apple product-page rhythm. Centered headlines, then a large visual or a bento of rounded tiles per section. Dark-first like a Pro page. */
+:root {
+  --bg:#000; --tile:#141416; --tile-hi:#1d1d1f; --well:#0a0a0b; --rule:#2c2c2e; --rule2:#1f1f22;
+  --ink:#f5f5f7; --mute:#86868b; --faint:#5a5a5f;
+  --link:#2997ff; --btn:#0071e3; --btn-ink:#fff;
+  --g1:#ffd194; --g2:#f0a35a; --g3:#e0663f;
+  --glow:rgba(240,163,90,.22);
+  --mnem:#61afef; --reg:#e06c75; --num:#d19a66; --str:#98c379; --kw:#c678dd; --ty:#56b6c2; --lbl:#e5c07b; --cmt:#6b737d; --fn:#f0a35a;
+  --ok:#30d158; --err:#ff453a; --amber:#f0a35a; --amber-soft:rgba(240,163,90,.13);
+  --sans:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+  --mono:ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --col:1040px; --wide:1200px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg:#fff; --tile:#f5f5f7; --tile-hi:#fbfbfd; --well:#fff; --rule:#d2d2d7; --rule2:#e8e8ed;
+  --ink:#1d1d1f; --mute:#6e6e73; --faint:#a1a1a6;
+  --link:#0066cc; --btn:#0071e3; --btn-ink:#fff;
+  --g1:#d9822b; --g2:#c2571f; --g3:#a83a1c;
+  --glow:rgba(217,130,43,.16);
+  --mnem:#0f68c9; --reg:#c0392b; --num:#9a6a1f; --str:#2e8b57; --kw:#a02bb8; --ty:#0e7f8f; --lbl:#8a6d12; --cmt:#8a94a0; --fn:#b4581c;
+  --ok:#248a3d; --err:#d70015; --amber:#b4581c; --amber-soft:rgba(180,88,28,.09);
+  color-scheme:light;
+} }
+:root[data-theme="light"] {
+  --bg:#fff; --tile:#f5f5f7; --tile-hi:#fbfbfd; --well:#fff; --rule:#d2d2d7; --rule2:#e8e8ed;
+  --ink:#1d1d1f; --mute:#6e6e73; --faint:#a1a1a6;
+  --link:#0066cc; --btn:#0071e3; --btn-ink:#fff;
+  --g1:#d9822b; --g2:#c2571f; --g3:#a83a1c;
+  --glow:rgba(217,130,43,.16);
+  --mnem:#0f68c9; --reg:#c0392b; --num:#9a6a1f; --str:#2e8b57; --kw:#a02bb8; --ty:#0e7f8f; --lbl:#8a6d12; --cmt:#8a94a0; --fn:#b4581c;
+  --ok:#248a3d; --err:#d70015; --amber:#b4581c; --amber-soft:rgba(180,88,28,.09);
+  color-scheme:light;
+}
+
+* { box-sizing:border-box }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth }
+body { margin:0; background:var(--bg); color:var(--ink); font:400 17px/1.47 var(--sans); letter-spacing:-.022em; padding-inline:clamp(16px,4vw,32px); -webkit-font-smoothing:antialiased }
+a { color:var(--link); text-decoration:none } a:hover { text-decoration:underline }
+:focus-visible { outline:2px solid var(--link); outline-offset:3px; border-radius:6px }
+h1,h2,h3 { text-wrap:balance; margin:0; font-weight:600 }
+p { margin:0 }
+code, pre { font-family:var(--mono); letter-spacing:0 }
+.wrap { max-width:var(--col); margin-inline:auto }
+.wide { max-width:var(--wide); margin-inline:auto }
+.center { text-align:center }
+.grad { background:linear-gradient(100deg, var(--g1), var(--g2) 45%, var(--g3)); -webkit-background-clip:text; background-clip:text; color:transparent }
+
+/* local nav */
+.nav { position:sticky; top:env(safe-area-inset-top,0px); z-index:20; margin-inline:calc(-1 * clamp(16px,4vw,32px)); padding-inline:clamp(16px,4vw,32px);
+  background:color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter:saturate(1.8) blur(20px); -webkit-backdrop-filter:saturate(1.8) blur(20px); border-bottom:1px solid var(--rule2) }
+.nav .in { max-width:var(--col); margin-inline:auto; height:52px; display:flex; align-items:center; gap:24px }
+.nav .name { font-size:21px; font-weight:600; color:var(--ink); letter-spacing:-.02em; display:flex; align-items:center; gap:9px }
+.glyph { width:17px; height:17px; fill:var(--ink) }
+.appicon { display:block; width:clamp(72px,9vw,104px); height:auto; margin:0 auto 22px; filter:drop-shadow(0 18px 30px rgba(0,0,0,.35)) }
+.nav .name:hover { text-decoration:none }
+.nav nav { margin-left:auto; display:flex; align-items:center; gap:22px; font-size:12px }
+.nav nav a { color:var(--mute) } .nav nav a:hover { color:var(--ink); text-decoration:none }
+.pill { display:inline-flex; align-items:center; justify-content:center; background:var(--btn); color:var(--btn-ink) !important; border-radius:980px; font-weight:400; text-decoration:none !important; border:0; cursor:pointer }
+.pill:hover { filter:brightness(1.1) }
+.pill.sm { font-size:12px; padding:4px 11px }
+.pill.lg { font-size:17px; padding:11px 22px }
+@media (max-width:720px){ .nav nav a:not(.pill){ display:none } }
+
+/* hero */
+.hero { padding-block:clamp(56px,9vw,104px) 0; text-align:center }
+.hero .eyebrow { font-size:clamp(19px,2vw,24px); font-weight:600; color:var(--mute); letter-spacing:-.01em }
+.hero h1 { font-size:clamp(56px,10vw,112px); line-height:1.02; letter-spacing:-.045em; font-weight:700; margin-top:10px; padding-bottom:.06em }
+.hero .lede { font-size:clamp(19px,2.2vw,24px); line-height:1.36; color:var(--mute); max-width:30em; margin:22px auto 0; font-weight:500; letter-spacing:-.015em }
+.hero .lede strong { color:var(--ink); font-weight:600 }
+.ctas { display:flex; justify-content:center; align-items:center; gap:28px; margin-top:32px; flex-wrap:wrap; font-size:17px }
+.more::after { content:" ›"; }
+
+.shot { position:relative; margin:clamp(48px,7vw,84px) auto 0; max-width:1000px }
+.shot::before { content:""; position:absolute; inset:8% 6% -6%; background:radial-gradient(60% 55% at 50% 40%, var(--glow), transparent 70%); filter:blur(30px); z-index:-1 }
+.win { border-radius:14px; overflow:hidden; background:var(--well); border:1px solid var(--rule); box-shadow:0 50px 100px -30px rgba(0,0,0,.55), 0 0 0 .5px rgba(255,255,255,.04) inset; text-align:left }
+.win-top { display:flex; align-items:center; gap:14px; padding:10px 14px; border-bottom:1px solid var(--rule2); background:var(--tile); font:11.5px var(--mono); color:var(--mute); flex-wrap:wrap }
+.lights { display:flex; gap:7px } .lights i { width:12px; height:12px; border-radius:50%; display:block; background:#ff5f57 } .lights i:nth-child(2){ background:#febc2e } .lights i:nth-child(3){ background:#28c840 }
+.win-top .doc { border:1px solid var(--rule); border-radius:6px; padding:3px 9px; color:var(--ink) }
+.seg { display:flex; margin-left:auto; background:var(--rule2); border-radius:8px; padding:2px; gap:2px }
+.seg span, .seg button { font:500 12px var(--sans); letter-spacing:-.01em; color:var(--mute); background:none; border:0; padding:4px 11px; border-radius:6px; cursor:default }
+.seg .on, .seg button[aria-pressed="true"] { background:var(--tile-hi); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.25) }
+.seg button { cursor:pointer }
+.ws { display:grid; grid-template-columns:170px minmax(0,1fr) 230px; font:12px/1.8 var(--mono); height:470px }
+.ws > div { min-width:0; min-height:0 }
+.ws-nav { border-right:1px solid var(--rule2); background:var(--tile); padding:12px 0; display:flex; flex-direction:column }
+.ws-nav .t { display:flex; gap:12px; padding:0 14px 8px; color:var(--faint); border-bottom:1px solid var(--rule2); margin-bottom:6px; font-family:var(--sans); font-size:11.5px; font-weight:500 }
+.ws-nav .t .on { color:var(--ink) }
+.fn { display:block; width:100%; text-align:left; font:inherit; background:none; border:0; padding:1px 14px; color:var(--mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer }
+.fn:hover { color:var(--ink) }
+.fn[aria-selected="true"] { background:var(--amber-soft); color:var(--ink) }
+.fn input { font:inherit; width:100%; background:var(--well); color:var(--ink); border:1px solid var(--amber); border-radius:4px; padding:0 4px; outline:0 }
+.tip { margin-top:auto; padding:0 14px; font:11px var(--sans); color:var(--faint) }
+.ws-main { overflow:auto }
+.d-code { margin:0; padding:14px 18px; white-space:pre; min-height:100%; outline:0; transition:opacity .18s }
+.d-code.fade { opacity:0 }
+.d-code .cur { background:var(--amber-soft); margin-inline:-18px; padding-inline:18px; display:inline-block; min-width:calc(100% + 36px) }
+.ucm { color:var(--ok) }
+.nm { border-radius:3px }
+.flash { animation:flash 1.4s ease-out }
+@keyframes flash { 0%,30% { background:color-mix(in srgb, var(--amber) 45%, transparent); color:var(--ink) } 100% { background:transparent } }
+.d-cfg svg { display:block; width:100%; height:auto }
+.d-cfg .blk { fill:var(--tile); stroke:var(--rule) }
+.d-cfg text { font:11px var(--mono); fill:var(--ink) }
+.d-cfg .lab { fill:var(--lbl) } .d-cfg .mn { fill:var(--mnem) } .d-cfg .fnn { fill:var(--fn) }
+.d-cfg .e { fill:none; stroke-width:1.6 }
+.e-g { stroke:var(--ok) } .e-r { stroke:var(--err) } .e-b { stroke:var(--link) }
+.h-g { fill:var(--ok) } .h-r { fill:var(--err) } .h-b { fill:var(--link) }
+.ws-ins { border-left:1px solid var(--rule2); background:var(--tile); display:flex; flex-direction:column; color:var(--mute) }
+.ins-tabs { display:flex; gap:4px; padding:8px 10px; border-bottom:1px solid var(--rule2) }
+.ins-tabs button { font:500 11.5px var(--sans); color:var(--faint); background:none; border:0; padding:3px 8px; border-radius:6px; cursor:pointer }
+.ins-tabs button[aria-selected="true"] { color:var(--ink); background:var(--rule2) }
+.ins-body { padding:12px 14px; overflow:auto; flex:1 }
+.ins-body h4 { margin:0 0 2px; font:600 10.5px var(--sans); letter-spacing:.02em; text-transform:uppercase; color:var(--faint) }
+.ins-body p { color:var(--ink); overflow-wrap:anywhere } .ins-body p + h4 { margin-top:12px }
+.agent-log { font-size:11px; line-height:1.6; display:flex; flex-direction:column; gap:8px }
+.agent-log .call { color:var(--ink) } .agent-log .call b { color:var(--amber); font-weight:500 }
+.agent-log .res { color:var(--mute); padding-left:12px; border-left:1px solid var(--rule) }
+.agent-log .say { font-family:var(--sans); font-size:12px; color:var(--ink) }
+.agent-log .empty { font-family:var(--sans); font-size:12.5px; color:var(--mute); line-height:1.45 }
+.agent-log > * { animation:in .25s ease-out }
+@keyframes in { from { transform:translateY(4px); opacity:.2 } }
+.win-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 14px; border-top:1px solid var(--rule2); background:var(--tile); font:11.5px var(--mono); color:var(--mute); flex-wrap:wrap }
+.foot-act { display:flex; gap:10px; align-items:center }
+.ghost { font:500 12px var(--sans); color:var(--link); background:none; border:0; cursor:pointer; padding:4px 6px }
+#d-agent { font-size:12.5px; padding:6px 14px; position:relative }
+#d-agent:disabled { opacity:.55; cursor:default }
+.demo-cap { margin-top:18px; font-size:13px; color:var(--mute) }
+@media (max-width:760px){
+  .ws { grid-template-columns:minmax(0,1fr); height:auto }
+  .ws-nav { border-right:0; border-bottom:1px solid var(--rule2); padding:8px 0 }
+  .ws-nav .t, .tip { display:none }
+  #d-funcs { display:flex; gap:6px; padding:0 10px; overflow-x:auto }
+  .fn { width:auto; border-radius:6px; padding:2px 10px }
+  .ws-main { height:330px }
+  .ws-ins { border-left:0; border-top:1px solid var(--rule2); height:220px }
+  .hide-s { display:none }
+  .win-top .seg button { padding:4px 8px }
+}
+
+/* sections */
+section { padding-block:clamp(96px,13vw,160px) 0 }
+.head { text-align:center; max-width:780px; margin-inline:auto }
+.head .over { font-size:clamp(17px,1.8vw,21px); font-weight:600; color:var(--amber); letter-spacing:-.01em }
+.head h2 { font-size:clamp(40px,6.4vw,72px); line-height:1.05; letter-spacing:-.04em; margin-top:8px }
+.head p { font-size:clamp(18px,2vw,21px); color:var(--mute); margin-top:20px; line-height:1.42; font-weight:500 }
+.head p strong { color:var(--ink); font-weight:600 }
+
+/* bento */
+.bento { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:56px }
+.tile { background:var(--tile); border-radius:28px; padding:clamp(26px,3.4vw,40px); position:relative; overflow:hidden; min-width:0; display:flex; flex-direction:column; gap:14px }
+.tile.s2 { grid-column:span 2 }
+.tile .lbl { font-size:17px; font-weight:600; color:var(--mute) }
+.tile .big { font-size:clamp(44px,5.6vw,76px); font-weight:700; line-height:1; letter-spacing:-.05em; font-variant-numeric:tabular-nums }
+.tile .mid { font-size:clamp(26px,3vw,36px); font-weight:600; line-height:1.1; letter-spacing:-.035em }
+.tile .note { color:var(--mute); font-size:16px; line-height:1.4; margin-top:auto }
+.tile .note strong { color:var(--ink); font-weight:600 }
+.chips { display:flex; flex-wrap:wrap; gap:8px }
+.chips span { font-size:13px; font-weight:500; padding:6px 12px; border-radius:980px; background:var(--tile-hi); border:1px solid var(--rule2); color:var(--ink) }
+.os { display:flex; gap:10px; flex-wrap:wrap; font-size:clamp(26px,3vw,36px); font-weight:600; letter-spacing:-.035em; line-height:1.15 }
+.os span:nth-child(2){ color:var(--mute) } .os span:nth-child(3){ color:var(--faint) }
+@media (max-width:860px){ .bento { grid-template-columns:repeat(2,minmax(0,1fr)) } .tile.s2 { grid-column:span 2 } }
+@media (max-width:560px){ .bento { grid-template-columns:1fr } .tile.s2 { grid-column:auto } }
+
+/* scrolly lens */
+.story { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:clamp(32px,5vw,72px); margin-top:72px; max-width:var(--wide); margin-inline:auto }
+.steps { display:grid }
+.step { min-height:72vh; display:flex; flex-direction:column; justify-content:center; gap:14px; opacity:.3; transition:opacity .4s }
+.step.on { opacity:1 }
+.step:first-child { min-height:56vh; justify-content:flex-start; padding-top:10vh }
+.step .n { font:500 13px var(--mono); color:var(--amber) }
+.step h3 { font-size:clamp(28px,3.2vw,40px); line-height:1.1; letter-spacing:-.035em }
+.step p { font-size:clamp(17px,1.7vw,19px); color:var(--mute); max-width:30em }
+.step p code { font-size:.88em; color:var(--ink) }
+.stick { position:sticky; top:calc(env(safe-area-inset-top,0px) + 96px); align-self:start }
+.code { margin:0; padding:22px 24px; font-size:13.5px; line-height:1.78; min-height:calc(16 * 1.78em + 44px); overflow-x:auto; white-space:pre; color:var(--ink) }
+.code .ln { display:block; min-height:1.78em }
+.stick figcaption { margin-top:16px; text-align:center; font-size:14px; color:var(--mute) }
+@media (max-width:880px){
+  .story { grid-template-columns:1fr; gap:0 }
+  .stick { order:-1; top:calc(env(safe-area-inset-top,0px) + 60px); z-index:2 }
+  .code { font-size:11px; min-height:calc(16 * 1.78em + 32px); padding:16px }
+  .stick figcaption { display:none }
+  .step, .step:first-child { min-height:60vh; padding-top:0; justify-content:center; position:relative; z-index:3 }
+  .step > * { background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); padding:6px 10px; border-radius:10px; width:fit-content }
+}
+.t-mn{color:var(--mnem)} .t-rg{color:var(--reg)} .t-nm{color:var(--num)} .t-kw{color:var(--kw)} .t-ty{color:var(--ty)} .t-lb{color:var(--lbl)} .t-cm{color:var(--cmt)} .t-ad{color:var(--faint)} .t-st{color:var(--str)} .t-fn{color:var(--fn)}
+.scr { color:var(--faint) }
+
+/* formats */
+.formats { margin-top:56px; display:grid; gap:16px }
+.frow { background:var(--tile); border-radius:28px; padding:26px clamp(20px,3vw,34px); display:grid; grid-template-columns:160px minmax(0,1fr); gap:20px; align-items:center }
+.frow > b { font-size:17px; font-weight:600; color:var(--mute) }
+.fitems { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:10px }
+.fi { padding:14px 16px; border-radius:16px; background:var(--tile-hi); border:1px solid var(--rule2); display:grid; gap:4px }
+.fi strong { font-size:19px; font-weight:600; letter-spacing:-.02em }
+.fi span { font-size:12.5px; color:var(--mute); line-height:1.35 }
+@media (max-width:640px){ .frow { grid-template-columns:1fr; gap:14px } }
+
+/* feature tiles */
+.duo { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:56px }
+@media (max-width:860px){ .duo { grid-template-columns:1fr } }
+.feat { background:var(--tile); border-radius:28px; padding:clamp(28px,3.6vw,44px) clamp(24px,3.4vw,44px) 0; overflow:hidden; display:flex; flex-direction:column; gap:12px; min-width:0 }
+.feat h3 { font-size:clamp(26px,2.8vw,34px); line-height:1.12; letter-spacing:-.035em }
+.feat > p { color:var(--mute); font-size:17px; max-width:34em }
+.feat > p code { font-size:.86em; color:var(--ink) }
+.feat .vis { margin-top:22px; background:var(--well); border:1px solid var(--rule2); border-bottom:0; border-radius:16px 16px 0 0; min-width:0; overflow:hidden }
+.feat.full { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:clamp(24px,4vw,56px); padding-bottom:clamp(28px,3.6vw,44px); align-items:center }
+.feat.full .vis { margin:0; border-radius:16px; border-bottom:1px solid var(--rule2) }
+.feat.full .txt { display:grid; gap:14px; align-content:center }
+.feat.full .txt p { color:var(--mute); font-size:17px }
+@media (max-width:860px){ .feat.full { grid-template-columns:1fr } }
+.pcode { margin:0; padding:20px 22px; font-size:12.5px; line-height:1.8; overflow-x:auto; white-space:pre }
+.rpc .dir { color:var(--amber) }
+.tools { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px }
+.tools code { font-size:12px; border-radius:980px; padding:5px 11px; background:var(--tile-hi); border:1px solid var(--rule2); color:var(--mute) }
+
+.cfg svg { display:block; width:100%; height:auto; max-height:430px; padding:14px 0 }
+.cfg .blk { fill:var(--tile); stroke:var(--rule) }
+.cfg text { font:12px var(--mono); fill:var(--ink) }
+.cfg .lab { fill:var(--lbl) } .cfg .mn { fill:var(--mnem) }
+.cfg .e { fill:none; stroke-width:1.8 }
+.cfg .e-ok { stroke:var(--ok) } .cfg .e-no { stroke:var(--err) } .cfg .e-bk { stroke:var(--amber) }
+.cfg .h-ok { fill:var(--ok) } .cfg .h-no { fill:var(--err) } .cfg .h-bk { fill:var(--amber) }
+.legend { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; font-size:12.5px; color:var(--mute); padding:0 0 18px }
+.legend i { display:inline-block; width:14px; height:2px; vertical-align:middle; margin-right:6px }
+
+/* team */
+.team { padding:26px 20px; display:grid; gap:22px }
+.prog { border-radius:14px; padding:16px; text-align:center; background:var(--amber-soft); border:1px solid color-mix(in srgb, var(--amber) 40%, transparent) }
+.prog b { display:block; font-size:16px; font-weight:600 }
+.prog span { font-size:13px; color:var(--mute) }
+.visitors { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; position:relative }
+.visitors::before { content:""; position:absolute; left:12.5%; right:12.5%; top:-12px; border-top:1px dashed color-mix(in srgb, var(--amber) 50%, transparent) }
+.v { border-radius:12px; padding:12px; background:var(--tile); border:1px solid var(--rule2); font:11.5px/1.6 var(--mono); color:var(--mute); position:relative; min-width:0; overflow-wrap:anywhere }
+.v::before { content:""; position:absolute; left:50%; top:-12px; height:12px; border-left:1px dashed color-mix(in srgb, var(--amber) 50%, transparent) }
+.v b { display:block; color:var(--ink); font:600 13px var(--sans); margin-bottom:4px }
+.v em { font-style:normal; color:var(--ok) }
+@media (max-width:560px){ .visitors { grid-template-columns:repeat(2,minmax(0,1fr)) } .visitors::before, .v::before { display:none } }
+
+/* compare */
+.compare { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:56px; max-width:860px; margin-inline:auto }
+.col { border-radius:28px; padding:36px 28px; text-align:center; background:var(--tile) }
+.col.us { box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--amber) 55%, transparent) }
+.col h3 { font-size:32px; letter-spacing:-.035em }
+.col .tag { font-size:14px; color:var(--mute); margin-top:4px }
+.col ul { list-style:none; padding:0; margin:26px 0 0; display:grid }
+.col li { padding:16px 0; border-top:1px solid var(--rule2); display:grid; gap:3px }
+.col li b { font-size:17px; font-weight:600 }
+.col li span { font-size:13px; color:var(--mute) }
+.col.them li b { color:var(--mute); font-weight:500 }
+.honest { max-width:680px; margin:32px auto 0; text-align:center; color:var(--mute); font-size:15px; line-height:1.5 }
+.honest b { color:var(--ink); font-weight:600 }
+@media (max-width:640px){ .compare { grid-template-columns:1fr } }
+
+/* start */
+.start { margin:56px auto 0; max-width:860px; background:var(--tile); border-radius:28px; overflow:hidden }
+.start-tabs { display:flex; justify-content:center; padding:20px 16px 0 }
+.start-tabs .seg { margin:0; background:var(--rule2); overflow-x:auto; max-width:100% }
+.start-tabs .seg button { font-size:13.5px; padding:7px 16px; white-space:nowrap }
+.start-panel { position:relative; margin:20px; background:var(--well); border:1px solid var(--rule2); border-radius:16px }
+.start-panel pre { margin:0; padding:24px 22px; font-size:13px; line-height:1.85; overflow-x:auto; white-space:pre }
+.start-panel .c { color:var(--faint) }
+.copy { position:absolute; top:12px; right:12px; font:500 12px var(--sans); color:var(--link); background:var(--tile); border:1px solid var(--rule2); border-radius:980px; padding:5px 12px; cursor:pointer }
+.reqs { text-align:center; margin-top:22px; font-size:14px; color:var(--mute) }
+.reqs code { font-size:.92em; color:var(--ink) }
+
+footer { margin-top:clamp(96px,12vw,150px); border-top:1px solid var(--rule2); padding-block:22px 36px; font-size:12px; color:var(--mute); display:grid; gap:12px }
+footer .in { max-width:var(--col); margin-inline:auto; width:100%; display:flex; gap:18px; flex-wrap:wrap; justify-content:space-between }
+footer a { color:var(--mute) } footer a:hover { color:var(--ink) }
+footer .links { display:flex; gap:18px; flex-wrap:wrap }
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .rise { animation:rise linear both; animation-timeline:view(); animation-range:entry 0% cover 28% }
+    @keyframes rise { from { transform:translateY(48px) scale(.975) } to { transform:none } }
+  }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto } .step { transition:none } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="in">
+    <a class="name" href="#top"><svg class="glyph" viewBox="19 19 58 58" aria-hidden="true"><use href="#rdis-cells"/><rect x="60.5" y="19" width="16.5" height="16.5" rx="3.5" fill="var(--amber)"/></svg>rdis</a>
+    <nav aria-label="Primary">
+      <a href="#highlights">Highlights</a>
+      <a href="#lift">Bytes to C</a>
+      <a href="#formats">Formats</a>
+      <a href="#agents">Agents</a>
+      <a href="#compare">Compare</a>
+      <a href="https://github.com/sagarchive/rdis">GitHub</a>
+      <a class="pill sm" href="#start">Get started</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <div class="hero wrap">
+    <svg class="appicon" viewBox="0 0 96 96" role="img" aria-label="rdis icon">
+      <defs>
+        <linearGradient id="ai-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b2b30"/><stop offset="1" stop-color="#0d0d0f"/></linearGradient>
+        <linearGradient id="ai-amb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd194"/><stop offset=".5" stop-color="#f0a35a"/><stop offset="1" stop-color="#e0663f"/></linearGradient>
+        <g id="rdis-cells"><rect x="19" y="19" width="16.5" height="16.5" rx="3.5"/><rect x="39.75" y="19" width="16.5" height="16.5" rx="3.5"/><rect x="19" y="39.75" width="16.5" height="16.5" rx="3.5"/><rect x="19" y="60.5" width="16.5" height="16.5" rx="3.5"/></g>
+      </defs>
+      <rect width="96" height="96" rx="21.3" fill="url(#ai-bg)"/>
+      <use href="#rdis-cells" fill="#f5f5f7"/>
+      <rect x="60.5" y="19" width="16.5" height="16.5" rx="3.5" fill="url(#ai-amb)"/>
+    </svg>
+    <p class="eyebrow">rdis 1.0</p>
+    <h1><span class="grad">Read any binary.</span></h1>
+    <p class="lede">A disassembler and decompiler that runs in your browser. <strong>Mach-O, ELF, PE and WebAssembly</strong> on macOS, Linux and Windows, with an MCP server your AI agent can drive.</p>
+    <div class="ctas">
+      <a class="pill lg" href="#start">Get started</a>
+      <a class="more" href="https://github.com/sagarchive/rdis">View on GitHub</a>
+    </div>
+
+    <figure class="shot" id="demo" style="margin-bottom:0" aria-label="Interactive rdis demo">
+      <div class="win">
+        <div class="win-top">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <span class="doc">demo.bin</span><span class="hide-s">raw · arm64</span>
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" id="dv-asm" data-v="asm" aria-pressed="true">Assembly</button>
+            <button type="button" id="dv-c" data-v="c" aria-pressed="false">C</button>
+            <button type="button" id="dv-cfg" data-v="cfg" aria-pressed="false">CFG</button>
+            <button type="button" id="dv-hex" data-v="hex" aria-pressed="false">Hex</button>
+          </div>
+        </div>
+        <div class="ws">
+          <div class="ws-nav">
+            <div class="t"><span class="on">Proc</span><span>Str</span><span>Imp</span></div>
+            <div id="d-funcs" role="listbox" aria-label="Functions"></div>
+            <p class="tip">Double-click to rename</p>
+          </div>
+          <div class="ws-main"><pre class="d-code" id="d-code" tabindex="0" aria-live="polite"></pre></div>
+          <div class="ws-ins">
+            <div class="ins-tabs" role="tablist" aria-label="Side panel">
+              <button type="button" role="tab" id="it-info" aria-selected="true" data-p="info">Inspector</button>
+              <button type="button" role="tab" id="it-agent" aria-selected="false" data-p="agent">Agent</button>
+            </div>
+            <div id="p-info" class="ins-body"></div>
+            <div id="p-agent" class="ins-body agent-log" hidden></div>
+          </div>
+        </div>
+        <div class="win-foot">
+          <span id="d-status">demo.bin · 100 bytes · 2 functions</span>
+          <span class="foot-act">
+            <button type="button" class="ghost" id="d-reset">Reset</button>
+            <button type="button" class="pill sm" id="d-agent">Let an agent take over</button>
+          </span>
+        </div>
+      </div>
+      <figcaption class="demo-cap">A live simulation. Every listing is real rdis output for a 100-byte ARM64 program.</figcaption>
+    </figure>
+  </div>
+
+  <section id="highlights" class="wide" aria-labelledby="hl-h">
+    <div class="head">
+      <h2 id="hl-h">Get the highlights.</h2>
+    </div>
+    <div class="bento">
+      <div class="tile s2 rise">
+        <p class="lbl">Formats</p>
+        <p class="mid">Executables, libraries, firmware and the packages they ship in.</p>
+        <div class="chips"><span>Mach-O</span><span>ELF</span><span>PE</span><span>WebAssembly</span><span>Raw firmware</span><span>APK</span><span>IPA</span><span>DMG</span></div>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">Runs on</p>
+        <p class="os"><span>macOS.</span><span>Linux.</span><span>Windows.</span></p>
+        <p class="note">One <strong>pip install</strong>. Opens in any modern browser.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">Decompiled in testing</p>
+        <p class="big grad">47k+</p>
+        <p class="note">functions across <strong>699 real binaries</strong>, with zero crashes.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">MCP tools</p>
+        <p class="big">12</p>
+        <p class="note">Built in, with <strong>zero dependencies</strong>. Any agent can call them.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">CPUs</p>
+        <p class="big">7</p>
+        <p class="note">x86, x86-64, ARM with Thumb, ARM64, MIPS, RISC-V and WASM.</p>
+      </div>
+      <div class="tile s2 rise">
+        <p class="lbl">Teams</p>
+        <p class="mid">Analyzed once. Shared by everyone.</p>
+        <p class="note">Host it for your team. Each person keeps their own names and comments, while the heavy analysis is <strong>shared by everyone</strong>.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">License</p>
+        <p class="big">MIT</p>
+        <p class="note">Free and open source.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">Reopen</p>
+        <p class="big grad">0.6s</p>
+        <p class="note">for a 9 MB Flutter library that takes 31s to analyze cold. The analysis is <strong>cached by content</strong>.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">JNI</p>
+        <p class="big">229</p>
+        <p class="note">JNIEnv calls named, and <strong>RegisterNatives</strong> tables traced to the Java methods they implement.</p>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">MIPS and RISC-V</p>
+        <p class="big">0</p>
+        <p class="note">failures decompiling 1,200 functions from Debian's busybox, delay slots and all.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="lift" aria-labelledby="lift-h">
+    <div class="head wrap">
+      <p class="over">Decompiler</p>
+      <h2 id="lift-h">From 36 bytes<br>to readable C.</h2>
+      <p>Scroll to watch rdis lift one real function. Every line on the right is <strong>actual rdis output</strong>.</p>
+    </div>
+    <div class="story">
+      <div class="steps">
+        <div class="step" data-mode="bytes">
+          <span class="n">Bytes</span>
+          <h3>It starts as nine words of machine code.</h3>
+          <p>Nine little-endian ARM64 instructions. Nothing here says it's a string hash yet.</p>
+        </div>
+        <div class="step" data-mode="asm">
+          <span class="n">Assembly</span>
+          <h3>Decoded, split into blocks, cross-referenced.</h3>
+          <p>Capstone decodes each word. rdis finds the basic blocks, labels the branch targets and records who jumps where.</p>
+        </div>
+        <div class="step" data-mode="c">
+          <span class="n">Pseudo-code</span>
+          <h3>Lifted back into C you can read.</h3>
+          <p>The shift-and-add folds back into <code>x8 + (x8 &lt;&lt; 5)</code>. The first argument becomes a <code>char *</code> because the loop dereferences it. A double-click renamed <code>start</code> to <code>_djb2</code>.</p>
+        </div>
+      </div>
+      <figure class="stick" style="margin:0">
+        <div class="win">
+          <div class="win-top">
+            <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <span>hash.bin · arm64</span>
+            <div class="seg" role="group" aria-label="View">
+              <button type="button" id="v-bytes" data-mode="bytes" aria-pressed="false">Bytes</button>
+              <button type="button" id="v-asm" data-mode="asm" aria-pressed="false">Assembly</button>
+              <button type="button" id="v-c" data-mode="c" aria-pressed="true">C</button>
+            </div>
+          </div>
+          <pre class="code" id="lens" aria-live="polite"></pre>
+        </div>
+        <figcaption>rdis hash.bin --loader raw --arch arm64 -f start -d</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="formats" class="wide" aria-labelledby="fmt-h">
+    <div class="head">
+      <p class="over">Formats</p>
+      <h2 id="fmt-h">If it ships, rdis opens it.</h2>
+      <p>Drop an APK on the page and pick one library, or open all 200 at once. Each one is <strong>analyzed the first time you look at it</strong>.</p>
+    </div>
+    <div class="formats">
+      <div class="frow rise"><b>Binaries</b><div class="fitems">
+        <div class="fi"><strong>Mach-O</strong><span>thin and fat</span></div>
+        <div class="fi"><strong>ELF</strong><span>stripped too</span></div>
+        <div class="fi"><strong>PE</strong><span>.exe, .dll</span></div>
+        <div class="fi"><strong>WASM</strong><span>own reader</span></div>
+        <div class="fi"><strong>Raw</strong><span>firmware at any base</span></div>
+      </div></div>
+      <div class="frow rise"><b>Packages</b><div class="fitems">
+        <div class="fi"><strong>APK</strong><span>lib/*/*.so</span></div>
+        <div class="fi"><strong>IPA</strong><span>Payload/*.app</span></div>
+        <div class="fi"><strong>AAR</strong><span>jni/*/*.so</span></div>
+        <div class="fi"><strong>JAR</strong><span>bundled natives</span></div>
+        <div class="fi"><strong>ZIP</strong><span>any archive</span></div>
+        <div class="fi"><strong>DMG</strong><span>via hdiutil</span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <section class="wide" aria-labelledby="deep-h">
+    <div class="head">
+      <p class="over">Analysis</p>
+      <h2 id="deep-h">Look closer.</h2>
+    </div>
+    <div class="duo">
+      <article class="feat rise">
+        <h3>See the shape of a function.</h3>
+        <p>Basic blocks, colored branches and loop back edges. Export any graph as Graphviz DOT with <code>--cfg</code>.</p>
+        <div class="vis cfg">
+          <svg viewBox="0 0 440 392" role="img" aria-label="Control-flow graph of _djb2: an entry block, a loop block with a back edge, and an exit block">
+            <defs>
+              <marker id="a-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="h-ok"/></marker>
+              <marker id="a-no" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="h-no"/></marker>
+              <marker id="a-bk" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="h-bk"/></marker>
+            </defs>
+            <path class="e e-no" d="M210 86 V124" marker-end="url(#a-no)"/>
+            <path class="e e-ok" d="M370 51 H410 V341 H376" marker-end="url(#a-ok)"/>
+            <path class="e e-bk" d="M70 228 H30 V152 H64" marker-end="url(#a-bk)"/>
+            <path class="e e-no" d="M210 254 V300" marker-end="url(#a-no)"/>
+            <rect class="blk" x="70" y="16" width="300" height="70" rx="8"/>
+            <text x="84" y="38" class="lab">loc_100003f20:</text>
+            <text x="84" y="58"><tspan class="mn">mov </tspan> w8, #0x1505</text>
+            <text x="84" y="76"><tspan class="mn">cbz </tspan> x1, #0x100003f3c</text>
+            <rect class="blk" x="70" y="130" width="300" height="124" rx="8"/>
+            <text x="84" y="152" class="lab">loc_100003f28:</text>
+            <text x="84" y="172"><tspan class="mn">ldrb</tspan> w9, [x0], #1</text>
+            <text x="84" y="190"><tspan class="mn">add </tspan> w8, w8, w8, lsl #5</text>
+            <text x="84" y="208"><tspan class="mn">add </tspan> w8, w8, w9</text>
+            <text x="84" y="226"><tspan class="mn">subs</tspan> x1, x1, #1</text>
+            <text x="84" y="244"><tspan class="mn">b.ne</tspan> #0x100003f28</text>
+            <rect class="blk" x="70" y="306" width="300" height="70" rx="8"/>
+            <text x="84" y="328" class="lab">loc_100003f3c:</text>
+            <text x="84" y="348"><tspan class="mn">mov </tspan> w0, w8</text>
+            <text x="84" y="366"><tspan class="mn">ret </tspan></text>
+          </svg>
+          <div class="legend"><span><i style="background:var(--ok)"></i>taken</span><span><i style="background:var(--err)"></i>fall through</span><span><i style="background:var(--amber)"></i>loop</span></div>
+        </div>
+      </article>
+      <article class="feat rise">
+        <h3>Objective-C and Swift, put back together.</h3>
+        <p>Classes, categories, protocols, ivars with offsets, properties and selectors. Swift types with their fields and conformances, demangled.</p>
+        <div class="vis">
+<pre class="pcode"><span class="t-kw">@interface</span> <span class="t-ty">RDDocument</span> : <span class="t-ty">NSObject</span> &lt;<span class="t-ty">NSCopying</span>&gt; {
+    <span class="t-ty">NSString</span> *_path; <span class="t-cm">// +0x8</span>
+    <span class="t-ty">unsigned long long</span> _arch; <span class="t-cm">// +0x10</span>
+}
+<span class="t-kw">@property</span> (nonatomic, copy) <span class="t-ty">NSString</span> *path;
+- (<span class="t-ty">id</span>)initWithPath:(<span class="t-ty">id</span>)arg0; <span class="t-cm">// 0x100004a10</span>
+- (<span class="t-ty">id</span>)copyWithZone:(<span class="t-ty">void *</span>)arg0; <span class="t-cm">// 0x100004b2c</span>
++ (<span class="t-ty">id</span>)documentWithURL:(<span class="t-ty">id</span>)arg0; <span class="t-cm">// 0x100004b88</span>
+<span class="t-kw">@end</span>
+
+<span class="t-kw">@protocol</span> <span class="t-ty">RDExporting</span>
+- (<span class="t-ty">BOOL</span>)export:(<span class="t-ty">id</span>)arg0;
+<span class="t-kw">@optional</span> - (<span class="t-ty">id</span>)suggestedName;
+<span class="t-kw">@end</span>
+<span class="t-cm">// sample of the --classes format</span></pre>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="wide" aria-labelledby="ir-h">
+    <div class="head">
+      <p class="over">Decompiler</p>
+      <h2 id="ir-h">Android natives and odd CPUs, read as C.</h2>
+    </div>
+    <div class="duo">
+      <article class="feat rise">
+        <h3>JNI calls by name.</h3>
+        <p>A native method reaches Java through a table of 229 function pointers. rdis maps every slot, so the double indirection reads as the call it is.</p>
+        <div class="vis">
+<pre class="pcode"><span class="t-cm">// before: *(int64_t *)(*(int64_t *)x19 + 0x30)(x19, …)</span>
+x19_1-&gt;<span class="t-fn">FindClass</span>(<span class="t-st">"java/io/IOException"</span>)
+<span class="t-cm">// from libdatastore_shared_counter.so, arm64</span>
+
+<span class="t-cm">// a RegisterNatives table entry becomes a header:</span>
+<span class="t-cm">/* JNI native nativeInit(Ljava/lang/String;I)V */</span></pre>
+        </div>
+      </article>
+      <article class="feat rise">
+        <h3>Structs, recovered.</h3>
+        <p>MIPS and RISC-V go through an IR built on Ghidra's P-code, or on rdis's own frontend when pypcode isn't installed. Field accesses through a pointer argument become a real <code>struct</code>, shared with the functions it's passed to.</p>
+        <div class="vis">
+<pre class="pcode"><span class="t-kw">struct</span> <span class="t-ty">s_10100_0</span> {
+    <span class="t-ty">int64_t</span> f_0;   <span class="t-cm">/* +0x0 */</span>
+    <span class="t-ty">int64_t</span> f_8;   <span class="t-cm">/* +0x8 */</span>
+};
+
+<span class="t-ty">int64_t</span> <span class="t-fn">entry</span>(<span class="t-kw">struct</span> <span class="t-ty">s_10100_0</span> *a0) {
+    <span class="t-kw">return</span> a0-&gt;f_0 + a0-&gt;f_8;
+}
+<span class="t-cm">// RISC-V: ld, ld, add, ret</span></pre>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="agents" class="wide" aria-labelledby="ag-h">
+    <div class="head">
+      <p class="over">For AI agents</p>
+      <h2 id="ag-h">Your agent can<br>reverse engineer too.</h2>
+      <p>A built-in MCP server speaks stdio JSON-RPC with <strong>no dependencies</strong>. Point Claude, REA or any MCP client at it.</p>
+    </div>
+    <div class="feat full rise" style="margin-top:56px">
+      <div class="txt">
+        <h3>12 tools. Same analysis as the UI.</h3>
+        <p>Renames and comments an agent makes land in the same <code>.rdb</code> file you open in the browser.</p>
+        <div class="tools" aria-label="MCP tools"><code>info</code><code>list_functions</code><code>disassemble</code><code>decompile</code><code>cfg</code><code>strings</code><code>imports</code><code>classes</code><code>xrefs</code><code>hexdump</code><code>rename</code><code>comment</code></div>
+      </div>
+      <div class="vis rpc">
+<pre class="pcode"><span class="dir">→</span> <span class="t-cm">tools/call</span>
+  {<span class="t-st">"name"</span>: <span class="t-st">"decompile"</span>,
+   <span class="t-st">"arguments"</span>: {<span class="t-st">"path"</span>: <span class="t-st">"hash.bin"</span>, <span class="t-st">"func"</span>: <span class="t-st">"_djb2"</span>}}
+
+<span class="dir">←</span> <span class="t-ty">int64_t</span> <span class="t-fn">_djb2</span>(<span class="t-ty">char *</span> x0, <span class="t-ty">int64_t</span> x1) {
+      <span class="t-ty">int64_t</span> x8;
+      x8 = <span class="t-nm">0x1505</span>;
+      <span class="t-cm">…</span>
+
+<span class="dir">→</span> <span class="t-cm">tools/call</span>
+  {<span class="t-st">"name"</span>: <span class="t-st">"rename"</span>,
+   <span class="t-st">"arguments"</span>: {<span class="t-st">"addr"</span>: <span class="t-st">"0x100003f20"</span>, <span class="t-st">"name"</span>: <span class="t-st">"hash_name"</span>, <span class="t-cm">…</span>}}
+
+<span class="dir">←</span> {<span class="t-st">"ok"</span>: <span class="t-kw">true</span>, <span class="t-st">"name"</span>: <span class="t-st">"hash_name"</span>}</pre>
+      </div>
+    </div>
+    <div class="feat full rise" style="margin-top:16px">
+      <div class="txt">
+        <h3>Host it once. Your whole team uses it.</h3>
+        <p>Bind to <code>0.0.0.0</code> and every visitor gets a private session. The same binary is analyzed only once. Stress-tested with 20 concurrent visitors, with no leaks between sessions.</p>
+      </div>
+      <div class="vis">
+        <div class="team">
+          <div class="prog"><b>hash.bin</b><span>instructions, xrefs, strings · analyzed once</span></div>
+          <div class="visitors">
+            <div class="v"><b>Session A</b>start → <em>_djb2</em></div>
+            <div class="v"><b>Session B</b>start → <em>hash_name</em></div>
+            <div class="v"><b>Session C</b>; <em>loop over bytes</em></div>
+            <div class="v"><b>Session D</b>reading CFG</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare" class="wrap" aria-labelledby="cmp-h">
+    <div class="head">
+      <p class="over">Compare</p>
+      <h2 id="cmp-h">Which one is right for you?</h2>
+    </div>
+    <div class="compare">
+      <div class="col us rise">
+        <h3 class="grad">rdis</h3>
+        <p class="tag">Free · MIT</p>
+        <ul>
+          <li><b>macOS, Linux, Windows</b><span>Platforms</span></li>
+          <li><b>Mach-O, ELF, PE, WASM</b><span>Formats</span></li>
+          <li><b>APK, IPA, DMG in place</b><span>Packages</span></li>
+          <li><b>Browser, multi-user</b><span>Interface</span></li>
+          <li><b>Built in, zero deps</b><span>MCP server</span></li>
+          <li><b>import rdis</b><span>Scripting</span></li>
+        </ul>
+      </div>
+      <div class="col them rise">
+        <h3>Hopper</h3>
+        <p class="tag">Commercial</p>
+        <ul>
+          <li><b>macOS, Linux</b><span>Platforms</span></li>
+          <li><b>Mach-O, ELF, PE</b><span>Formats</span></li>
+          <li><b>Extract first</b><span>Packages</span></li>
+          <li><b>Desktop, single user</b><span>Interface</span></li>
+          <li><b>Separate server</b><span>MCP server</span></li>
+          <li><b>Python API in the app</b><span>Scripting</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="honest"><b>Where Hopper is still ahead:</b> its decompiler is more mature. rdis lifts code by matching patterns, so heavily optimized code comes out rougher, vectorized SIMD lifts to comments, and struct recovery stops at field offsets.</p>
+  </section>
+
+  <section id="start" class="wrap" aria-labelledby="start-h">
+    <div class="head">
+      <h2 id="start-h">Up and running<br>in a minute.</h2>
+      <p>Python 3, a virtual environment, one install. You get <strong>rdis</strong>, <strong>rdis-gui</strong> and <strong>rdis-mcp</strong>.</p>
+    </div>
+    <div class="start rise">
+      <div class="start-tabs">
+        <div class="seg" role="tablist" aria-label="Ways to use rdis">
+          <button type="button" role="tab" id="t-install" aria-controls="p-start" aria-selected="true" data-k="install">Install</button>
+          <button type="button" role="tab" id="t-gui" aria-controls="p-start" aria-selected="false" data-k="gui">Web UI</button>
+          <button type="button" role="tab" id="t-cli" aria-controls="p-start" aria-selected="false" data-k="cli">CLI</button>
+          <button type="button" role="tab" id="t-lib" aria-controls="p-start" aria-selected="false" data-k="lib">Library</button>
+          <button type="button" role="tab" id="t-mcp" aria-controls="p-start" aria-selected="false" data-k="mcp">MCP</button>
+        </div>
+      </div>
+      <div class="start-panel" id="p-start" role="tabpanel" aria-labelledby="t-install">
+        <pre id="start-code"></pre>
+        <button type="button" class="copy" id="copy">Copy</button>
+      </div>
+    </div>
+    <p class="reqs">Optional: <code>swift-demangle</code>, <code>c++filt</code>, <code>dot</code> and <code>lldb</code> unlock demangling, rendered graphs and the debugger.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="in">
+    <div class="links"><a href="#highlights">Highlights</a><a href="#lift">Bytes to C</a><a href="#formats">Formats</a><a href="#agents">Agents</a><a href="#start">Get started</a><a href="https://github.com/sagarchive/rdis">GitHub</a><a href="brand/">Brand</a></div>
+    <span>Built on Capstone and LIEF</span>
+  </div>
+  <div class="in"><span>Copyright © 2026 the rdis authors. MIT License.</span></div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Real rdis output for the 36-byte raw arm64 blob (function renamed start -> _djb2).
+  const VIEWS = {
+    bytes: [
+      "; hash.bin  36 bytes  raw @ 0x100003f20",
+      "",
+      "0x100003f20  a8 a0 82 52   ...R",
+      "0x100003f24  c1 00 00 b4   ....",
+      "0x100003f28  09 14 40 38   ..@8",
+      "0x100003f2c  08 15 08 0b   ....",
+      "0x100003f30  08 01 09 0b   ....",
+      "0x100003f34  21 04 00 f1   !...",
+      "0x100003f38  81 ff ff 54   ...T",
+      "0x100003f3c  e0 03 08 2a   ...*",
+      "0x100003f40  c0 03 5f d6   .._.",
+    ],
+    asm: [
+      "; ---- _djb2  (3 blocks) ----",
+      "loc_100003f20:",
+      "    0x100003f20  mov    w8, #0x1505",
+      "    0x100003f24  cbz    x1, #0x100003f3c",
+      "loc_100003f28:   ; xrefs: 0x100003f38",
+      "    0x100003f28  ldrb   w9, [x0], #1",
+      "    0x100003f2c  add    w8, w8, w8, lsl #5",
+      "    0x100003f30  add    w8, w8, w9",
+      "    0x100003f34  subs   x1, x1, #1",
+      "    0x100003f38  b.ne   #0x100003f28",
+      "loc_100003f3c:   ; xrefs: 0x100003f24",
+      "    0x100003f3c  mov    w0, w8",
+      "    0x100003f40  ret",
+    ],
+    c: [
+      "int64_t _djb2(char * x0, int64_t x1) {",
+      "    int64_t x8;",
+      "    int64_t t1;",
+      "",
+      "    x8 = 0x1505;",
+      "    if (x1 != 0) {",
+      "        while (1) {",
+      "            t1 = x1 != 1;",
+      "            x1 = x1 - 1;",
+      "            x8 = x8 + (x8 << 5) + (uint8_t)*x0;",
+      "            x0 = x0 + 1;",
+      "            if (!t1) break;",
+      "        }",
+      "    }",
+      "    return x8;",
+      "}",
+    ],
+  };
+
+  function hl(line, mode) {
+    const s = esc(line);
+    if (/^\s*;/.test(line)) return `<span class="t-cm">${s}</span>`;
+    if (mode === "bytes") {
+      return s.replace(/^(0x[0-9a-f]+)(\s+)((?:[0-9a-f]{2} ){3}[0-9a-f]{2})(\s+)(.*)$/,
+        (_, a, g, b, g2, t) => `<span class="t-ad">${a}</span>${g}<span class="t-nm">${b}</span>${g2}<span class="t-cm">${t}</span>`);
+    }
+    if (mode === "asm") {
+      if (/^loc_/.test(line)) return s.replace(/^(loc_[0-9a-f]+:)(.*)$/, `<span class="t-lb">$1</span><span class="t-cm">$2</span>`);
+      return s.replace(/^(\s+)(0x[0-9a-f]+)(\s+)(\S+)(.*)$/, (_, i, a, g, m, ops) =>
+        `${i}<span class="t-ad">${a}</span>${g}<span class="t-mn">${m}</span>` +
+        ops.replace(/#0x[0-9a-f]+|#\d+/g, x => `<span class="t-nm">${x}</span>`)
+           .replace(/\b([wx]\d+)\b/g, `<span class="t-rg">$1</span>`)
+           .replace(/\b(lsl)\b/g, `<span class="t-kw">$1</span>`));
+    }
+    return s
+      .replace(/\b(int64_t|uint8_t|char)\b/g, `<span class="t-ty">$1</span>`)
+      .replace(/\b(if|while|break|return)\b/g, `<span class="t-kw">$1</span>`)
+      .replace(/\b(0x[0-9a-f]+|\d+)\b/g, `<span class="t-nm">$1</span>`)
+      .replace(/\b(_djb2)\b/, `<span class="t-fn">$1</span>`);
+  }
+
+  // Lens: rewrites the same 16 rows between views with a short decode scramble.
+  const lens = document.getElementById("lens");
+  const N = 16;
+  const rows = Array.from({ length: N }, () => { const el = document.createElement("span"); el.className = "ln"; lens.appendChild(el); return el; });
+  let current = "c", plain = Array(N).fill(""), runId = 0;
+  const GLYPHS = "0123456789abcdef.;#[],";
+
+  function paint(mode) {
+    const L = VIEWS[mode];
+    rows.forEach((el, i) => { el.innerHTML = L[i] != null ? hl(L[i], mode) : ""; plain[i] = L[i] || ""; });
+  }
+  function morph(mode) {
+    const id = ++runId, L = VIEWS[mode], from = plain.slice(), t0 = performance.now();
+    function frame(now) {
+      if (id !== runId) return;
+      let done = true;
+      rows.forEach((el, i) => {
+        const to = L[i] || "", p = Math.min(1, Math.max(0, (now - t0 - i * 28) / 480));
+        if (p >= 1) { if (el.dataset.d !== String(id)) { el.innerHTML = to ? hl(to, mode) : ""; el.dataset.d = String(id); } return; }
+        done = false;
+        const len = Math.max(from[i].length, to.length), k = Math.floor(p * len);
+        let tail = "";
+        for (let j = k; j < Math.round(len * (1 - p * .6)); j++) tail += (to[j] === " " && from[i][j] === " ") ? " " : GLYPHS[(Math.random() * GLYPHS.length) | 0];
+        el.innerHTML = esc(to.slice(0, k)) + `<span class="scr">${esc(tail)}</span>`;
+      });
+      if (!done) requestAnimationFrame(frame);
+      else plain = Array.from({ length: N }, (_, i) => L[i] || "");
+    }
+    requestAnimationFrame(frame);
+  }
+  function show(mode) {
+    if (mode === current) return;
+    current = mode;
+    document.querySelectorAll("#lift .seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+    document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.mode === mode));
+    if (reduce) { runId++; paint(mode); } else morph(mode);
+  }
+  document.querySelectorAll("#lift .seg button").forEach(b => b.addEventListener("click", () => show(b.dataset.mode)));
+  paint("c");
+  document.querySelector('.step[data-mode="c"]').classList.add("on");
+
+  // Scroll drives the lens: whichever step crosses the middle of the viewport wins.
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && show(e.target.dataset.mode)),
+      { rootMargin: "-45% 0px -45% 0px" });
+    document.querySelectorAll(".step").forEach(s => io.observe(s));
+  }
+
+  // ---------------- Live demo: a tiny rdis over real output for demo.bin ----------------
+  // demo.bin = 25 arm64 words at 0x100003f00. Listings below are verbatim rdis output;
+  // {f00}/{f28} stand for the current (renameable) function names.
+  const WORDS = [0xA9BE7BFD,0xA90153F3,0x910003FD,0xAA0003F3,0x94000006,0xAA0003E1,0xAA1303E0,0xA94153F3,0xA8C27BFD,0x14000007,
+    0xAA0003E1,0x38401422,0x35FFFFE2,0xCB000020,0xD1000400,0xD65F03C0,
+    0x5282A0A8,0xB40000C1,0x38401409,0x0B081508,0x0B090108,0xF1000421,0x54FFFF81,0x2A0803E0,0xD65F03C0];
+  const BASE = 0x100003f00;
+  const FN = {
+    f00: { addr: 0x100003f00, orig: "start", ranges: [[0x100003f00, 0x100003f28], [0x100003f40, 0x100003f64]],
+      xrefs: "entry point", blocks: 4,
+      asm: [
+        "; ---- {f00}  (4 blocks) ----",
+        "loc_100003f00:",
+        "    0x100003f00  stp       x29, x30, [sp, #-0x20]!",
+        "    0x100003f04  stp       x19, x20, [sp, #0x10]",
+        "    0x100003f08  mov       x29, sp",
+        "    0x100003f0c  mov       x19, x0",
+        "    0x100003f10  bl        #0x100003f28              ; {f28}",
+        "    0x100003f14  mov       x1, x0",
+        "    0x100003f18  mov       x0, x19",
+        "    0x100003f1c  ldp       x19, x20, [sp, #0x10]",
+        "    0x100003f20  ldp       x29, x30, [sp], #0x20",
+        "    0x100003f24  b         #0x100003f40",
+        "loc_100003f40:   ; xrefs: 0x100003f24",
+        "    0x100003f40  mov       w8, #0x1505",
+        "    0x100003f44  cbz       x1, #0x100003f5c",
+        "loc_100003f48:   ; xrefs: 0x100003f58",
+        "    0x100003f48  ldrb      w9, [x0], #1",
+        "    0x100003f4c  add       w8, w8, w8, lsl #5",
+        "    0x100003f50  add       w8, w8, w9",
+        "    0x100003f54  subs      x1, x1, #1",
+        "    0x100003f58  b.ne      #0x100003f48",
+        "loc_100003f5c:   ; xrefs: 0x100003f44",
+        "    0x100003f5c  mov       w0, w8",
+        "    0x100003f60  ret",
+      ],
+      c: [
+        "int64_t {f00}(char * x0) {",
+        "    int64_t x0_1;",
+        "    int64_t x1;",
+        "    int64_t x8;",
+        "    int64_t t1;",
+        "    int64_t t2;",
+        "",
+        "    t1 = {f28}(x0);",
+        "    x0_1 = x0;",
+        "    x1 = t1;",
+        "    x8 = 0x1505;",
+        "    if (x1 != 0) {",
+        "        while (1) {",
+        "            t2 = x1 != 1;",
+        "            x1 = x1 - 1;",
+        "            x8 = x8 + (x8 << 5) + (uint8_t)*(uint8_t *)x0_1;",
+        "            x0_1 = x0_1 + 1;",
+        "            if (!t2) break;",
+        "        }",
+        "    }",
+        "    return x8;",
+        "}",
+      ],
+      // CFG from `rdis --cfg`: edge colors as rdis emits them (blue jump, green taken, red fall-through).
+      cfg: [
+        { lab: "loc_100003f00", ins: ["stp  x29, x30, [sp, #-0x20]!", "stp  x19, x20, [sp, #0x10]", "mov  x29, sp", "mov  x19, x0", "bl   {f28}", "mov  x1, x0", "mov  x0, x19", "ldp  x19, x20, [sp, #0x10]", "ldp  x29, x30, [sp], #0x20", "b    loc_100003f40"], out: [[1, "b"]] },
+        { lab: "loc_100003f40", ins: ["mov  w8, #0x1505", "cbz  x1, loc_100003f5c"], out: [[3, "g"], [2, "r"]] },
+        { lab: "loc_100003f48", ins: ["ldrb w9, [x0], #1", "add  w8, w8, w8, lsl #5", "add  w8, w8, w9", "subs x1, x1, #1", "b.ne loc_100003f48"], out: [[2, "g"], [3, "r"]] },
+        { lab: "loc_100003f5c", ins: ["mov  w0, w8", "ret"], out: [] },
+      ],
+    },
+    f28: { addr: 0x100003f28, orig: "sub_100003f28", ranges: [[0x100003f28, 0x100003f40]],
+      xrefs: "{f00}+0x10", blocks: 3,
+      asm: [
+        "; ---- {f28}  (3 blocks) ----",
+        "loc_100003f28:",
+        "    0x100003f28  mov       x1, x0",
+        "loc_100003f2c:   ; xrefs: 0x100003f30",
+        "    0x100003f2c  ldrb      w2, [x1], #1",
+        "    0x100003f30  cbnz      w2, #0x100003f2c",
+        "loc_100003f34:",
+        "    0x100003f34  sub       x0, x1, x0",
+        "    0x100003f38  sub       x0, x0, #1",
+        "    0x100003f3c  ret",
+      ],
+      c: [
+        "int64_t {f28}(char * x0) {",
+        "    int64_t x1;",
+        "    int64_t t1;",
+        "",
+        "    x1 = x0;",
+        "    while (1) {",
+        "        t1 = (uint8_t)*(uint8_t *)x1 != 0;",
+        "        x1 = x1 + 1;",
+        "        if (!t1) break;",
+        "    }",
+        "    return x1 - x0 - 1;",
+        "}",
+      ],
+      cfg: [
+        { lab: "loc_100003f28", ins: ["mov  x1, x0"], out: [[1, "b"]] },
+        { lab: "loc_100003f2c", ins: ["ldrb w2, [x1], #1", "cbnz w2, loc_100003f2c"], out: [[1, "g"], [2, "r"]] },
+        { lab: "loc_100003f34", ins: ["sub  x0, x1, x0", "sub  x0, x0, #1", "ret"], out: [] },
+      ],
+    },
+  };
+  const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
+  const D = { sel: "f00", view: "asm", names: { f00: "start", f28: "sub_100003f28" }, cmts: {}, cur: null, flash: null, run: 0, dirty: false };
+  const $ = id => document.getElementById(id);
+  const sleep = ms => new Promise(r => setTimeout(r, reduce ? Math.min(ms, 120) : ms));
+
+  const nameSpan = k => `<span class="t-fn nm${D.flash === k ? " flash" : ""}">${esc(D.names[k])}</span>`;
+  const sub = s => s.replace(/\{(f00|f28)\}/g, (_, k) => nameSpan(k));
+
+  function hlAsm(line) {
+    const i = line.indexOf("  ; {");
+    const body = i > 0 ? line.slice(0, i) : line;
+    let h = hl(body, "asm");
+    if (i > 0) h += `  <span class="t-cm">; </span>` + line.slice(i + 4);
+    return sub(h);
+  }
+  function hexLines(k) {
+    const out = [`; ---- ${D.names[k]}  hexdump ----`];
+    for (const [a, b] of FN[k].ranges) {
+      for (let p = a; p < b; p += 16) {
+        const bytes = [];
+        for (let q = p; q < Math.min(p + 16, b); q++) { const w = WORDS[(q - BASE) >> 2]; bytes.push((w >>> (8 * ((q - BASE) & 3))) & 255); }
+        const hx = bytes.map(x => x.toString(16).padStart(2, "0")).join(" ");
+        const as = bytes.map(x => x >= 32 && x < 127 ? String.fromCharCode(x) : ".").join("");
+        out.push(`<span class="t-ad">0x${p.toString(16)}</span>  <span class="t-nm">${hx.padEnd(47)}</span>  <span class="t-cm">${esc(as)}</span>`);
+      }
+    }
+    out[0] = `<span class="t-cm">${esc(out[0])}</span>`;
+    return out.join("\n");
+  }
+  function cfgSvg(k) {
+    const B = FN[k].cfg, LH = 15, PAD = 10, W = 270, X = 60, GAP = 34;
+    let y = 10; const pos = B.map(b => { const h = PAD * 2 + LH * (b.ins.length + 1); const p = { y, h }; y += h + GAP; return p; });
+    const H = y - GAP + 10, cx = X + W / 2;
+    let edges = "", side = 0;
+    B.forEach((b, i) => b.out.forEach(([j, c]) => {
+      const a = pos[i], t = pos[j];
+      if (j === i + 1) edges += `<path class="e e-${c}" d="M${cx} ${a.y + a.h} V${t.y - 4}" marker-end="url(#m-${c})"/>`;
+      else if (j > i) { const x = X + W + 22 + side++ * 12; edges += `<path class="e e-${c}" d="M${X + W} ${a.y + 18} H${x} V${t.y + 18} H${X + W + 4}" marker-end="url(#m-${c})"/>`; }
+      else edges += `<path class="e e-${c}" d="M${X} ${a.y + a.h - 14} H${X - 26} V${t.y + 18} H${X - 4}" marker-end="url(#m-${c})"/>`;
+    }));
+    const mk = c => `<marker id="m-${c}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="h-${c}"/></marker>`;
+    const blocks = B.map((b, i) => {
+      const p = pos[i];
+      const lines = b.ins.map((s, n) => {
+        const m = s.slice(0, 4).trim(), rest = esc(s.slice(5)).replace(/\{(f00|f28)\}/g, (_, kk) => `<tspan class="fnn">${esc(D.names[kk])}</tspan>`);
+        return `<text x="${X + 12}" y="${p.y + PAD + LH * (n + 2) - 3}"><tspan class="mn">${m}</tspan> ${rest}</text>`;
+      }).join("");
+      return `<rect class="blk" x="${X}" y="${p.y}" width="${W}" height="${p.h}" rx="7"/><text class="lab" x="${X + 12}" y="${p.y + PAD + LH - 3}">${b.lab}:</text>${lines}`;
+    }).join("");
+    return `<div class="d-cfg"><svg viewBox="0 0 ${X + W + 60} ${H}" role="img" aria-label="Control-flow graph of ${esc(D.names[k])}"><defs>${mk("g")}${mk("r")}${mk("b")}</defs>${edges}${blocks}</svg></div>`;
+  }
+  function body() {
+    const k = D.sel, f = FN[k];
+    if (D.view === "hex") return hexLines(k);
+    if (D.view === "cfg") return cfgSvg(k);
+    if (D.view === "c") return f.c.map(l => sub(hl(l, "c"))).join("\n");
+    return f.asm.map(l => {
+      const m = l.match(/0x[0-9a-f]{9}/), a = m && /^\s/.test(l) ? m[0] : null;
+      let h = /^\s/.test(l) ? hlAsm(l) : sub(hl(l, "asm"));
+      if (a && D.cmts[a]) h += `  <span class="ucm${D.flash === a ? " flash" : ""}">; ${esc(D.cmts[a])}</span>`;
+      return a && a === D.cur ? `<span class="cur">${h}</span>` : h;
+    }).join("\n");
+  }
+  function renderFuncs() {
+    $("d-funcs").innerHTML = Object.keys(FN).map(k =>
+      `<button type="button" class="fn${D.flash === k ? " flash" : ""}" role="option" data-k="${k}" aria-selected="${k === D.sel}" title="0x${FN[k].addr.toString(16)}">${esc(D.names[k])}</button>`).join("");
+  }
+  function renderInfo() {
+    const f = FN[D.sel];
+    $("p-info").innerHTML =
+      `<h4>Binary</h4><p>raw · arm64<br>base 0x100003f00</p>` +
+      `<h4>Function</h4><p class="t-fn">${esc(D.names[D.sel])}</p>` +
+      `<h4>Address</h4><p>0x${f.addr.toString(16)}</p>` +
+      `<h4>Blocks</h4><p>${f.blocks}</p>` +
+      `<h4>Xrefs to</h4><p>${sub(esc(f.xrefs))}</p>` +
+      `<h4>Analysis database</h4><p>${D.dirty ? "demo.bin.rdb · saved" : "no edits yet"}</p>`;
+  }
+  async function render(fade) {
+    const el = $("d-code");
+    if (fade && !reduce) { el.classList.add("fade"); await new Promise(r => setTimeout(r, 160)); }
+    el.innerHTML = body();
+    el.classList.remove("fade");
+    renderFuncs(); renderInfo();
+    document.querySelectorAll("#demo .seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === D.view)));
+    $("d-status").textContent = `demo.bin · 100 bytes · 2 functions${D.dirty ? " · saved to demo.bin.rdb" : ""}`;
+    const c = el.querySelector(".cur"); if (c) c.scrollIntoView({ block: "nearest" });
+  }
+  function select(k, view) { D.sel = k; if (view) D.view = view; D.cur = null; return render(true); }
+  function rename(k, name) {
+    if (!NAME_RE.test(name) || name === D.names[k]) return false;
+    D.names[k] = name; D.flash = k; D.dirty = true; render(false);
+    setTimeout(() => { if (D.flash === k) D.flash = null; }, 1500);
+    return true;
+  }
+  function startEdit(btn) {
+    if (D.run) return;
+    const k = btn.dataset.k, inp = document.createElement("input");
+    inp.value = D.names[k]; inp.setAttribute("aria-label", "New function name"); inp.spellcheck = false;
+    btn.textContent = ""; btn.appendChild(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = ok => { if (done) return; done = true; if (!(ok && rename(k, inp.value.trim()))) render(false); };
+    inp.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+    inp.addEventListener("blur", () => finish(true));
+    inp.addEventListener("click", e => e.stopPropagation());
+  }
+  $("d-funcs").addEventListener("click", e => { const b = e.target.closest(".fn"); if (b && !b.querySelector("input") && b.dataset.k !== D.sel) select(b.dataset.k); });
+  $("d-funcs").addEventListener("dblclick", e => { const b = e.target.closest(".fn"); if (b) startEdit(b); });
+  $("d-funcs").addEventListener("keydown", e => { const b = e.target.closest(".fn"); if (b && e.key === "F2") startEdit(b); });
+  document.querySelectorAll("#demo .seg button").forEach(b => b.addEventListener("click", () => { if (b.dataset.v !== D.view) { D.view = b.dataset.v; render(true); } }));
+
+  function panel(p) {
+    document.querySelectorAll(".ins-tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.p === p)));
+    $("p-info").hidden = p !== "info"; $("p-agent").hidden = p !== "agent";
+  }
+  document.querySelectorAll(".ins-tabs button").forEach(b => b.addEventListener("click", () => panel(b.dataset.p)));
+  const IDLE = `<p class="empty">An MCP agent calls the same 12 tools you get from <code>rdis.mcp_server</code>. Press <b>Let an agent take over</b> to watch one work.</p>`;
+  $("p-agent").innerHTML = IDLE;
+
+  function log(cls, html) { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; $("p-agent").appendChild(d); d.scrollIntoView({ block: "nearest" }); }
+  const call = (tool, args) => log("call", `→ <b>${tool}</b>${args ? " " + esc(args) : ""}`);
+
+  // Scripted agent session: each step is one MCP tool call, and the UI reacts the way the real GUI would.
+  async function agent() {
+    const id = ++D.run; const live = () => D.run === id;
+    $("d-agent").disabled = true; $("p-agent").innerHTML = ""; panel("agent");
+    const steps = [
+      async () => { call("list_functions"); await sleep(700); log("res", `${esc(D.names.f00)} · ${esc(D.names.f28)}`); },
+      async () => { call("decompile", `{"func":"${D.names.f28}"}`); await select("f28", "c"); await sleep(900); log("say", "It walks the string until the NUL byte and returns how far it got. That's strlen."); },
+      async () => { call("rename", `{"addr":"0x100003f28","name":"str_len"}`); await sleep(500); rename("f28", "str_len"); log("res", `{"ok": true}`); },
+      async () => { call("decompile", `{"func":"${D.names.f00}"}`); await select("f00", "c"); await sleep(1000); log("say", "Seed 5381 (0x1505), then hash = hash × 33 + c over the bytes. This is djb2."); },
+      async () => { call("rename", `{"addr":"0x100003f00","name":"djb2_hash"}`); await sleep(500); rename("f00", "djb2_hash"); log("res", `{"ok": true}`); },
+      async () => { call("comment", `{"addr":"0x100003f4c","text":"hash * 33"}`); D.view = "asm"; D.cur = "0x100003f4c"; D.cmts["0x100003f4c"] = "hash * 33"; D.flash = "0x100003f4c"; await render(true); log("res", `{"ok": true}`); },
+      async () => { call("cfg", `{"func":"djb2_hash"}`); await sleep(900); D.flash = null; D.view = "cfg"; D.cur = null; await render(true); log("res", "4 blocks · 1 loop"); },
+      async () => { await sleep(300); log("say", "Done. Two functions named and one comment added, saved to demo.bin.rdb for you to open in the browser."); },
+    ];
+    for (const s of steps) { if (!live()) return; await s(); await sleep(900); }
+    if (live()) { D.run = 0; $("d-agent").disabled = false; $("d-agent").textContent = "Run the agent again"; }
+  }
+  $("d-agent").addEventListener("click", () => { reset(false); agent(); });
+  function reset(full = true) {
+    D.run = 0; D.sel = "f00"; D.view = "asm"; D.cur = null; D.flash = null; D.dirty = false;
+    D.names = { f00: "start", f28: "sub_100003f28" }; D.cmts = {};
+    $("d-agent").disabled = false;
+    if (full) { $("d-agent").textContent = "Let an agent take over"; $("p-agent").innerHTML = IDLE; panel("info"); }
+    render(false);
+  }
+  $("d-reset").addEventListener("click", () => reset(true));
+  render(false);
+
+  // Get started
+  const START = {
+    install: `<span class="c"># macOS / Linux  (Windows: .venv\\Scripts\\activate)</span>
+python3 -m venv .venv && source .venv/bin/activate
+pip install .
+<span class="c"># optional native window for the GUI</span>
+pip install '.[desktop]'`,
+    gui: `rdis-gui ./MyApp --arch arm64        <span class="c"># opens http://127.0.0.1:8000</span>
+rdis-gui ./MyApp --desktop           <span class="c"># native window</span>
+rdis-gui --host 0.0.0.0 --port 8000  <span class="c"># host for your team</span>`,
+    cli: `rdis BIN                    <span class="c"># list functions</span>
+rdis BIN -f main            <span class="c"># disassemble</span>
+rdis BIN -f main -d         <span class="c"># decompile to C</span>
+rdis BIN -f main --cfg | dot -Tpng -o cfg.png
+rdis BIN --classes          <span class="c"># Objective-C / Swift</span>
+rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d`,
+    lib: `from rdis.loader import open_image
+from rdis.analysis import Program
+from rdis.decompile import Decompiler
+
+prog = Program(open_image("/bin/ls", arch="arm64")).analyze()
+print(Decompiler(prog, prog.functions[prog.resolve("_main")]).c())`,
+    mcp: `<span class="c"># register in any MCP client</span>
+{
+  "command": ".venv/bin/python",
+  "args": ["-m", "rdis.mcp_server"],
+  "cwd": "/path/to/rdis"
+}`,
+  };
+  const code = document.getElementById("start-code"), startPanel = document.getElementById("p-start");
+  const tabs = [...document.querySelectorAll("#start [role=tab]")];
+  function pick(btn) {
+    tabs.forEach(t => { const on = t === btn; t.setAttribute("aria-selected", String(on)); t.setAttribute("aria-pressed", String(on)); t.tabIndex = on ? 0 : -1; });
+    startPanel.setAttribute("aria-labelledby", btn.id);
+    code.innerHTML = START[btn.dataset.k];
+  }
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => pick(t));
+    t.addEventListener("keydown", e => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (d) { const n = tabs[(i + d + tabs.length) % tabs.length]; pick(n); n.focus(); }
+    });
+  });
+  pick(tabs[0]);
+
+  const copyBtn = document.getElementById("copy");
+  copyBtn.addEventListener("click", () => {
+    const text = code.textContent;
+    const done = msg => { copyBtn.textContent = msg; setTimeout(() => copyBtn.textContent = "Copy", 1400); };
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(() => done("Copied"))
+      .catch(() => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); done("Press ⌘C"); });
+  });
+})();
+</script>
+</body>
+</html>

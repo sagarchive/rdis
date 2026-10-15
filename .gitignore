@@ -9,6 +9,7 @@ __pycache__/
 # rdis runtime state (never commit uploaded binaries or per-binary analysis databases)
 .rdis_uploads/
 .rdis_db/
+.rdis_cache/
 *.rdb
 *.rdb.json
 

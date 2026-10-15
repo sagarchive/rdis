@@ -8,25 +8,39 @@
   rdis BIN --classes            Objective-C / Swift type declarations
   rdis BIN --imports            imported symbols
   rdis BIN --json ...           machine-readable form of any of the above
+  rdis app.apk                  APK/IPA/AAR/JAR/ZIP/DMG: list the native libraries inside
+  rdis app.apk -l lib/arm64-v8a/libfoo.so [any command above]   analyze that member
 Options: --arch NAME (fat Mach-O slice), --loader raw --base 0xADDR (headerless blob).
 """
 import argparse, json, sys
 
 from .loader import open_image
 from .analysis import Program
-from . import render
+from . import cache, containers, render
 from .decompile import Decompiler
 
 
-def build(args):
+def build(args, path):
     opts = {}
     if args.loader:
         opts["loader"] = args.loader
     if args.base:
         opts["base"] = args.base
-    prog = Program(open_image(args.binary, arch=args.arch, **opts)).analyze()
+    prog = cache.analyze(open_image(path, arch=args.arch, **opts))
     prog.load(prog.rdb_path())  # CLI owns one workspace: restore saved renames/comments
     return prog
+
+
+def list_containers(path, libs, as_json=False):
+    if as_json:
+        print(json.dumps([{"entry": s["entry"], "arch": s.get("arch"), "size": s.get("size")}
+                          for s in libs], indent=2))
+    else:
+        print(f"{path}: {len(libs)} native libraries")
+        for s in libs:
+            size = f"{s['size']:>10,} B" if s.get("size") is not None else " " * 13
+            print(f"  {size}  {s.get('arch') or '-':<7}  {s['entry']}")
+        print(f"\npick one with:  rdis {path} -l {libs[0]['entry']}")
 
 
 def main(argv=None):
@@ -38,12 +52,29 @@ def main(argv=None):
     p.add_argument("--strings", action="store_true")
     p.add_argument("--classes", action="store_true", help="Objective-C / Swift declarations")
     p.add_argument("--imports", action="store_true")
+    p.add_argument("-l", "--entry", metavar="MEMBER",
+                   help="archive member to analyze (APK/IPA/AAR/JAR/ZIP/DMG): full path, or a "
+                        "unique part like libfoo.so")
     p.add_argument("--arch", help="slice to use for a fat Mach-O (x86_64, arm64, ...)")
     p.add_argument("--loader", help="force a plugin loader (e.g. raw)")
     p.add_argument("--base", help="load address for --loader raw")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
-    prog = build(a)
+    try:
+        path = a.binary
+        if a.entry:
+            path = containers.extract(path, containers.find_entry(path, a.entry))
+        else:
+            libs = [s for s in containers.slices(path) if s.get("entry") and not s.get("disabled")]
+            if libs and len(libs) > 1:
+                list_containers(path, libs, a.json)
+                return
+            if libs:
+                print(f"rdis: 1 native library; analyzing {libs[0]['entry']}", file=sys.stderr)
+                path = containers.extract(path, libs[0]["entry"])
+        prog = build(a, path)
+    except (KeyError, ValueError) as e:
+        sys.exit(f"rdis: {e}")
 
     if a.strings:
         s = prog.strings()
@@ -79,7 +110,7 @@ def main(argv=None):
     elif a.cfg:
         print(render.to_dot(prog, func))
     elif a.json:
-        print(json.dumps({hex(b.addr): [f"{i.mnemonic} {i.op_str}" for i in b.insns]
+        print(json.dumps({hex(b.addr): [f"{i.mnemonic} {i.op_str}" for i in b.shown]
                           for b in func.blocks.values()}))
     else:
         print(render.disassemble(prog, func))

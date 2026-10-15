@@ -350,6 +350,202 @@ def test_arm_thumb():
     print("ok  arm_thumb: Thumb decode + bit0 stripping, no phantom twins")
 
 
+def test_tail_call():
+    """Register tail-calls (`br x2`, vtable/JNIEnv dispatch) must not silently vanish into a bare
+    `return;` — the IJMP terminator has no successors and used to be swallowed by the RET path."""
+    from rdis.arch import IJMP
+    p = Program(open_image("/bin/ls", arch="arm64")).analyze()
+    checked = 0
+    for a, f in p.functions.items():
+        if not any(p.arch.kind(b.insns[-1]) == IJMP and not [s for s in b.succs if s in f.blocks]
+                   for b in f.blocks.values()):
+            continue
+        c = Decompiler(p, f).c()
+        # the body must reference the indirect branch, not collapse to just `return;`
+        assert "tail-call" in c or "computed jump" in c or "goto *" in c, (hex(a), c)
+        assert c.strip().count("return;") == 0 or "(*" in c, (hex(a), c)
+        checked += 1
+        if checked >= 5:
+            break
+    assert checked, "no register-indirect-terminated function found to exercise the fix"
+    print(f"ok  tail_call: {checked} register-indirect terminators render the call, not a bare return")
+
+
+def test_jni():
+    """JNIEnv dispatch: slot offsets map to the right JNI function, and decompiled calls of the form
+    `*(int64_t *)(*(int64_t *)env + 0xOFF)(env, ...)` are rewritten to `env->Fn(...)`."""
+    from rdis import jni
+    assert jni.slot_name(0x20, 8) == "GetVersion"      # index 4
+    assert jni.slot_name(0x30, 8) == "FindClass"       # index 6
+    assert jni.slot_name(0x18, 8) is None              # reserved slot
+    assert jni.slot_name(0x18, 4) == "FindClass"       # 32-bit: index 6 * 4
+    out = jni.name_calls('t4 = *(int64_t *)(*(int64_t *)x19 + 0x30)(x19, "java/io/IOException");')
+    assert out == 't4 = x19->FindClass("java/io/IOException");', out
+    # GetObjectArrayElement is the offset the JNI assessment cited (0x568 on 64-bit)
+    assert jni.slot_name(0x568, 8) == "GetObjectArrayElement", jni.slot_name(0x568, 8)
+    # RegisterNatives table {name*, sig*, fn*}: once PIC (pointers only in RELA fixups), once with
+    # the pointers in the file (REL / arm32, Thumb bit set on fn).
+    from rdis.loader import Section
+    from rdis.arch import make
+
+    class Im:
+        def __init__(self, arch, blob, fixups):
+            self.arch, self.blob, self.fixups = make(arch), blob, fixups
+            self.sections = [Section(".text", 0x1000, 0x100, 0x1000, True),
+                             Section(".data", 0x2000, len(blob), 0x2000, False)]
+        def read(self, va, n):
+            return self.blob[va - 0x2000:va - 0x2000 + n] if va >= 0x2000 else b""
+        def is_code(self, va):
+            return 0x1000 <= va < 0x1100
+    strs = b"nativeInit\0(Ljava/lang/String;I)V\0"           # name @0x2000, sig @0x200b
+    pic = Im("arm64", strs.ljust(0x40, b"\0") + bytes(24), {0x2040: 0x2000, 0x2048: 0x200b, 0x2050: 0x1010})
+    assert jni.native_tables(pic) == {0x1010: ("nativeInit", "(Ljava/lang/String;I)V", False)}
+    words = b"".join(v.to_bytes(4, "little") for v in (0x2000, 0x200b, 0x1021))
+    rel = Im("arm", strs.ljust(0x40, b"\0") + words, {})
+    assert jni.native_tables(rel) == {0x1020: ("nativeInit", "(Ljava/lang/String;I)V", True)}
+    print("ok  jni: slot table + env->Fn() call naming + RegisterNatives tables")
+
+
+def _mini_elf(machine, wide, code, base=0x10000):
+    """Smallest ELF that loads: header + one R|X PT_LOAD covering the file, code at base+0x100."""
+    import struct
+    eh, ph = (64, 56) if wide else (52, 32)
+    ident = b"\x7fELF" + bytes([2 if wide else 1, 1, 1]) + bytes(9)
+    w = "Q" if wide else "I"
+    hdr = ident + struct.pack(f"<HHI{w}{w}{w}IHHHHHH", 2, machine, 1, base + 0x100, eh, 0, 0,
+                              eh, ph, 1, 64 if wide else 40, 0, 0)
+    size = 0x100 + len(code)
+    if wide:
+        phdr = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, size, size, 0x1000)
+    else:
+        phdr = struct.pack("<IIIIIIII", 1, 0, base, base, size, size, 5, 0x1000)
+    return (hdr + phdr).ljust(0x100, b"\0") + code
+
+
+def test_mips_riscv():
+    """MIPS (delay slots, lui/addiu pairs) and RISC-V (PC-relative targets, auipc/addi, `ret`
+    reported as a call by Capstone): functions, calls, blocks and string xrefs are recovered."""
+    import os, struct, tempfile
+    tmp = tempfile.mkdtemp()
+    words = lambda ws: b"".join(struct.pack("<I", x & 0xffffffff) for x in ws)
+    B = 0x10100
+    # MIPS o32 LE.  f1: addiu sp,-24; sw ra,20(sp); jal f2; nop; lw ra,20(sp); jr ra; addiu sp,24
+    #               f2 @+0x1c: lui a0,1; beq a0,zero,+1; addiu a0,a0,0x40 (slot); jr ra; nop
+    f2 = B + 0x1c
+    mips = words([0x27bdffe8, 0xafbf0014, (3 << 26) | (f2 >> 2), 0, 0x8fbf0014, 0x03e00008, 0x27bd0018,
+                  0x3c040001, 0x10800001, 0x24840140, 0x03e00008, 0])
+    p = os.path.join(tmp, "m.elf")
+    open(p, "wb").write(_mini_elf(8, False, mips))
+    prog = Program(open_image(p)).analyze()
+    assert prog.arch.name == "mipsel", prog.arch.name
+    assert {B, f2} <= set(prog.functions), [hex(a) for a in prog.functions]
+    assert f2 in prog.functions[B].calls
+    b0 = prog.functions[B].blocks[B]
+    assert b0.insns[-1].mnemonic == "jr" and b0.delay.mnemonic == "addiu", "delay slot kept with jr"
+    assert prog.arch.kind(b0.insns[-1]) == "ret"
+    assert any(s == f2 + 8 for s, _ in prog.xrefs_to(0x10140)), "lui/addiu in a delay slot -> xref"
+    # RISC-V 64 (RVC on).  f1: addi sp,-16; sd ra,8(sp); jal ra,f2; ld ra,8(sp); addi sp,16; ret
+    #                      f2 @+0x18: auipc a0,0; addi a0,a0,0x20; beq a0,zero,+8; nop; ret
+    jal = lambda rd, off: ((off >> 20 & 1) << 31) | ((off >> 1 & 0x3ff) << 21) | ((off >> 11 & 1) << 20) \
+        | ((off >> 12 & 0xff) << 12) | (rd << 7) | 0x6f
+    rv = words([0xff010113, 0x00113423, jal(1, 0x18 - 8), 0x00813083, 0x01010113, 0x00008067,
+                0x00000517, 0x02050513, 0x00050463, 0x00000013, 0x00008067])
+    p = os.path.join(tmp, "r.elf")
+    open(p, "wb").write(_mini_elf(243, True, rv))
+    prog = Program(open_image(p)).analyze()
+    f2 = B + 0x18
+    assert prog.arch.name == "riscv64"
+    assert f2 in prog.functions and f2 in prog.functions[B].calls, [hex(a) for a in prog.functions]
+    assert len(prog.functions[B].blocks) == 1, "ret ends f1 (Capstone files it under 'call')"
+    assert len(prog.functions[f2].blocks) == 3, "beq splits f2 at its PC-relative target"
+    assert any(s == f2 + 4 for s, _ in prog.xrefs_to(f2 + 0x20)), "auipc/addi -> xref"
+    print("ok  mips + riscv: delay slots, PC-relative targets, hi/lo address pairs")
+
+
+def test_analysis_cache():
+    """Persistent analysis DB: a restored analysis lists, links and decompiles exactly like a fresh
+    one — arm64, Thumb (per-block mode; `pop {.., pc}` is a return) and MIPS delay slots."""
+    import os, struct, tempfile
+    from rdis import cache
+    tmp = tempfile.mkdtemp()
+    os.environ["RDIS_CACHE_DIR"], cache.MIN_SECONDS = os.path.join(tmp, "c"), 0
+    B = 0x10100
+    # Thumb: f1: push {r7,lr}; bl f2; pop {r7,pc}   f2 @+8: bx lr      (entry odd -> Thumb)
+    thumb = bytes.fromhex("80b5" "00f001f8" "80bd" "7047")
+    elf = bytearray(_mini_elf(40, False, thumb))
+    elf[24:28] = struct.pack("<I", B | 1)
+    paths = [os.path.join(tmp, "t.elf")]
+    open(paths[0], "wb").write(elf)
+    mips = struct.pack("<7I", 0x27bdffe8, 0x0c004047, 0, 0x03e00008, 0x27bd0018, 0x03e00008, 0)
+    paths.append(os.path.join(tmp, "m.elf"))
+    open(paths[1], "wb").write(_mini_elf(8, False, mips))
+    for p, arch in [(paths[0], None), (paths[1], None), ("/bin/ls", "arm64")]:
+        fresh = cache.analyze(open_image(p, arch=arch))
+        warm = cache.analyze(open_image(p, arch=arch))
+        assert type(next(iter(warm.functions[warm.image.entry].blocks.values()))).__name__ == "LazyBlock"
+        assert set(fresh.functions) == set(warm.functions), p
+        assert {k: v for k, v in fresh.xrefs.items() if v} == {k: v for k, v in warm.xrefs.items() if v}, p
+        for a in fresh.functions:
+            assert render.disassemble(fresh, fresh.functions[a]) == render.disassemble(warm, warm.functions[a]), (p, hex(a))
+        e = fresh.image.entry
+        assert Decompiler(fresh, fresh.functions[e]).c() == Decompiler(warm, warm.functions[e]).c(), p
+    t = Program(open_image(paths[0])).analyze()
+    assert {B, B + 8} <= set(t.functions) and len(t.functions[B].blocks) == 1, "pop {r7, pc} returns"
+    print("ok  analysis cache: restored == fresh (arm64, Thumb, MIPS delay slots)")
+
+
+def test_ir():
+    """IR decompiler on MIPS/RISC-V, through Ghidra P-code AND our own frontend: delay-slot
+    semantics (the slot runs before the branch takes), returns, and struct recovery."""
+    import os, struct, tempfile
+    from rdis import ir, ir_front
+    x = ("v", "a0", 8)
+    assert ir.mkcast("int64_t", ir.mkcast("int32_t", x, 4), 8)[2][0] == "cast", "sext(trunc) keeps the trunc"
+    assert ir.mkcast("int32_t", ir.mkcast("int64_t", ("v", "b", 4), 8), 4) == ("v", "b", 4)
+    tmp = tempfile.mkdtemp()
+    # MIPS: f(a0, a1) { if (a0 == 0) return 7; return a0 + a1; }  -- both results come from delay slots
+    mips = struct.pack("<6I", 0x10800003, 0x00851021, 0x03e00008, 0, 0x03e00008, 0x24020007)
+    pm = os.path.join(tmp, "m.elf")
+    open(pm, "wb").write(_mini_elf(8, False, mips))
+    # RISC-V: g(p) { return p->f_0 + p->f_8; }
+    rv = struct.pack("<3IH", 0x00053783, 0x00853503, 0x00a78533, 0x8082)
+    pr = os.path.join(tmp, "r.elf")
+    open(pr, "wb").write(_mini_elf(243, True, rv))
+    fronts = ["native"] + (["pcode"] if ir_front.pypcode else [])
+    for front in fronts:
+        os.environ["RDIS_IR_FRONT"] = front
+        try:
+            p = Program(open_image(pm)).analyze()
+            c = Decompiler(p, p.functions[p.image.entry]).c()
+            assert "int32_t entry(int32_t a0, int32_t a1)" in c, (front, c)
+            assert "return 7;" in c and "a0 + a1" in c and "a0 == 0" in c, (front, c)
+            p = Program(open_image(pr)).analyze()
+            c = Decompiler(p, p.functions[p.image.entry]).c()
+            assert "struct s_" in c and "a0->f_0 + a0->f_8" in c and "int64_t f_8;" in c, (front, c)
+        finally:
+            os.environ.pop("RDIS_IR_FRONT", None)
+    print(f"ok  ir: delay slots, returns, struct recovery ({' + '.join(fronts)} frontends agree)")
+
+
+def test_overlay_isolation():
+    """One visitor marking a procedure must not write the shared analysis (xrefs/modes), and a
+    tampered .rdb sidecar must not inject non-string names, bogus types or junk addresses."""
+    import json, tempfile
+    base = Program(open_image("/bin/ls", arch="arm64")).analyze()
+    n0 = sum(len(v) for v in base.xrefs.values())
+    a, b = base.overlay(), base.overlay()
+    gap = next(x for x in range(base.image.entry + 0x400, base.image.entry + 0x4000, 4)
+               if base.function_at(x) is None and base.image.is_code(x))
+    a.create_function(gap)
+    assert sum(len(v) for v in base.xrefs.values()) == n0 and b.xrefs is base.xrefs
+    f = tempfile.mktemp()
+    json.dump({"names": {"1": {"a": 1}, "2": "ok", "x": "bad"}, "procs": ["zz", True],
+               "types": {"3": "evil"}}, open(f, "w"))
+    c = base.overlay().load(f)
+    assert c.user_names == {2: "ok"} and not c.user_types, (c.user_names, c.user_types)
+    print("ok  overlay isolation + sanitized .rdb load")
+
+
 def test_resolve_and_xrefs():
     p = Program(open_image("/bin/ls", arch="arm64")).analyze()
     entry = p.resolve("0x%x" % p.image.entry)
@@ -357,6 +553,149 @@ def test_resolve_and_xrefs():
     # at least one call target has recorded xrefs
     assert any(p.xrefs_to(a) for a in p.functions)
     print("ok  resolve + xrefs")
+
+
+def test_hostile_inputs():
+    """Crafted uploads: bounded WASM decode, safe archive extraction, corrupt caches, bad names."""
+    import gzip, io, json, tarfile, time, zipfile
+    from rdis import cache, containers, loader, objc, wasm
+    # WASM: a 30-byte module declaring 300M locals, and an endless LEB128 run, stay cheap
+    body = b"\x01\x80\xde\xc3\x8f\x01\x7f\x0b"
+    mod = (b"\0asm\1\0\0\0" + b"\x01\x04\x01\x60\x00\x00" + b"\x03\x02\x01\x00" +
+           b"\x0a" + bytes([len(body) + 2, 1, len(body)]) + body)
+    t = time.time()
+    w = wasm.WasmProgram("bomb.wasm", mod)
+    assert len(w.mod.funcs[0].locals) <= wasm._MAX_LOCALS and time.time() - t < 2
+    t = time.time()
+    try:
+        wasm.WasmProgram("leb.wasm", b"\0asm\1\0\0\0\x01" + b"\xff" * 200000 + b"\x00")
+    except ValueError:
+        pass
+    assert time.time() - t < 2, "LEB128 decode must be bounded"
+    # tar: symlink members are not extractable; a long member walk is capped
+    d = tempfile.mkdtemp(dir=TMP)
+    tp = os.path.join(d, "links.tar")
+    with tarfile.open(tp, "w") as tf:
+        ti = tarfile.TarInfo("evil"); ti.type = tarfile.SYMTYPE; ti.linkname = "/bin/ls"; tf.addfile(ti)
+    try:
+        containers.extract(tp, "evil", d)
+        raise AssertionError("tar symlink member extracted")
+    except KeyError:
+        pass
+    # zip: traversal names land in the cache dir under a sanitized name; a member whose CRC fails
+    # leaves no temp file behind; a "koly" zip comment does not divert it to the DMG path
+    zp = os.path.join(d, "a.apk")
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("../../../../evil.so", b"\x7fELF" + b"\0" * 64)
+        z.writestr("lib/x86/bad.so", b"\x7fELF" + b"A" * 4096)
+        z.comment = b"koly" * 8
+    out = containers.extract(zp, "../../../../evil.so", os.path.join(d, "c"))
+    assert os.path.dirname(out) == os.path.join(d, "c") and out.endswith("evil.so")
+    raw = bytearray(open(zp, "rb").read())
+    raw[raw.find(b"A" * 64) + 10] ^= 0xFF
+    open(zp, "wb").write(raw)
+    before = set(os.listdir(os.path.join(d, "c")))
+    try:
+        containers.extract(zp, "lib/x86/bad.so", os.path.join(d, "c"))
+        raise AssertionError("bad CRC accepted")
+    except zipfile.BadZipFile:
+        pass
+    assert set(os.listdir(os.path.join(d, "c"))) == before, "temp file leaked on failed extract"
+    # analysis cache: a truncated or non-object cache file falls back to a fresh analysis
+    old = os.environ.get("RDIS_CACHE_DIR"), cache.MIN_SECONDS
+    os.environ["RDIS_CACHE_DIR"], cache.MIN_SECONDS = os.path.join(d, "cache"), 0
+    try:
+        good = cache.analyze(open_image("/bin/ls", arch="arm64"))
+        f = os.path.join(d, "cache", os.listdir(os.path.join(d, "cache"))[0])
+        blob = open(f, "rb").read()
+        for bad in (blob[:len(blob) // 2], gzip.compress(b"[1, 2]")):
+            open(f, "wb").write(bad)
+            assert len(cache.analyze(open_image("/bin/ls", arch="arm64")).functions) == len(good.functions)
+    finally:
+        cache.MIN_SECONDS = old[1]
+        if old[0] is None:
+            os.environ.pop("RDIS_CACHE_DIR")
+        else:
+            os.environ["RDIS_CACHE_DIR"] = old[0]
+    # loader: non-UTF-8 LIEF names become str; an unmapped address has no file offset
+    assert loader._str(b"\xffab") == "�ab" and loader._str(None) == ""
+    im = open_image("/bin/ls", arch="arm64")
+    assert im.file_offset(0x1) is None
+    # ObjC: a method list claiming 0xFFFFFFFF entries is capped, not walked
+    class Img:
+        format, binds = "macho", {}
+        def read(self, va, n):
+            hdr = b"\x18\0\0\0\xff\xff\xff\xff"   # entsize 24, count 0xFFFFFFFF
+            return hdr[va - 0x1000:va - 0x1000 + n] if 0x1000 <= va < 0x1008 else b""
+        def ptr(self, va):
+            return 0
+    o = objc.ObjC.empty(Img())
+    o.im = Img()
+    t = time.time()
+    assert len(o._methods(0x1000, False)) == objc._MAX_LIST and time.time() - t < 10
+    print("ok  hostile inputs: wasm/tar/zip/cache/loader/objc bounded")
+
+
+def test_server_guards():
+    """Web server: CSRF/DNS-rebinding guards, Content-Length validation, typed edits, 404 routes."""
+    import http.client, json, threading
+    from http.server import ThreadingHTTPServer
+    from rdis import server
+    server.CFG.update(single_user=True, persist=False, allow_paths=True, allow_python=False)
+    server._local.session = server._get_session("local")
+    server.open_doc("/bin/ls", arch="arm64")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def call(method, path, body=b"", headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request(method, path, body=body, headers=headers or {})
+        r = c.getresponse()
+        return r.status, json.loads(r.read() or b"{}")
+    J = {"Content-Type": "application/json"}
+    try:
+        assert call("GET", "/api/info")[0] == 200
+        assert call("GET", "/api/info", headers={"Host": "evil.example:80"})[0] == 403, "DNS rebinding"
+        line = json.dumps({"line": "info"}).encode()
+        assert call("POST", "/api/command", line, {"Content-Type": "text/plain"})[0] == 403, "CSRF"
+        assert call("POST", "/api/command", line, {**J, "Origin": "http://evil.example"})[0] == 403
+        assert call("POST", "/api/command", line, J)[0] == 200
+        assert call("POST", "/api/close", b"", {**J, "Content-Length": "-1"})[0] == 400
+        assert call("GET", "/api/docs")[1]["docs"], "negative Content-Length must not run the route"
+        f = call("GET", "/api/functions")[1]["items"][0]["addr"]
+        bad = json.dumps({"addr": f, "name": {"a": 1}}).encode()
+        assert call("POST", "/api/rename", bad, J)[0] == 400, "non-string rename must be rejected"
+        long = json.dumps({"addr": f, "name": "x" * 5000}).encode()
+        assert call("POST", "/api/rename", long, J)[0] == 400
+        assert call("GET", "/api/search?q=sub")[0] == 200
+        assert call("GET", "/api/no_such_route")[0] == 404
+        assert call("GET", "/api/addrinfo?addr=0x1")[0] == 200, "unmapped address must serialize"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    # LRU: cookieless visitors must not evict a session that holds documents
+    server.CFG["max_sessions"], saved = 4, dict(server.SESSIONS)
+    try:
+        server.SESSIONS.clear()
+        server._get_session("a" * 32)["docs"]["x"] = object()
+        for n in range(10):
+            server._get_session("%032x" % n)
+        assert "a" * 32 in server.SESSIONS
+    finally:
+        server.CFG["max_sessions"] = 128
+        server.SESSIONS.clear()
+        server.SESSIONS.update(saved)
+    print("ok  server guards: host/origin/content-type, Content-Length, typed edits, 404, LRU")
+
+
+def test_mcp_malformed():
+    r = subprocess.run([sys.executable, "-m", "rdis.mcp_server"], input='not json\n[1]\n'
+                       '{"jsonrpc":"2.0","id":3,"method":"tools/list"}\n', capture_output=True, text=True,
+                       cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), timeout=60)
+    lines = [l for l in r.stdout.splitlines() if l.strip()]
+    assert len(lines) == 3 and '"id": 3' in lines[2] and "tools" in lines[2], r.stdout + r.stderr
+    print("ok  mcp: malformed lines answered with errors, server keeps running")
 
 
 if __name__ == "__main__":
@@ -371,5 +710,14 @@ if __name__ == "__main__":
     test_swift()
     test_wasm()
     test_arm_thumb()
+    test_tail_call()
+    test_jni()
+    test_mips_riscv()
+    test_analysis_cache()
+    test_ir()
+    test_overlay_isolation()
     test_resolve_and_xrefs()
+    test_hostile_inputs()
+    test_server_guards()
+    test_mcp_malformed()
     print("\nall checks passed")

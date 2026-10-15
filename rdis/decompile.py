@@ -164,9 +164,9 @@ class Structurer:
             out.append(("block", a))
             kind = self.arch.kind(self.blocks[a].insns[-1])
             ss = self.succ[a]
-            if kind == RET or not ss:
-                out.append(("ret", a))
-                return out
+            # IJMP must be checked before `not ss`: a register tail-call (`br x2`, JNIEnv/vtable
+            # dispatch, PLT tail) has no successors, and would otherwise be swallowed as a bare
+            # `return;`, silently dropping the call that IS the function body.
             if kind == IJMP:
                 out.append(("switch", a))
                 jt = getattr(self.prog, "jump_tables", {}).get(self.blocks[a].insns[-1].address)
@@ -175,6 +175,9 @@ class Structurer:
                         self.labels.add(t)   # every case target is a goto label, placed or not
                         if t not in self.placed and t in self.blocks:
                             out += self._seq(t, end, first=True)
+                return out
+            if kind == RET or not ss:
+                out.append(("ret", a))
                 return out
             if kind == CJMP and len(ss) == 2:
                 node, a = self._if(a, end)
@@ -421,9 +424,18 @@ def webs(func, live_in, live_out, defs):
 
 
 class Decompiler:
-    def __init__(self, prog, func):
+    # ISAs the pattern lifter models; the rest (MIPS, RISC-V, ...) decompile through the IR.
+    # RDIS_IR=1 routes every ISA through the IR (needs pypcode beyond MIPS/RISC-V).
+    LEGACY = ("x86", "x86_64", "arm64", "arm")
+
+    def __init__(self, prog, func, engine=None):
+        import os
+        from . import ir
         self.prog, self.func = prog, func
-        self.lifter = lift.Lifter(prog)
+        engine = engine or ("ir" if os.environ.get("RDIS_IR") == "1" or prog.arch.name not in self.LEGACY
+                            else "legacy")
+        self.engine = engine if engine == "legacy" or ir.IRLifter.supports(prog.arch) else "legacy"
+        self.lifter = ir.IRLifter(prog) if self.engine == "ir" else lift.Lifter(prog)
 
     _IDENT = re.compile(r"(?<![\w.])[A-Za-z_]\w*")  # not the x in 0x10
 
@@ -438,25 +450,37 @@ class Decompiler:
         sig = self.lifter.signature(self.func, name)   # first: scans args, resets temp state
         L = self.lifter
         returns = set() if L._ret_void else {L._canon(L.arch.fret if L._ret_fp else L.arch.ret)}
-        live_in, L.live_out, defs = liveness(L, self.func, returns)
+        live_in, L.live_out, defs = (L.liveness(self.func, returns) if hasattr(L, "liveness")
+                                     else liveness(L, self.func, returns))
         L.entry_names, L.def_names = webs(self.func, live_in, L.live_out, defs)
         body = self._tidy(self._emit(tree, 1))         # then: allocates temps/locals
         # count every identifier once; a temp used only by its own definition drops the "vN = "
         counts = Counter(self._IDENT.findall("\n".join(body)))
         dead = {t for t in self.lifter._temps if counts.get(t, 0) == 1}
+        tp = re.escape(getattr(L, "TEMP", "t"))
         if dead:
             # an unused temp: drop it if its value is pure, keep the expression if it calls
             def keep(ln):
-                m = re.fullmatch(r"\s*(t\d+) = (.*);", ln)
+                m = re.fullmatch(rf"\s*({tp}\d+) = (.*);", ln)
                 return not (m and m.group(1) in dead and not _CALL.search(m.group(2)))
-            body = [re.sub(r"^(\s*)(t\d+) = ", lambda m: m.group(1) if m.group(2) in dead else m.group(0), ln)
+            body = [re.sub(rf"^(\s*)({tp}\d+) = ", lambda m: m.group(1) if m.group(2) in dead else m.group(0), ln)
                     for ln in body if keep(ln)]
             counts = Counter(self._IDENT.findall("\n".join(body)))
         decls = [d for d in self.lifter.locals_block() if counts.get(d.split()[-1].rstrip(";").lstrip("*"), 0)]
-        decls = self._register_decls(sig, counts) + decls
+        decls = (L.register_decls(sig, counts) if hasattr(L, "register_decls")
+                 else self._register_decls(sig, counts)) + decls
         tables = self._table_decls(counts)   # static const arrays for recovered lookup tables
+        nat = getattr(self.prog, "jni_natives", {}).get(self.func.addr)
+        if nat:   # registered via RegisterNatives: show the Java-side method it implements
+            tables = tables + [f"/* JNI native {nat[0]}{nat[1]}  (env, thiz, ...) */"]
+        if hasattr(L, "preamble"):
+            tables = L.preamble(counts) + tables     # recovered struct declarations
+        if self.engine == "legacy" and self.prog.arch.name not in self.LEGACY:
+            tables = tables + [f"/* {self.prog.arch.name}: control flow recovered; instruction "
+                               "semantics shown as asm (install pypcode for the IR lifter) */"]
         lines = tables + [sig + " {"] + ["    " + d for d in decls] + ([""] if decls else []) + body + ["}"]
-        return "\n".join(lines)
+        from . import jni
+        return jni.name_calls("\n".join(lines))   # (*env)->Fn(…) for JNIEnv dispatch calls
 
     def _table_decls(self, counts):
         """`static const T table_X[] = { ... };` for each recovered lookup table used in the body."""
@@ -501,6 +525,10 @@ class Decompiler:
                 _, a, then, els, neg = node
                 cond = self.lifter.condition(self.func.blocks[a])
                 cond = negate(cond) if neg else cond
+                k = {"0": "0", "1": "1", "!0": "1", "!1": "0", "!(0)": "1", "!(1)": "0"}.get(cond.strip())
+                if k:                               # folded to a constant: keep only the live arm
+                    out += self._emit(then if k == "1" else els, depth)
+                    continue
                 t_out, e_out = self._emit(then, depth + 1), self._emit(els, depth + 1)
                 if not t_out and e_out:           # nothing to do when true: flip it
                     cond, t_out, e_out = negate(cond), e_out, []

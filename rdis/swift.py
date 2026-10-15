@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from .demangle import _pipe, _tool
 
 KINDS = {16: "class", 17: "struct", 18: "enum"}
+_MAX_SECT = 1 << 24   # section sizes are attacker-controlled: bound the walk (16M / 4 = 4M records)
 
 
 @dataclass
@@ -39,7 +40,7 @@ class Swift:
         if image.format != "macho" or not s:
             return
         raw_types = []
-        for o in range(0, s.size, 4):
+        for o in range(0, min(s.size, _MAX_SECT), 4):
             d = self._rel(s.va + o)
             if d & 1:  # indirect: points at a pointer to the descriptor
                 d = self.im.ptr(d & ~1)
@@ -59,7 +60,7 @@ class Swift:
         if not sec:
             return
         by_addr = {t.addr: t for t in types}
-        for o in range(0, sec.size, 4):
+        for o in range(0, min(sec.size, _MAX_SECT), 4):
             desc = self._rel(sec.va + o)
             proto = self._proto_name(desc)
             type_kind = int.from_bytes(self.im.read(desc + 12, 4), "little") & 0x7

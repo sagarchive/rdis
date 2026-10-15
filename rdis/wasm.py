@@ -10,9 +10,17 @@ listing/search); pseudo-code and CFG are reported as not-yet-supported for the s
 import struct
 
 
+_LEB_MAX = 10      # a 64-bit LEB128 is at most 10 bytes; longer runs are malformed (and would let a
+                   # crafted module build a megabit integer one byte at a time: quadratic CPU)
+_MAX_LOCALS = 50000  # per-function local count cap (engines enforce the same): a 30-byte module
+                     # declaring 300M locals would otherwise allocate gigabytes
+
+
 def _uleb(data, p):
     r = s = 0
     while True:
+        if s >= 7 * _LEB_MAX:
+            raise ValueError("LEB128 too long")
         b = data[p]
         p += 1
         r |= (b & 0x7F) << s
@@ -24,6 +32,8 @@ def _uleb(data, p):
 def _sleb(data, p):
     r = s = 0
     while True:
+        if s >= 7 * _LEB_MAX:
+            raise ValueError("LEB128 too long")
         b = data[p]
         p += 1
         r |= (b & 0x7F) << s
@@ -177,7 +187,10 @@ class WasmModule:
             sig = self.types[ti] if ti is not None and ti < len(self.types) else None
             name = self.func_names.get(idx) or export_name.get(idx) or f"func_{idx}"
             f = Func(idx, start, name, sig)
-            self._disasm_body(f, start, end)
+            try:
+                self._disasm_body(f, start, min(end, len(self.data)))
+            except Exception:
+                f.end = max(f.end, end)  # a malformed body keeps what decoded; others still load
             funcs.append(f)
             idx += 1
         self.by_index = {f.index: f for f in funcs}
@@ -190,6 +203,8 @@ class WasmModule:
             c, p = _uleb(data, p)
             t = _VALTYPE.get(data[p], "?")
             p += 1
+            if len(f.locals) + c > _MAX_LOCALS:
+                raise ValueError("too many locals")
             f.locals += [t] * c
         depth = 0
         while p < end:

@@ -1,4 +1,6 @@
-# rdis
+<p align="center"><img src="docs/brand/rdis-icon.svg" width="112" height="112" alt="rdis icon"></p>
+
+<h1 align="center">rdis</h1>
 
 A scriptable, multi-format disassembler and decompiler — a cross-platform, browser-based answer to
 Hopper. Pure Python over [Capstone](https://www.capstone-engine.org/) (decoding) and
@@ -11,17 +13,17 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Capability | rdis | Hopper |
 |---|---|---|
 | Formats | Mach-O (thin + fat), ELF, PE, **WebAssembly**, raw firmware | Mach-O/ELF/PE |
-| Containers | **APK / IPA / AAR / JAR / ZIP** (open one lib or the whole package), **DMG** (via `hdiutil`) | — |
-| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **WASM** | x86/x64/ARM |
+| Containers | **APK / IPA / AAR / JAR / ZIP** (open one lib or the whole package), **DMG** (via `hdiutil`), **tar / tar.gz / tar.xz**, transparent **gzip / xz / bzip2**; any other file opens as a **raw** binary | — |
+| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM** | x86/x64/ARM |
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
-| Function / basic-block discovery | symbols, function-starts, `.pdata`, prologue scan, call graph | yes |
+| Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
 | Control-flow graph | Graphviz DOT, colored edges | yes (native view) |
-| C pseudo-code | yes (structuring + symbolic lifter, expression propagation) | yes (more mature) |
+| C pseudo-code | yes: structuring + symbolic lifter (x86/ARM), plus an **IR decompiler** (Ghidra P-code via `pypcode`, or our own dependency-free MIPS/RISC-V frontend) with stack-frame recovery, cross-block constant propagation, conditional-move/trap merging | yes (more mature) |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
 | Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
-| Struct/field reconstruction | `p->field_N` for pointer args, `s[i]` for `char *` buffers | yes |
+| Struct/field reconstruction | `p->field_N` for pointer args, `s[i]` for `char *` buffers; IR path emits real `struct` declarations, **merged across calls** that pass the pointer on | yes |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
 | Cross-references | to any address/symbol | yes |
@@ -31,14 +33,17 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | AI integration | **built-in MCP server, zero deps** | MCP server |
 | Debugger | LLDB batch wrapper (static + live) | LLDB/GDB |
 | GUI | web three-pane (navigator / asm / pseudo-CFG), or native window | native app |
-| Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP | yes |
+| Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP; **content-addressed analysis cache** (`.rdis_cache/`) reopens a 9 MB Flutter lib in 0.6s instead of 31s | yes |
+| Android JNI | **`env->FindClass(...)` naming for all 229 JNIEnv slots; `RegisterNatives` tables found and their natives named + typed** | no |
 | Runs on Linux | **yes** | no (macOS only) |
 
 Where rdis is behind: the decompiler is a pragmatic pattern lifter, not a full IR/type-recovery
 pipeline, so its output on heavily optimized code is rougher. The lifter is most complete on
 arm64/x86-64; 32-bit ARM/Thumb decodes and structures correctly but some operand forms still lift to
-a raw-instruction line rather than a C expression. Like every decompiler (Hopper says so too), the
-pseudo-code is a reconstruction, not compilable source.
+a raw-instruction line rather than a C expression. MIPS and RISC-V decompile through the IR
+(tested on Debian's static busybox for mipsel/mips64el/riscv64: 1,200 functions, 0 failures);
+`RDIS_IR=1` routes any ISA through it for comparison. Like every decompiler (Hopper says so too),
+the pseudo-code is a reconstruction, not compilable source.
 
 ## Install
 
@@ -51,6 +56,8 @@ pip install '.[desktop]'      # also enables `rdis-gui --desktop` (native window
 ```
 
 Or just the libraries for development: `pip install capstone lief`.
+`pip install '.[ir]'` adds Ghidra's P-code semantics (`pypcode`) to the IR decompiler; without it
+MIPS/RISC-V still decompile through rdis's own frontend.
 
 Optional external tools (already present on a Mac with Xcode CLT) unlock extras:
 `swift-demangle`, `c++filt` (demangling), `dot`/viz.js (render CFGs), `lldb` (debugger).
@@ -85,8 +92,10 @@ switches **Assembly / Pseudo-code / CFG / Hex**. Double-click a function to rena
 instruction address to comment. Renames and comments save to `<binary>.rdb` next to the binary and
 reload automatically.
 
-Drop any file on the page: native binaries open directly; **APK/IPA/AAR/JAR/ZIP** and **DMG** images
-show a loader dialog listing the native libraries inside. Pick one (e.g. `lib/arm64-v8a/…​.so`), or
+Drop any file on the page: native binaries (Mach-O/ELF/PE/`.so`/`.dylib`) open directly;
+**APK/IPA/AAR/JAR/ZIP**, **DMG** images and **tar** archives show a loader dialog listing the native
+binaries inside; **gzip/xz/bzip2** files are decompressed automatically; and anything unrecognized
+opens as a **raw** binary at a chosen architecture. Pick one (e.g. `lib/arm64-v8a/…​.so`), or
 click **Open all N libraries** to load the whole package at once — every library becomes a switchable
 document in the toolbar list and is analyzed lazily the first time you open it, so even a 200-library
 APK opens instantly. Unchecking **Start automatic analysis** lists a file without analyzing it yet

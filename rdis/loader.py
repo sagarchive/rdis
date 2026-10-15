@@ -1,4 +1,5 @@
 """Binary loading: Mach-O (thin/fat), ELF and PE through LIEF, plus plugin loaders."""
+import bisect
 from dataclasses import dataclass
 import lief
 
@@ -42,7 +43,22 @@ class Image:
         return int.from_bytes(self.read(va, self.arch.bits // 8), "little")
 
     def section_at(self, va):
-        return next((s for s in self.sections if s.va <= va < s.va + s.size), None)
+        # hot path (every decoded instruction asks is_code): bisect over sections sorted by start.
+        # Sections may overlap (ELF segment fallback), so scan back a few for the containing one.
+        idx = getattr(self, "_sidx", None)
+        if idx is None or idx[0] is not self.sections or idx[1] != len(self.sections):
+            order = sorted(self.sections, key=lambda s: s.va)
+            idx = self._sidx = (self.sections, len(self.sections), [s.va for s in order], order)
+        starts, order = idx[2], idx[3]
+        i = bisect.bisect_right(starts, va) - 1
+        while i >= 0:
+            s = order[i]
+            if va < s.va + s.size:
+                return s
+            if starts[i] + 0x10000000 < va:   # ponytail: bounded backscan for overlapping sections
+                break
+            i -= 1
+        return None
 
     def is_code(self, va):
         s = self.section_at(va)
@@ -56,11 +72,24 @@ class Image:
         return self.symbols.get(va) or self.imports.get(va)
 
 
+def _str(n):
+    """LIEF hands back `bytes` for a name that is not valid UTF-8 (crafted/corrupt symbol tables);
+    everything downstream (demangling, JSON, sorting) needs str."""
+    return n.decode("utf-8", "replace") if isinstance(n, (bytes, bytearray)) else (n or "")
+
+
 def _arch_name(b):
     if isinstance(b, lief.MachO.Binary):
         return {"X86_64": "x86_64", "X86": "x86", "ARM64": "arm64", "ARM": "arm"}[b.header.cpu_type.__name__]
     if isinstance(b, lief.ELF.Binary):
-        return {"X86_64": "x86_64", "I386": "x86", "AARCH64": "arm64", "ARM": "arm"}[b.header.machine_type.__name__]
+        m = b.header.machine_type.__name__
+        wide = b.header.identity_class == lief.ELF.Header.CLASS.ELF64
+        if m in ("MIPS", "MIPS_RS3_LE"):
+            le = b.header.identity_data == lief.ELF.Header.ELF_DATA.LSB
+            return ("mips64" if wide else "mips") + ("el" if le else "")
+        if m == "RISCV":
+            return "riscv64" if wide else "riscv32"
+        return {"X86_64": "x86_64", "I386": "x86", "AARCH64": "arm64", "ARM": "arm"}[m]
     return {"AMD64": "x86_64", "I386": "x86", "ARM64": "arm64", "ARMNT": "arm"}[b.header.machine.__name__]
 
 
@@ -78,18 +107,18 @@ def _macho_imports(b, ptr):
         for n in range(s.size // step if step else 0):
             idx = s.reserved1 + n
             if idx < len(indirect) and indirect[idx].name:
-                out[s.virtual_address + n * step] = indirect[idx].name
+                out[s.virtual_address + n * step] = _str(indirect[idx].name)
     return out
 
 
 def _elf_imports(b):
-    out = {r.address: r.symbol.name for r in b.pltgot_relocations if r.has_symbol and r.symbol.name}
+    out = {r.address: _str(r.symbol.name) for r in b.pltgot_relocations if r.has_symbol and r.symbol.name}
     # PLT stubs jump through those GOT slots; resolved later by analysis via `imports` slots.
     return out
 
 
 def _pe_imports(b):
-    return {b.imagebase + e.iat_address: f"{imp.name}!{e.name or f'#{e.ordinal}'}"
+    return {b.imagebase + e.iat_address: f"{_str(imp.name)}!{_str(e.name) or f'#{e.ordinal}'}"
             for imp in b.imports for e in imp.entries}
 
 
@@ -106,7 +135,7 @@ def _sections(b):
             code = s.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE)
             va = b.imagebase + s.virtual_address
         if s.size:
-            out.append(Section(s.name, va, s.size, s.offset, code))
+            out.append(Section(_str(s.name), va, s.size, s.offset, code))
     if isinstance(b, lief.ELF.Binary) and not any(s.code for s in out):
         # section headers stripped (common in obfuscated/packed libs): LIEF reports no code, so
         # fall back to the executable LOAD segments to recover a code range for analysis.
@@ -130,24 +159,48 @@ def _pe_function_starts(b):
     return [b.imagebase + s for s in starts if s]
 
 
+def _arm_array_modes(b):
+    """ARM ELF: the DT_INIT_ARRAY / DT_FINI_ARRAY / DT_PREINIT_ARRAY tables hold function pointers
+    whose bit0 selects Thumb. LIEF lists those targets as functions but loses the mode; recover it
+    so init/fini routines decode correctly instead of as garbage ARM. Returns the Thumb addresses."""
+    thumb = set()
+    try:
+        tag = lief.ELF.DynamicEntry.TAG
+        pairs = [(tag.INIT_ARRAY, tag.INIT_ARRAYSZ), (tag.FINI_ARRAY, tag.FINI_ARRAYSZ),
+                 (tag.PREINIT_ARRAY, tag.PREINIT_ARRAYSZ)]
+        have = {d.tag: d.value for d in b.dynamic_entries}
+        ptr = b.header.identity_class == lief.ELF.Header.CLASS.ELF64 and 8 or 4
+        for a_tag, sz_tag in pairs:
+            if a_tag not in have or sz_tag not in have:
+                continue
+            raw = bytes(b.get_content_from_virtual_address(have[a_tag], have[sz_tag]))
+            for o in range(0, len(raw) - ptr + 1, ptr):
+                v = int.from_bytes(raw[o:o + ptr], "little")
+                if v & 1:
+                    thumb.add(v & ~1)
+    except Exception:
+        pass
+    return thumb
+
+
 def _symbols(b):
     base = b.imagebase if isinstance(b, (lief.MachO.Binary, lief.PE.Binary)) else 0
     out = {}
     for f in b.functions:  # symbols + LC_FUNCTION_STARTS / .eh_frame / PE exception table
         a = f.address + (base if 0 < f.address < base else 0)
         if f.name:
-            out[a] = f.name
+            out[a] = _str(f.name)
         else:
             out.setdefault(a, "")
     if isinstance(b, lief.PE.Binary):
         for a in _pe_function_starts(b):
             out.setdefault(a, "")
         for e in b.exported_functions:
-            out[base + e.address] = e.name
+            out[base + e.address] = _str(e.name)
         return out
     for s in b.symbols:
         if s.value and s.name:
-            out[s.value] = out.get(s.value) or s.name
+            out[s.value] = out.get(s.value) or _str(s.name)
     return out
 
 
@@ -180,13 +233,18 @@ def open_image(path, arch=None, **opts):
     owner = None
     if lief.is_macho(path):  # lief.parse would silently pick the first fat slice
         owner = lief.MachO.parse(path)  # slices die with their FatBinary, so keep it on the Image
-        slices = list(owner)
+        slices = list(owner) if owner is not None else []
+        if not slices:
+            raise ValueError(f"malformed Mach-O (no parseable slice): {path}")
         b = next((s for s in slices if arch and _arch_name(s) == archmod.make(arch).name), slices[0])
     else:
         b = lief.parse(path)
     if b is None:
         raise ValueError(f"not a Mach-O/ELF/PE file: {path}")
-    a = archmod.make(_arch_name(b))
+    try:
+        a = archmod.make(_arch_name(b))
+    except KeyError as e:   # e.g. e_machine NONE in a truncated/crafted header
+        raise ValueError(f"unsupported CPU architecture {e} in {path}") from None
     if isinstance(b, lief.MachO.Binary):
         fmt, imports = "macho", _macho_imports(b, a.bits // 8)
     elif isinstance(b, lief.ELF.Binary):
@@ -195,14 +253,16 @@ def open_image(path, arch=None, **opts):
         fmt, imports = "pe", _pe_imports(b)
     def offset_of(va):
         try:
-            return b.virtual_address_to_offset(va - (b.imagebase if fmt == "pe" else 0))
+            off = b.virtual_address_to_offset(va - (b.imagebase if fmt == "pe" else 0))
         except Exception:
             return None
+        return off if isinstance(off, int) else None   # LIEF returns a lief_errors value, not raise
     raw = _symbols(b)
     thumb = set()
     entry = b.entrypoint
     if a.name == "arm":
         raw, thumb = _arm_thumb(b, raw)
+        thumb |= _arm_array_modes(b)   # init/fini-array targets carry their mode in the pointer's bit0
         entry &= ~1
     syms = {k: v or f"sub_{k:x}" for k, v in raw.items()}
     im = Image(path, fmt, a, entry, b.imagebase, _sections(b), syms, imports,
@@ -211,5 +271,27 @@ def open_image(path, arch=None, **opts):
     im.lief, im._owner = b, owner
     if fmt == "macho":
         im.fixups = {r.address: r.target for r in b.relocations if type(r).__name__ == "RelocationFixup"}
-        im.binds = {x.address: x.symbol.name for x in b.bindings if x.has_symbol}
+        im.binds = {x.address: _str(x.symbol.name) for x in b.bindings if x.has_symbol}
+    elif fmt == "elf":
+        im.fixups = _elf_fixups(b)
     return im
+
+
+def _elf_fixups(b):
+    """PIC data pointers live in RELA relocations (the file word is 0): {slot: target} from
+    *_RELATIVE (addend) and absolute relocs against locally-defined symbols. REL (arm32) keeps the
+    value in the file already, so ptr() reading the bytes is correct there."""
+    out = {}
+    try:
+        for r in b.relocations:
+            if not r.is_rela:
+                continue
+            t = str(r.type)
+            if t.endswith("_RELATIVE"):
+                out[r.address] = r.addend
+            elif (t.endswith("_ABS64") or t.endswith("_ABS32") or t.endswith("_64")) \
+                    and r.has_symbol and r.symbol.value:
+                out[r.address] = r.symbol.value + r.addend
+    except Exception:
+        pass
+    return out

@@ -335,6 +335,8 @@ class Lifter:
         tk = self.arch.kind(term)
         # the last instruction is control flow (ret/branch); the structurer owns it, so skip it
         insns = b.insns[:-1] if tk in (RET, CJMP, JMP, IJMP) else b.insns
+        if b.delay is not None:   # MIPS delay slot: runs before the branch transfers control
+            insns = insns + [b.delay]
         for i in insns:
             try:
                 s = self._step(i, regs)
@@ -444,7 +446,10 @@ class Lifter:
         return f"return {rv};" if rv else f"return {self._ent(reg)};"
 
     def indirect(self, b):
-        return f"goto *{self._last_regs.get(self._target_reg(b.insns[-1]), '?')}; // jump table"
+        # reached only when no jump table was recovered: a register-indirect branch — i.e. a
+        # computed goto or (at a function tail) a tail-call through a function pointer / vtable slot.
+        tgt = self._last_regs.get(self._target_reg(b.insns[-1]), "?")
+        return f"return (*(code *){tgt})(...);  /* indirect tail-call / computed jump */"
 
     # -- argument discovery ------------------------------------------------
     def _scan_args(self, func):

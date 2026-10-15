@@ -16,7 +16,7 @@ import lief
 
 from .loader import open_image
 from .analysis import Program
-from . import render, console
+from . import cache, containers, render, console
 from .decompile import Decompiler
 
 WEB = os.path.join(os.path.dirname(__file__), "web")
@@ -44,7 +44,10 @@ def _get_session(sid):
         if sid not in SESSIONS:
             SESSIONS[sid] = {"docs": OrderedDict(), "cur": None, "uploads": {}}
             while len(SESSIONS) > CFG["max_sessions"]:
-                SESSIONS.popitem(last=False)
+                # evict the oldest EMPTY workspace first: otherwise max_sessions cookieless requests
+                # (each mints a session) wipe every real visitor's open documents
+                old = next((k for k, v in SESSIONS.items() if not v["docs"] and k != sid), None)
+                SESSIONS.pop(old) if old is not None else SESSIONS.popitem(last=False)
         SESSIONS.move_to_end(sid)
         return SESSIONS[sid]
 
@@ -69,28 +72,36 @@ def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
         with LOCK:
             shared = ANALYSES.get(key)
         if shared is None:
-            with open(path, "rb") as fh:
-                head = fh.read(4)
-            if head == b"\0asm":                 # WebAssembly: its own parser/disassembler
-                from .wasm import WasmProgram
-                shared = WasmProgram(path, open(path, "rb").read())
-            else:
-                opts = {}
-                if loader:
-                    opts["loader"] = loader
-                if base:
-                    opts["base"] = base
-                shared = Program(open_image(path, arch=arch, **opts)).analyze(
-                    objc=objc, swift=swift, prologues=prologues)
+            try:
+                shared = _analyze(path, arch, objc, swift, prologues, loader, base)
+            except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+                with LOCK:
+                    ANALYSES.pop("__gate__:" + key, None)
+                raise
             with LOCK:
                 ANALYSES[key] = shared
-                ANALYSES.pop("__gate__:" + key, None)
+                ANALYSES.pop("__gate__:" + key, None)   # only after the result is visible
                 while len([k for k in ANALYSES if not k.startswith("__gate__:")]) > CFG["max_analyses"]:
                     for k in list(ANALYSES):
                         if not k.startswith("__gate__:"):
                             ANALYSES.pop(k)
                             break
     return shared
+
+
+def _analyze(path, arch, objc, swift, prologues, loader, base):
+    with open(path, "rb") as fh:
+        head = fh.read(4)
+    if head == b"\0asm":                 # WebAssembly: its own parser/disassembler
+        from .wasm import WasmProgram
+        with open(path, "rb") as fh:
+            return WasmProgram(path, fh.read())
+    opts = {}
+    if loader:
+        opts["loader"] = loader
+    if base:
+        opts["base"] = base
+    return cache.analyze(open_image(path, arch=arch, **opts), objc=objc, swift=swift, prologues=prologues)
 
 
 # ---- documents -------------------------------------------------------------
@@ -105,29 +116,21 @@ def prog():
 
 
 def _extract(path, entry):
-    """Extract one archive member to a content-addressed cache file; return its path. Guards against
-    zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
-    import zipfile
-    if _is_dmg(path):
-        out = _dmg_list(path, _extract_entry=entry)
-        if out is None:
-            raise ValueError(f"could not extract {entry} from the disk image")
-        return out
-    with zipfile.ZipFile(path) as z:
-        info = z.getinfo(entry)
-        if info.file_size > CFG["max_mb"] << 20:
-            raise ValueError(f"archive member larger than {CFG['max_mb']} MB")
-        os.makedirs(CFG["upload_dir"], exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{info.CRC}|{info.file_size}".encode()).hexdigest()[:16]
-        safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "lib"
-        out = os.path.join(CFG["upload_dir"], f"{tag}-{safe}")
-        if not (os.path.exists(out) and os.path.getsize(out) == info.file_size):
-            import tempfile
-            fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
-            with os.fdopen(fd, "wb") as f, z.open(entry) as src:
-                f.write(src.read(CFG["max_mb"] << 20))
-            os.replace(tmp, out)
-    return out
+    return containers.extract(path, entry, CFG["upload_dir"], CFG["max_mb"])
+
+
+class NotFound(LookupError):
+    """Unknown API route (HTTP 404)."""
+
+
+def _text(v, field, limit=4096):
+    """A user-supplied name/comment must be a string: a dict or list stored here would persist into
+    the .rdb and break search/decompile (`.lower()`/`.startswith()`) for that document for good."""
+    if not isinstance(v, str):
+        raise ValueError(f"'{field}' must be a string")
+    if len(v) > limit:
+        raise ValueError(f"'{field}' longer than {limit} characters")
+    return v
 
 
 class PendingDoc:
@@ -194,141 +197,7 @@ def _persist(P):
         P.save(P.rdb_path())
 
 
-_ABI_ARCH = {"arm64-v8a": "arm64", "armeabi-v7a": "arm", "armeabi": "arm",
-             "x86_64": "x86_64", "x86": "x86"}
-
-
-def slices(path):
-    """Loader choices for a file, like Hopper's loader popup. For a native binary: its slices. For
-    an archive (APK/AAR/JAR/IPA/ZIP): the native libraries it contains, each openable on its own."""
-    if lief.is_macho(path):
-        fat = lief.MachO.parse(path)
-        out = [{"arch": _arch_of(b), "label": f"Mach-O {_arch_of(b)}"} for b in fat]
-        return out or [{"arch": None, "label": "Mach-O"}]
-    if lief.is_elf(path):
-        return [{"arch": None, "label": "ELF"}]
-    if lief.is_pe(path):
-        return [{"arch": None, "label": "PE"}]
-    import zipfile
-    if zipfile.is_zipfile(path):
-        return _archive_slices(path)
-    with open(path, "rb") as fh:
-        head = fh.read(8)
-    if head[:4] == b"\0asm":
-        return [{"arch": "wasm", "label": "WebAssembly module"}]
-    if _is_dmg(path):
-        return _dmg_slices(path)
-    if head[:2] in (b"\x1f\x8b",) or head[:4] == b"\xfd7zX" or head[:6] == b"\xfd7zXZ\x00" \
-            or head[:3] == b"BZh" or head[:4] == b"\x28\xb5\x2f\xfd":
-        return [{"arch": None, "label": "Compressed archive — decompress it first (gzip/xz/bzip2/zstd), "
-                 "then open the contained binary", "disabled": True}]
-    return [{"arch": "x86_64", "label": "Raw binary (x86-64)", "loader": "raw"},
-            {"arch": "arm64", "label": "Raw binary (AArch64)", "loader": "raw"},
-            {"arch": "arm", "label": "Raw binary (ARM)", "loader": "raw"},
-            {"arch": "x86", "label": "Raw binary (x86)", "loader": "raw"}]
-
-
-def _is_dmg(path):
-    """Apple disk image: UDIF trailer 'koly' in the last 512 bytes."""
-    try:
-        with open(path, "rb") as f:
-            f.seek(-512, 2)
-            return b"koly" in f.read(512)
-    except OSError:
-        return False
-
-
-def _dmg_slices(path):
-    """Mach-O/ELF/PE binaries inside a DMG, via `hdiutil` (macOS). Mounts read-only, walks the
-    volume, and lists native executables; each entry carries the in-DMG path as its `entry`."""
-    import shutil
-    if not shutil.which("hdiutil"):
-        return [{"arch": None, "disabled": True,
-                 "label": "DMG needs `hdiutil` (macOS) to inspect; not available on this host"}]
-    out = _dmg_list(path)
-    return out or [{"arch": None, "disabled": True, "label": "No native binaries found in the DMG"}]
-
-
-def _archive_slices(path):
-    """Native libraries inside an APK/IPA/AAR/ZIP, as loader choices. Each carries the `entry` to
-    extract. A note row flags Dalvik `.dex` (Java bytecode: out of scope, needs a DEX tool)."""
-    import zipfile
-    out, has_dex = [], False
-    with zipfile.ZipFile(path) as z:
-        for info in z.infolist():
-            n = info.filename
-            if n.endswith("/"):
-                continue
-            low = n.lower()
-            if low.endswith(".dex"):
-                has_dex = True
-            elif low.endswith((".so", ".dylib")) or "/lib/" in low or low.startswith("lib/"):
-                abi = next((a for a in _ABI_ARCH if f"/{a}/" in n or n.startswith(a + "/")), None)
-                out.append({"entry": n, "arch": _ABI_ARCH.get(abi),
-                            "label": f"{n}  ({info.file_size:,} B)", "size": info.file_size})
-            elif low.endswith((".exe", ".dll")):
-                out.append({"entry": n, "label": f"{n}  ({info.file_size:,} B)", "size": info.file_size})
-    out.sort(key=lambda s: (s.get("arch") or "zzz", s["entry"]))
-    if not out:
-        note = "No native libraries found. "
-        note += "This APK's code is Dalvik bytecode (classes.dex) — use a DEX decompiler (jadx)." \
-            if has_dex else "Archive contains no Mach-O/ELF/PE files."
-        return [{"arch": None, "label": note, "disabled": True}]
-    if has_dex:
-        out.append({"label": "(classes.dex — Java/Kotlin bytecode, not analyzable here)",
-                    "disabled": True, "arch": None})
-    return out
-
-
-def _dmg_list(path, _extract_entry=None):
-    """Attach a DMG read-only, enumerate native binaries (or extract one). Returns slice list, or
-    the extracted file path when `_extract_entry` is given."""
-    import plistlib
-    import shutil
-    import subprocess
-    try:
-        out = subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-plist", path],
-                             capture_output=True, timeout=120)
-        if out.returncode != 0:
-            return [] if _extract_entry is None else None
-        info = plistlib.loads(out.stdout)
-        mounts = [e["mount-point"] for e in info.get("system-entities", []) if e.get("mount-point")]
-    except Exception:
-        return [] if _extract_entry is None else None
-    try:
-        slices, dev = [], info["system-entities"][0]["dev-entry"]
-        for mp in mounts:
-            for root, _, files in os.walk(mp):
-                for fn in files:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, mp)
-                    try:
-                        with open(full, "rb") as f:
-                            magic = f.read(4)
-                    except OSError:
-                        continue
-                    if magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe",
-                                 b"\x7fELF") or magic[:2] == b"MZ":
-                        if _extract_entry == rel:
-                            dst = os.path.join(CFG["upload_dir"],
-                                               hashlib.sha1((path + rel).encode()).hexdigest()[:16] + "-" + fn)
-                            os.makedirs(CFG["upload_dir"], exist_ok=True)
-                            shutil.copy(full, dst)
-                            return dst
-                        slices.append({"entry": rel, "arch": None,
-                                       "label": f"{rel}  ({os.path.getsize(full):,} B)"})
-        return slices if _extract_entry is None else None
-    finally:
-        for mp in mounts:
-            subprocess.run(["hdiutil", "detach", "-quiet", mp], capture_output=True)
-
-
-def _arch_of(b):
-    from .loader import _arch_name
-    try:
-        return _arch_name(b)
-    except KeyError:
-        return b.header.cpu_type.__name__.lower()
+slices = containers.slices
 
 
 # ---- GET API ---------------------------------------------------------------
@@ -409,7 +278,7 @@ def _api_doc(route, q, arg, P):
         return {"items": _search(P, arg("q", ""))}
     if route == "export":  # the analysis database (renames, comments, bookmarks, types, procs)
         return {"rdis_db": 1, "name": P.display_name, "arch": P.arch.name, **_db_dict(P)}
-    raise KeyError(route)
+    raise NotFound(f"unknown route: {route}")
 
 
 def _db_dict(P):
@@ -542,7 +411,7 @@ def post(route, body, raw=None, query=None):
             P.comments.update({int(k): str(v) for k, v in body.get("comments", {}).items()})
             P.bookmarks.update(int(a) for a in body.get("bookmarks", []))
             P.user_types.update({int(k): str(v) for k, v in body.get("types", {}).items()})
-            for a in body.get("procs", []):
+            for a in list(body.get("procs", []))[:4096]:   # each one runs discovery: bound the work
                 P.create_function(int(a))
             for a in body.get("removed", []):
                 P.remove_function(int(a))
@@ -550,18 +419,18 @@ def post(route, body, raw=None, query=None):
         return {"ok": True}
     with P._analysis_lock:   # edits and the console touch the overlay and shared caches: serialize
         if route == "rename":
-            P.rename(P.resolve(body["addr"]), body["name"])
+            P.rename(P.resolve(body["addr"]), _text(body["name"], "name"))
         elif route == "comment":
-            P.comment(P.resolve(body["addr"]), body.get("text", ""))
+            P.comment(P.resolve(body["addr"]), _text(body.get("text", ""), "text", 65536))
         elif route == "bookmark":
             a = P.resolve(body["addr"])
             P.bookmark(a, body.get("on", a not in P.bookmarks))
         elif route == "mark":
-            return _save(P, console.run(P, f"mark {body['kind']} {body['addr']}"))
+            return _save(P, console.run(P, f"mark {_text(body['kind'], 'kind')} {_text(body['addr'], 'addr')}"))
         elif route == "command":
-            return _save(P, console.run(P, body.get("line", ""), CFG["allow_python"]))
+            return _save(P, console.run(P, _text(body.get("line", ""), "line"), CFG["allow_python"]))
         else:
-            raise KeyError(route)
+            raise NotFound(f"unknown route: {route}")
         _persist(P)
     return {"ok": True}
 
@@ -616,6 +485,30 @@ class Handler(BaseHTTPRequestHandler):
             sid = self._new_sid = secrets.token_hex(16)
         _local.session = _get_session(sid)
 
+    def _forbidden(self, post):
+        """Reason to refuse a request that a hostile web page could have made, else None.
+
+        A local (loopback) install has no auth, so without these checks any site the user visits
+        could drive it: a cross-origin `text/plain` POST is a "simple" request that skips CORS
+        preflight (CSRF: open server paths, run console commands -- with --allow-python that is code
+        execution), and DNS rebinding lets a page read every GET route. So on loopback the Host must
+        be loopback and a browser-sent Origin must be same-host, and every POST must carry a
+        non-simple Content-Type (forces a preflight, which this server never grants)."""
+        host = self.headers.get("Host") or ""
+        if CFG["single_user"]:
+            name = host[1:].split("]")[0] if host.startswith("[") else host.rsplit(":", 1)[0]
+            if name not in ("127.0.0.1", "localhost", "::1"):
+                return "bad Host header"
+        if post:
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype not in ("application/json", "application/octet-stream"):
+                return "POST needs Content-Type application/json or application/octet-stream"
+            origin = self.headers.get("Origin")   # (multi-user relies on its SameSite=Strict cookie;
+            # behind a proxy the Host it sees need not match the public Origin)
+            if CFG["single_user"] and origin is not None and urlparse(origin).netloc != host:
+                return "cross-origin request refused"
+        return None
+
     def _send(self, code, body, ctype):
         data = body.encode() if isinstance(body, str) else body
         self.send_response(code)
@@ -629,12 +522,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _err(self, e):
-        code = 404 if isinstance(e, LookupError) and "no document" in str(e) else \
+        code = 404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
                403 if isinstance(e, PermissionError) else 400
         return self._send(code, json.dumps({"error": f"{e}"}), "application/json")
 
     def do_GET(self):
         self._bind_session()
+        bad = self._forbidden(post=False)
+        if bad:
+            return self._send(403, json.dumps({"error": bad}), "application/json")
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             return self._send(200, open(os.path.join(WEB, "index.html"), "rb").read(), "text/html; charset=utf-8")
@@ -648,7 +544,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._bind_session()
         u = urlparse(self.path)
-        n = int(self.headers.get("Content-Length", 0))
+        bad = self._forbidden(post=True)
+        if bad:
+            return self._send(403, json.dumps({"error": bad}), "application/json")
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            n = -1
+        if n < 0:   # rfile.read(-1) would block until the client hangs up, buffering all it sends
+            return self._send(400, json.dumps({"error": "bad Content-Length"}), "application/json")
         if n > (CFG["max_mb"] << 20) + 1024:
             return self._send(413, json.dumps({"error": "payload too large"}), "application/json")
         raw = self.rfile.read(n)

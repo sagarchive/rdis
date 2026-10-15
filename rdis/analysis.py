@@ -19,11 +19,17 @@ class Block:
     addr: int
     insns: list
     succs: list = field(default_factory=list)
+    delay: object = None  # MIPS: the branch-delay-slot instruction after the terminator
 
     @property
     def end(self):
-        last = self.insns[-1]
+        last = self.delay or self.insns[-1]
         return last.address + last.size
+
+    @property
+    def shown(self):
+        """Instructions in address order, delay slot included (for listings and graphs)."""
+        return self.insns + [self.delay] if self.delay else self.insns
 
 
 @dataclass
@@ -35,6 +41,26 @@ class Function:
     @property
     def end(self):
         return max(b.end for b in self.blocks.values())
+
+
+class _LayerXrefs(dict):
+    """A session's own xrefs on top of the shared analysis's: reads fall through to the base,
+    the first write to a target copies its set, so one visitor's procedure edits stay private."""
+
+    def __init__(self, base):
+        super().__init__()
+        self.base = base
+
+    def __missing__(self, k):
+        v = self[k] = set(self.base.get(k, ()))
+        return v
+
+    def get(self, k, default=None):
+        return dict.get(self, k) if k in self else self.base.get(k, default)
+
+    def items(self):
+        own = dict(dict.items(self))
+        return list(own.items()) + [(k, v) for k, v in self.base.items() if k not in own]
 
 
 class Program:
@@ -61,6 +87,7 @@ class Program:
         self.bookmarks = set()
         self.user_types = {}   # addr -> 'data' | 'ascii' | 'code'
         self.user_procs, self.removed_procs = set(), set()
+        self.jni_natives = {}  # fn addr -> (java name, signature, thumb) from RegisterNatives tables
 
     def overlay(self):
         """A per-session view: shares the heavy immutable analysis (image, decoded instructions,
@@ -91,7 +118,12 @@ class Program:
             thumb = self._is_thumb(a)
         key = (a, thumb)
         if key not in self._insns:
-            self._insns[key] = self.arch.decode(self.image.read(a, 16), a, thumb)
+            # decode a short linear run, not one instruction: the per-call Capstone overhead dominated
+            # analysis, and a decode at an address is the same however it is reached, so caching the
+            # neighbours is always valid (the walker usually asks for exactly those next).
+            for i in self.arch.decode_run(self.image.read(a, 96), a, thumb):
+                self._insns.setdefault((i.address, thumb), i)
+            self._insns.setdefault(key, None)
         return self._insns[key]
 
     def call_target(self, i, regs=None):
@@ -124,6 +156,7 @@ class Program:
             self.auto_name(a, n)
         seeds = [a for a in self.image.symbols if self.image.is_code(a)]
         seeds += [m.imp for c in self.objc.classes for m in c.methods]
+        seeds += self._jni_natives()
         if self.image.is_code(self.image.entry):
             seeds.append(self.image.entry)
             self.auto_name(self.image.entry, "entry")
@@ -137,16 +170,35 @@ class Program:
         # load it explicitly onto their own view.
         return self
 
+    def _jni_natives(self):
+        """Name RegisterNatives targets from their JNINativeMethod tables; return them as seeds."""
+        from . import jni
+        self.jni_natives = {} if self.image.format != "elf" else jni.native_tables(self.image)
+        for fn, (name, sig, thumb) in self.jni_natives.items():
+            if thumb:
+                self.image.thumb.add(fn)
+            self.auto_name(fn, name)
+        return list(self.jni_natives)
+
     # -- user edits: procedures, data types, bookmarks ----------------------
     def create_function(self, a):
         """Mark `a` as a procedure start (Hopper's P) and analyze it."""
         a = int(a)
+        self._private_analysis()
         self.user_procs.add(a)
         self.removed_procs.discard(a)
         self.functions.pop(a, None)
         self._discover([a])
         self.names.setdefault(a, f"sub_{a:x}")
         return self.functions.get(a)
+
+    def _private_analysis(self):
+        """Before an overlay discovers code: give it its own xref layer and mode map, so the
+        shared analysis (seen by every other visitor) is never written."""
+        base = getattr(self, "_shared", None)
+        if base is not None and self.xrefs is base.xrefs:
+            self.xrefs = _LayerXrefs(base.xrefs)
+            self._tmode = dict(self._tmode)
 
     def remove_function(self, a):
         """Drop the procedure starting at `a` (Hopper's U)."""
@@ -219,14 +271,31 @@ class Program:
             data = json.load(open(path))
         except (OSError, ValueError):
             return self  # a corrupt sidecar must never block opening the binary
-        self.user_names.update({int(k): v for k, v in data.get("names", {}).items()})
-        self.comments.update({int(k): v for k, v in data.get("comments", {}).items()})
-        self.bookmarks.update(int(a) for a in data.get("bookmarks", []))
-        self.user_types.update({int(k): v for k, v in data.get("types", {}).items()})
-        for a in data.get("procs", []):
-            if int(a) not in self.functions:
+        if not isinstance(data, dict):
+            return self
+
+        def strmap(key):   # a hand-edited / old sidecar must not inject non-string names
+            out = {}
+            for k, v in (data.get(key) or {}).items() if isinstance(data.get(key), dict) else ():
+                try:
+                    if isinstance(v, str):
+                        out[int(k)] = v
+                except (TypeError, ValueError):
+                    pass
+            return out
+
+        def addrs(key):
+            v = data.get(key) or []
+            return [a for a in v if isinstance(a, int) and not isinstance(a, bool)] if isinstance(v, list) else []
+
+        self.user_names.update(strmap("names"))
+        self.comments.update(strmap("comments"))
+        self.bookmarks.update(addrs("bookmarks"))
+        self.user_types.update({k: v for k, v in strmap("types").items() if v in ("data", "ascii", "code")})
+        for a in addrs("procs")[:4096]:
+            if a not in self.functions:
                 self.create_function(a)
-        for a in data.get("removed", []):
+        for a in addrs("removed"):
             self.remove_function(a)
         return self
 
@@ -262,6 +331,7 @@ class Program:
         self._tmode.setdefault(start, thumb)
         work = [(start, thumb), *((s, thumb) for s in seeds)]
         known = self.image.symbols
+        delays = set()
         while work and len(insns) < MAX_INSNS:
             (a, tm), regs = work.pop(), {}
             while a not in seen and self.image.is_code(a):
@@ -271,6 +341,16 @@ class Program:
                     break
                 insns[a] = i
                 k = self.arch.kind(i)
+                step = i.size
+                if self.arch.delay_slot and k in (JMP, CJMP, IJMP, RET):
+                    d = self.insn(a + i.size)          # executes before the branch takes effect
+                    if d is not None:
+                        insns[d.address] = d
+                        seen.add(d.address)
+                        delays.add(d.address)
+                        step += d.size                  # fall through past the slot
+                        for r in self.arch.data_refs(d, dict(regs)):  # `addiu a0, %lo(s)` in a slot
+                            self.xrefs[r].add((d.address, "data"))
                 if k in (CALL, JMP, CJMP, IJMP):
                     t = self.call_target(i, regs)
                     tt = self._target_mode(i, t, tm)  # instruction-set mode at the target
@@ -303,8 +383,8 @@ class Program:
                     break
                 elif k == RET:
                     break
-                a += i.size
-        return Function(start, self._split(start, insns), calls)
+                a += step
+        return Function(start, self._split(start, insns, delays), calls)
 
     def _recover_tables(self):
         """Recover lookup/jump tables so optimized switches decompile and computed gotos resolve.
@@ -317,6 +397,8 @@ class Program:
         Jump-table case bodies are added to the owning function (rebuilt with them as extra seeds).
         """
         self.value_tables, self.jump_tables = {}, {}
+        if not self.arch.name.startswith(("x86", "arm")):
+            return   # ponytail: table idioms below are x86/ARM operand shapes; MIPS/RISC-V switches show as goto *
         for fa in list(self.functions):
             func = self.functions[fa]
             jt_targets = self._scan_tables(func)
@@ -411,20 +493,30 @@ class Program:
         self.jump_tables[i.address] = {"base": tbl, "cases": cases, "index": index}
         jt_targets.extend(cases.values())
 
-    def _split(self, start, insns):
+    def _split(self, start, insns, delays=()):
         leaders = {start}
         for a, i in insns.items():
+            if a in delays:
+                continue
             k = self.arch.kind(i)
             t = self.arch.target(i)
             if k in (JMP, CJMP) and t in insns:
                 leaders.add(t)
-            if k in (JMP, CJMP, RET, IJMP) and a + i.size in insns:
-                leaders.add(a + i.size)
-        blocks, cur = {}, None
+            if k in (JMP, CJMP, RET, IJMP):
+                nxt = a + i.size
+                if nxt in delays:
+                    nxt += insns[nxt].size
+                if nxt in insns:
+                    leaders.add(nxt)
+        blocks, cur, last = {}, None, None
         for a in sorted(insns):
+            if a in delays and last is not None and last.end == a and last.delay is None:
+                last.delay = insns[a]               # belongs to the branch just before it
+                continue
             if a in leaders or cur is None or insns[a].address != cur.end:
                 cur = blocks[a] = Block(a, [])
             cur.insns.append(insns[a])
+            last = cur
             if self.arch.kind(insns[a]) in (JMP, CJMP, RET, IJMP):
                 cur = None
         for b in blocks.values():
@@ -432,7 +524,7 @@ class Program:
             k, t = self.arch.kind(last), self.arch.target(last)
             if k in (JMP, CJMP) and t in blocks:
                 b.succs.append(t)
-            if k not in (JMP, RET, IJMP) and b.end in blocks:
+            if k not in (JMP, RET, IJMP) and b.end in blocks and b.end not in b.succs:
                 b.succs.append(b.end)
         return blocks
 
@@ -460,29 +552,57 @@ class Program:
         for f in self.functions.values():
             for b in f.blocks.values():
                 covered.update(range(b.addr, b.end))
-        x86 = self.arch.name.startswith("x86")
+        pat, align, after, thumb = self._prologue_pattern()
+        if pat is None:
+            return
         for s in self.image.sections:
             if not s.code or "plt" in s.name or "stub" in s.name:
                 continue
             data = self.image.read(s.va, s.size)
-            if x86:
-                pats = rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if self.arch.bits == 64 else rb"\x55\x89\xe5"
-                cands = (m.start() for m in re.finditer(pats, data))
-            else:
-                cands = range(0, len(data) - 3, 4)
-            for off in cands:
+            # match encodings, not decoded text: decoding every word dominated analysis time
+            for m in re.finditer(b"(?=(?:" + pat + b"))", data, re.S):   # overlapping
+                off = m.start()
                 a = s.va + off
-                if a in covered:
+                if a % align or a in covered:
                     continue
-                if not x86:
-                    i = self.insn(a)
-                    if not i or not (i.mnemonic == "pacibsp" or
-                                     (i.mnemonic == "stp" and i.op_str.startswith("x29, x30, [sp, #-"))):
-                        continue
-                    prev = self.insn(a - 4) if off else None
-                    if prev and prev.mnemonic == "pacibsp":
-                        continue
+                prev = data[max(off - 4, 0):off]
+                if after is not None and off and not after(prev):
+                    continue
+                if thumb:
+                    self._tmode.setdefault(a, True)
                 yield a
+
+    _PACIBSP = b"\x7f\x23\x03\xd5"
+
+    def _prologue_pattern(self):
+        """(byte regex, alignment, previous-bytes check, is_thumb) for function-entry encodings."""
+        n, bits = self.arch.name, self.arch.bits
+        if n.startswith("x86"):
+            return (rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if bits == 64 else rb"\x55\x89\xe5"), 1, None, False
+        if n == "arm64":
+            # pacibsp, or `stp x29, x30, [sp, #-N]` (pre-index or signed offset, negative imm7);
+            # a stp right after a pacibsp belongs to that function, not a new one. Dart AOT keeps
+            # its stack in x15, so its frames open with `stp x29, x30, [x15, #-N]!`.
+            return (re.escape(self._PACIBSP) + rb"|\xfd[\x7b\xfb][\x20-\x3f\xa0-\xbf]\xa9"
+                    rb"|\xfd[\x79\xf9][\xa0-\xbf]\xa9", 4,
+                    lambda p: p != self._PACIBSP, False)
+        if n == "arm":
+            if self.image.thumb:   # Thumb code (Android armeabi-v7a): `push {..., lr}` after a
+                # function end — pop {..,pc} / bx lr / nop / padding — since 2 bytes alone are weak
+                end = lambda p: p[-1:] == b"\xbd" or p[-2:] in (b"\x70\x47", b"\x00\xbf", b"\x00\x00")
+                return rb"[\x00-\xff]\xb5", 2, end, True
+            return rb"[\x00-\xff][\x40-\x7f\xc0-\xff]\x2d\xe9", 4, None, False   # ARM `push {..., lr}`
+        if n.startswith("mips"):
+            le = n.endswith("el")   # `addiu $sp, $sp, -N`
+            # `addiu $sp, $sp, -N` (0x27bd) or MIPS64 `daddiu $sp, $sp, -N` (0x67bd)
+            return (rb"[\x00-\xff][\x80-\xff]\xbd[\x27\x67]" if le else rb"[\x27\x67]\xbd[\x80-\xff][\x00-\xff]"), 4, None, False
+        if n.startswith("riscv"):
+            # `addi sp, sp, -N` (32-bit) or c.addi16sp / c.addi sp, -N (RVC) after a return/padding
+            end = lambda p: p[-2:] in (b"\x82\x80", b"\x01\x00", b"\x00\x00") or p == b"\x67\x80\x00\x00"
+            return rb"\x13\x01[\x01\x11\x21\x31\x41\x51\x61\x71\x81\x91\xa1\xb1\xc1\xd1\xe1\xf1][\x80-\xff]" \
+                   rb"|[\x01\x05\x09\x0d\x11\x15\x19\x1d\x21\x25\x29\x2d\x31\x35\x39\x3d" \
+                   rb"\x41\x45\x49\x4d\x51\x55\x59\x5d\x61\x65\x69\x6d\x71\x75\x79\x7d][\x11\x71]", 2, end, False
+        return None, 1, None, False
 
     # -- queries ------------------------------------------------------------
     def function_at(self, a):
