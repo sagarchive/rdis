@@ -72,9 +72,13 @@ class WasmModule:
         self.globals, self.memories, self.tables = [], [], []
         self.data_segments, self.func_names = [], {}
         self.start = None
-        if data[:4] != b"\0asm":
+        if len(data) < 8:
+            raise ValueError("truncated WebAssembly header")
+        if data[:4] != b"\\0asm":
             raise ValueError("not a WebAssembly module")
         self.version = struct.unpack_from("<I", data, 4)[0]
+        if self.version != 1:
+            raise ValueError(f"unsupported WebAssembly version: {self.version}")
         self._parse_sections()
         self.funcs = self._build_funcs()
 
@@ -85,11 +89,15 @@ class WasmModule:
         while p < n:
             sid = data[p]
             size, p = _uleb(data, p + 1)
+            if size > n - p:
+                raise ValueError(f"truncated WebAssembly section {sid}: expected {size} bytes")
             body_end = p + size
             try:
                 self._section(sid, p, body_end)
             except Exception:
-                pass  # a malformed section must not sink the whole module
+                # Section payload parsing is intentionally tolerant for optional/custom sections,
+                # but the outer section framing above is strict: never advance beyond the file.
+                pass
             p = body_end
 
     def _section(self, sid, p, end):
