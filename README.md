@@ -119,7 +119,8 @@ clickable call targets · inspector (binary info, sections, cross-references). T
 switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview so branches and
 loops are visible at a glance; use **Detail** for more instructions per block, **Fit** for large
 functions, click a block to inspect it, and double-click to jump to its listing. Conditional edges
-are labeled **T/F**, the entry block is highlighted, and SVG export preserves the graph.
+are labeled **T/F** when the branch target is known (unresolved edges stay neutral); the entry block
+is highlighted, and SVG export preserves the graph.
 Double-click a function to rename it; double-click an instruction address to comment. Renames and
 comments save to `<binary>.rdb` next to the binary and reload automatically.
 
