@@ -526,7 +526,7 @@ class Program:
                 cases[value] = target
             if len(cases) != bound[1] + 1:
                 continue
-            self.jump_tables[i.address] = {"base": tbl, "cases": cases, "index": index}
+            self.jump_tables[i.address] = {"base": table_addr, "target_base": target_base, "cases": cases, "index": index}
             jt_targets.extend(cases.values())
             return
 
