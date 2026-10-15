@@ -18,7 +18,7 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
-| Control-flow graph | Graphviz DOT, colored edges | yes (native view) |
+| Control-flow graph | Interactive browser CFG, zoom-to-fit, pointer-centered zoom, keyboard block selection, standalone SVG + DOT export | Interactive native CFG + PDF export |
 | C pseudo-code | structuring + symbolic lifter (x86/ARM) and an **IR decompiler** (Ghidra P-code via `pypcode`, or our own MIPS/RISC-V frontend). **Checked by execution:** 124 `-O2`/`-O3`, vectorized and struct cases recompile and match; 96% / 95% of real arm64 / x86-64 functions compile | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
@@ -31,7 +31,7 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Strings | ASCII + UTF-16 | yes |
 | Scripting | import `rdis` as a library | Python API |
 | Plugin SDK | custom loaders, CPUs, tools | SDK |
-| AI integration | **built-in MCP server, zero deps** | MCP server |
+| AI integration | **built-in standard-library MCP server** | Integrated MCP server |
 | Debugger | LLDB batch wrapper (static + live) | LLDB/GDB |
 | GUI | web three-pane (navigator / asm / pseudo-CFG), or native window | native app |
 | Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP; **content-addressed analysis cache** (`.rdis_cache/`) reopens a 9 MB Flutter lib in 0.6s instead of 31s | yes |
@@ -119,8 +119,7 @@ clickable call targets · inspector (binary info, sections, cross-references). T
 switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview so branches and
 loops are visible at a glance; use **Detail** for more instructions per block, **Fit** for large
 functions, click or keyboard-focus a block to inspect it, and double-click (or press Shift+Enter on a focused block) to jump to its listing. Mouse-wheel zooms around the pointer; drag pans and Shift+wheel pans. Conditional edges
-are labeled **T/F** when the branch target is known (unresolved edges stay neutral); the entry block
-is highlighted, and SVG export preserves the graph.
+are labeled **T/F** when the branch target is known (unresolved edges stay neutral); the entry block is highlighted. Wheel zoom is pointer-centered; drag pans and Shift+wheel pans. The graph's fit-to-view uses rendered pixel bounds (important for Graphviz's point-based SVG sizing), and exported SVG resolves theme colors for standalone viewing. Real Chromium CI tests capture overview, instruction-detail, keyboard-focus, and large-graph screenshots; download them from the `rdis-cfg-browser-evidence` workflow artifact.
 Double-click a function to rename it; double-click an instruction address to comment. Renames and
 comments save to `<binary>.rdb` next to the binary and reload automatically.
 
