@@ -60,3 +60,11 @@ Full suite/runtime baseline, complete line-level review, architecture semantic c
 - **Failure mode:** truncated input could raise low-level exceptions or be accepted as a partial module without a visible parse warning.
 - **Change:** add header/section bounds checks, bounded LEB128/name reads, bounded constant-expression scanning, common non-function import descriptor skipping, and recorded section errors.
 - **Verification:** malformed-header/section/LEB/name regression tests added; CI result pending.
+
+### RDIS-AUDIT-010 — User-controlled line breaks could disrupt CFG DOT labels
+
+- **Area:** M7, `rdis/render.py`
+- **Evidence:** DOT label escaping covered backslashes and quotes but left carriage returns/newlines literal.
+- **Failure mode:** multi-line comments or metadata could break the generated DOT label and cause graph rendering failures.
+- **Change:** escape CR/LF as Graphviz newline sequences; add a regression test for newline, quote and backslash handling.
+- **Verification:** regression test added; CI result pending.
