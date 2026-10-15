@@ -161,6 +161,21 @@ class PrecisionRegressionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mcp_server.t_list_functions("ignored", limit="all")
 
+    def test_upload_token_metadata_is_bounded_per_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_state = {"uploads": {}}
+            with patch.dict(server.CFG, {"upload_dir": tmp, "max_mb": 1, "max_uploads_per_session": 2}):
+                with patch.object(server, "slices", return_value=[]):
+                    server._local.session = session_state
+                    try:
+                        first = server._upload(b"one", "one.bin")["token"]
+                        server._upload(b"two", "two.bin")
+                        server._upload(b"three", "three.bin")
+                        self.assertEqual(len(session_state["uploads"]), 2)
+                        self.assertNotIn(first, session_state["uploads"])
+                    finally:
+                        del server._local.session
+
     def test_persistent_cache_hash_includes_new_and_changed_modules(self):
         with tempfile.TemporaryDirectory() as tmp:
             module = os.path.join(tmp, "cache.py")
