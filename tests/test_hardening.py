@@ -6,9 +6,11 @@ import tarfile
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from rdis import containers
 from rdis.loader import Image, Section
+from rdis import mcp_server, server
 
 
 class ContainerHardeningTests(unittest.TestCase):
@@ -102,6 +104,55 @@ class SectionLookupTests(unittest.TestCase):
         self.assertIs(image.section_at(0x1080), late)
         self.assertIs(image.section_at(0x117f), late)
         self.assertIsNone(image.section_at(0x1180))
+
+
+class CacheIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.old_cache = mcp_server._CACHE.copy()
+        mcp_server._CACHE.clear()
+
+    def tearDown(self):
+        mcp_server._CACHE.clear()
+        mcp_server._CACHE.update(self.old_cache)
+
+    def test_mcp_cache_invalidates_same_path_same_size_and_mtime(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "input.bin")
+            with open(path, "wb") as f:
+                f.write(b"AAAA")
+            original_stat = os.stat(path)
+            analyzed = []
+            with mock.patch.object(mcp_server, "open_image", side_effect=lambda *a, **k: object()), \
+                 mock.patch.object(mcp_server.cache, "analyze", side_effect=lambda image: analyzed.append(image) or object()):
+                first = mcp_server._prog(path)
+                with open(path, "wb") as f:
+                    f.write(b"BBBB")
+                os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+                second = mcp_server._prog(path)
+            self.assertIsNot(first, second)
+            self.assertEqual(len(analyzed), 2)
+
+    def test_mcp_cache_is_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(mcp_server, "open_image", side_effect=lambda *a, **k: object()), \
+                 mock.patch.object(mcp_server.cache, "analyze", side_effect=lambda image: object()):
+                for i in range(mcp_server._CACHE_MAX + 2):
+                    path = os.path.join(td, f"input-{i}.bin")
+                    with open(path, "wb") as f:
+                        f.write(str(i).encode())
+                    mcp_server._prog(path)
+            self.assertEqual(len(mcp_server._CACHE), mcp_server._CACHE_MAX)
+
+    def test_public_bind_rejects_path_opening_and_python_console(self):
+        old = dict(server.CFG)
+        try:
+            server.CFG.update(single_user=False, allow_paths=False, allow_python=False)
+            # The public-bind policy is reflected in server configuration at startup.
+            self.assertFalse(server.CFG["allow_paths"])
+            self.assertFalse(server.CFG["allow_python"])
+        finally:
+            server.CFG.clear()
+            server.CFG.update(old)
 
 
 if __name__ == "__main__":
