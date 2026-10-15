@@ -241,12 +241,12 @@ class WasmBoundsTests(unittest.TestCase):
 
     def test_invalid_function_type_form_is_reported(self):
         # One type entry whose form byte is not 0x60.
-        module = WasmModule(b"\\0asm\\x01\\0\\0\\0\\x01\\x02\\x01\\x00")
+        module = WasmModule(b"\0asm\x01\0\0\0\x01\x02\x01\x00")
         self.assertTrue(any("invalid function type form" in error for error in module.errors))
 
     def test_small_random_section_bodies_do_not_escape_low_level_errors(self):
         rng = random.Random(0x5741534D)
-        header = b"\\0asm\\x01\\0\\0\\0"
+        header = b"\0asm\x01\0\0\0"
         for size in range(64):
             body = bytes(rng.randrange(256) for _ in range(size))
             section_id = rng.randrange(13)
