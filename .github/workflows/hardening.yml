@@ -54,6 +54,29 @@ jobs:
       - name: Run hardening regressions
         run: python -m unittest discover -s tests -p 'test_hardening.py' -v
 
+  cfg-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned browser test runner
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Render real application CFG in desktop and mobile browsers
+        run: node tests/cfg_browser_smoke.mjs
+      - name: Upload CFG screenshots and standalone SVG
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-cfg-browser-evidence
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
   macos-regression:
     runs-on: macos-14
     steps:
