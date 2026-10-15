@@ -40,6 +40,17 @@ jobs:
           rdis --help
           rdis-gui --help
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rdis-mcp
+      - name: Check embedded browser JavaScript syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          html = Path("rdis/web/index.html").read_text()
+          scripts = re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>', html, re.S | re.I)
+          assert scripts, "no inline application script found"
+          Path("/tmp/rdis-inline.js").write_text("\\n".join(scripts))
+          PY
+          node --check /tmp/rdis-inline.js
       - name: Run hardening regressions
         run: python -m unittest discover -s tests -p 'test_hardening.py' -v
 
