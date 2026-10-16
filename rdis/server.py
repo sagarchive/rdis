@@ -8,22 +8,24 @@ documents. Security model, because this is meant to run as a free online tool:
   * opening arbitrary server-side paths is allowed only when bound to loopback;
   * the console's `py` command exists only with --allow-python (it is code execution).
 """
-import argparse, hashlib, json, os, sys, threading, webbrowser
+import argparse, hashlib, json, os, sys, threading, warnings, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import lief
 
 from .loader import open_image
-from .analysis import Program
+from .analysis import Program, _binary_sha256
 from . import cache, containers, render, console
 from .decompile import Decompiler
 
 WEB = os.path.join(os.path.dirname(__file__), "web")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
-       "max_analyses": 24}
+       "max_analyses": 24, "request_timeout": 15, "max_workers": 64, "max_upload_storage_mb": 1024,
+       "max_parallel_analyses": 4, "analysis_wait_seconds": 60, "max_uploads_per_session": 32, "allow_legacy_rdb": False}
 LOCK = threading.Lock()  # guards the session and shared-analysis registries
+ANALYSIS_SLOTS = threading.BoundedSemaphore(CFG["max_parallel_analyses"])
 
 # Per-visitor workspaces (cookie `rdis_sid`): one visitor's documents, renames and navigation never
 # leak into another's. Each open document is a lightweight OVERLAY of a shared, immutable analysis,
@@ -53,15 +55,26 @@ def _get_session(sid):
 
 
 def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
-    """The analyzed Program for a (content, options) key, analyzing once and sharing it across all
-    sessions. Analysis for a given key is serialized so two simultaneous first-opens do not both
-    do the work; different keys analyze in parallel."""
-    try:
-        st = os.stat(path)
-        content = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
-    except OSError:
-        content = path
-    key = f"{content}|{arch}|{loader}|{base}|{int(objc)}{int(swift)}{int(prologues)}"
+    """Share one immutable analysis per exact input bytes and analysis configuration.
+
+    File size and mtime are not identities: files can be replaced while preserving both.
+    Hash the bytes so a stale Program can never be reused just because metadata was preserved.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    identity = {
+        "path": os.path.abspath(path),
+        "sha256": digest.hexdigest(),
+        "arch": arch,
+        "loader": loader,
+        "base": base,
+        "objc": bool(objc),
+        "swift": bool(swift),
+        "prologues": bool(prologues),
+    }
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     with LOCK:
         shared = ANALYSES.get(key)
         if shared is not None:
@@ -72,12 +85,19 @@ def _shared_analysis(path, arch, objc, swift, prologues, loader, base):
         with LOCK:
             shared = ANALYSES.get(key)
         if shared is None:
-            try:
-                shared = _analyze(path, arch, objc, swift, prologues, loader, base)
-            except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+            if not ANALYSIS_SLOTS.acquire(timeout=CFG["analysis_wait_seconds"]):
                 with LOCK:
                     ANALYSES.pop("__gate__:" + key, None)
-                raise
+                raise TimeoutError("analysis capacity is busy; retry after another analysis finishes")
+            try:
+                try:
+                    shared = _analyze(path, arch, objc, swift, prologues, loader, base)
+                except BaseException:    # a failed analysis must not leak its gate (one per bad upload)
+                    with LOCK:
+                        ANALYSES.pop("__gate__:" + key, None)
+                    raise
+            finally:
+                ANALYSIS_SLOTS.release()
             with LOCK:
                 ANALYSES[key] = shared
                 ANALYSES.pop("__gate__:" + key, None)   # only after the result is visible
@@ -116,7 +136,8 @@ def prog():
 
 
 def _extract(path, entry):
-    return containers.extract(path, entry, CFG["upload_dir"], CFG["max_mb"])
+    return containers.extract(path, entry, CFG["upload_dir"], CFG["max_mb"],
+                              max_total_mb=CFG["max_upload_storage_mb"])
 
 
 class NotFound(LookupError):
@@ -154,8 +175,8 @@ def _open_program(path, arch=None, objc=True, swift=True, prologues=True, loader
     shared = _shared_analysis(path, arch, objc, swift, prologues, loader, base)
     p = shared.overlay()                 # this session's private edit view of the shared analysis
     p.display_name = disp
-    if CFG["persist"] and CFG["single_user"]:
-        p.load(p.rdb_path())             # reattach saved renames/comments (single-user local only)
+    if CFG["persist"] and CFG["single_user"] and isinstance(p, Program):
+        p.load(p.rdb_path(), allow_legacy=CFG["allow_legacy_rdb"])  # legacy import is explicit and local-only
     p._doc_key = hashlib.sha1(f"{path}|{arch}|{loader}".encode()).hexdigest()[:10]
     return p
 
@@ -260,7 +281,7 @@ def _api_doc(route, q, arg, P):
             return {"name": P.display(f.addr), "addr": hex(f.addr), "rows": render.listing(P, f)}
         if route == "pseudo":
             return {"name": P.display(f.addr), "addr": hex(f.addr), "c": Decompiler(P, f).c()}
-        return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": render.to_dot(P, f)}
+        return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": render.to_dot(P, f, detail=arg("detail", "0") == "1")}
     if route == "hex":
         a = P.resolve(arg("addr") or arg("func"))
         f = P.functions.get(a)
@@ -276,16 +297,35 @@ def _api_doc(route, q, arg, P):
         return _addrinfo(P, P.resolve(arg("addr")))
     if route == "search":
         return {"items": _search(P, arg("q", ""))}
-    if route == "export":  # the analysis database (renames, comments, bookmarks, types, procs)
+    if route == "export":  # the analysis database (annotations are bound to this exact analysis identity)
         return {"rdis_db": 1, "name": P.display_name, "arch": P.arch.name, **_db_dict(P)}
     raise NotFound(f"unknown route: {route}")
 
 
 def _db_dict(P):
-    return {"names": {str(k): v for k, v in P.user_names.items()},
-            "comments": {str(k): v for k, v in P.comments.items()},
-            "bookmarks": sorted(P.bookmarks), "types": {str(k): v for k, v in P.user_types.items()},
-            "procs": sorted(P.user_procs), "removed": sorted(P.removed_procs)}
+    im = P.image
+    sections = sorted(
+        (s.name, int(s.va), int(s.size), int(s.offset), bool(s.code))
+        for s in getattr(im, "sections", ())
+    )
+    section_map_sha256 = hashlib.sha256(
+        json.dumps(sections, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "db_version": 2,
+        "binary_sha256": _binary_sha256(im.path),
+        "format": im.format,
+        "arch": P.arch.name,
+        "base": int(getattr(im, "base", 0) or 0),
+        "entry": int(getattr(im, "entry", 0) or 0),
+        "section_map_sha256": section_map_sha256,
+        "names": {str(k): v for k, v in P.user_names.items()},
+        "comments": {str(k): v for k, v in P.comments.items()},
+        "bookmarks": sorted(P.bookmarks),
+        "types": {str(k): v for k, v in P.user_types.items()},
+        "procs": sorted(P.user_procs),
+        "removed": sorted(P.removed_procs),
+    }
 
 
 def _func(P, spec):
@@ -406,6 +446,24 @@ def post(route, body, raw=None, query=None):
     if route == "import":
         if body.get("rdis_db") != 1:
             raise ValueError("not an rdis database export")
+        identity = _db_dict(P)
+        version = body.get("db_version", 1)
+        if not isinstance(version, int) or isinstance(version, bool) or version not in (1, 2):
+            raise ValueError("unsupported RDIS analysis database version")
+        if version == 2:
+            keys = ("binary_sha256", "format", "arch", "base", "entry", "section_map_sha256")
+            mismatched = [key for key in keys if body.get(key) != identity[key]]
+            if mismatched:
+                raise ValueError("analysis database belongs to a different binary or address mapping (mismatch: " +
+                                 ", ".join(mismatched) + ")")
+        elif version == 1:
+            allow_legacy = (query or {}).get("allow_legacy", ["0"])[0] == "1"
+            if not allow_legacy:
+                raise ValueError("legacy analysis database has no binary digest; confirm the original binary in the import dialog to proceed")
+            if body.get("arch") != P.arch.name:
+                raise ValueError("legacy analysis database architecture does not match")
+            warnings.warn("Importing a legacy analysis database without a binary content digest; address compatibility cannot be proven",
+                          RuntimeWarning, stacklevel=2)
         with P._analysis_lock:
             P.user_names.update({int(k): str(v) for k, v in body.get("names", {}).items()})
             P.comments.update({int(k): str(v) for k, v in body.get("comments", {}).items()})
@@ -453,22 +511,41 @@ def _upload(raw, name):
     # content-addressed, so identical uploads from different visitors share one file. Write to a
     # per-call temp and atomically rename, or two concurrent writers truncate each other's file and
     # a reader sees a torn, partial binary.
-    if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
-        import tempfile
-        fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(raw)
-            os.replace(tmp, path)   # atomic on the same filesystem
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    session()["uploads"][digest[:16]] = {"path": path, "name": safe}
+    # Serialize the existence check, quota calculation and atomic write together: concurrent
+    # duplicate uploads must not count the same content twice or bypass the shared quota.
+    with containers._STORAGE_WRITE_LOCK:
+        if not (os.path.exists(path) and os.path.getsize(path) == len(raw)):
+            used = containers._directory_size(CFG["upload_dir"])
+            limit = CFG["max_upload_storage_mb"] << 20
+            if used + len(raw) > limit:
+                raise containers.StorageLimitError(
+                    f"upload/cache storage quota exceeded ({used + len(raw)} > {limit} bytes); "
+                    "remove unused files from the upload/cache directory or raise --max-upload-storage-mb"
+                )
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=CFG["upload_dir"])
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(raw)
+                os.replace(tmp, path)   # atomic on the same filesystem
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+    uploads = session()["uploads"]
+    uploads[digest[:16]] = {"path": path, "name": safe}
+    # Token metadata is small but user-controlled upload repetition must not grow it forever.
+    while len(uploads) > CFG["max_uploads_per_session"]:
+        uploads.pop(next(iter(uploads)))
     return {"token": digest[:16], "name": safe, "size": len(raw), "sha256": digest, "slices": slices(path)}
 
 
 # ---- HTTP ------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    # Prevent slow clients from occupying request threads indefinitely while sending headers/bodies.
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(CFG["request_timeout"])
+
     def log_message(self, *a):
         pass
 
@@ -522,7 +599,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _err(self, e):
-        code = 404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
+        code = 507 if isinstance(e, containers.StorageLimitError) else \
+               503 if isinstance(e, TimeoutError) else \
+               404 if isinstance(e, NotFound) or isinstance(e, LookupError) and "no document" in str(e) else \
                403 if isinstance(e, PermissionError) else 400
         return self._send(code, json.dumps({"error": f"{e}"}), "application/json")
 
@@ -547,15 +626,22 @@ class Handler(BaseHTTPRequestHandler):
         bad = self._forbidden(post=True)
         if bad:
             return self._send(403, json.dumps({"error": bad}), "application/json")
-        try:
-            n = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            n = -1
-        if n < 0:   # rfile.read(-1) would block until the client hangs up, buffering all it sends
-            return self._send(400, json.dumps({"error": "bad Content-Length"}), "application/json")
+        # This server deliberately supports Content-Length framing only. Reject ambiguous/chunked
+        # requests instead of interpreting a missing length as an empty body.
+        if self.headers.get("Transfer-Encoding") is not None:
+            return self._send(400, json.dumps({"error": "Transfer-Encoding is not supported"}), "application/json")
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal():
+            return self._send(400, json.dumps({"error": "exactly one valid Content-Length is required"}), "application/json")
+        n = int(lengths[0])
         if n > (CFG["max_mb"] << 20) + 1024:
             return self._send(413, json.dumps({"error": "payload too large"}), "application/json")
-        raw = self.rfile.read(n)
+        try:
+            raw = self.rfile.read(n)
+        except (TimeoutError, OSError):
+            return self._send(408, json.dumps({"error": "request body timed out"}), "application/json")
+        if len(raw) != n:
+            return self._send(400, json.dumps({"error": "incomplete request body"}), "application/json")
         route = u.path[5:]
         try:
             body = {} if route == "upload" else json.loads(raw or b"{}")
@@ -563,6 +649,42 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(result), "application/json")
         except Exception as e:
             return self._err(e)
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Cap simultaneous request handlers so slow clients cannot spawn unlimited threads."""
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 64  # align the kernel accept backlog with the bounded worker pool
+
+    def __init__(self, server_address, handler_class, max_workers=64):
+        if max_workers < 1:
+            raise ValueError("max_workers must be positive")
+        self._worker_slots = threading.BoundedSemaphore(max_workers)
+        super().__init__(server_address, handler_class)
+
+    def process_request(self, request, client_address):
+        if not self._worker_slots.acquire(blocking=False):
+            try:
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Connection: close\r\nContent-Length: 0\r\n\r\n"
+                )
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
 
 
 def main(argv=None):
@@ -574,17 +696,28 @@ def main(argv=None):
     p.add_argument("--no-open", action="store_true")
     p.add_argument("--allow-python", action="store_true", help="enable `py` in the console (local only!)")
     p.add_argument("--upload-dir", default=".rdis_uploads")
-    p.add_argument("--max-mb", type=int, default=128)
+    p.add_argument("--max-mb", type=int, default=128, help="maximum size per uploaded file or extracted member")
+    p.add_argument("--max-upload-storage-mb", type=int, default=1024,
+                   help="aggregate upload and extraction-cache disk quota")
     p.add_argument("--desktop", action="store_true",
                    help="open in a native window (needs the 'desktop' extra: pip install rdis[desktop])")
     p.add_argument("--multi-user", action="store_true",
                    help="per-visitor cookie sessions even on loopback (for a shared instance behind a proxy)")
+    p.add_argument("--allow-legacy-rdb", action="store_true",
+                   help="import old sidecars without content hashes (verify the original binary first; local single-user mode only)")
     a = p.parse_args(argv)
+    if a.max_mb < 1:
+        p.error("--max-mb must be a positive integer")
+    if a.max_upload_storage_mb < 1:
+        p.error("--max-upload-storage-mb must be a positive integer")
+    if not 1 <= a.port <= 65535:
+        p.error("--port must be between 1 and 65535")
     loopback = a.host in ("127.0.0.1", "localhost", "::1")
     single = loopback and not a.multi_user   # one shared workspace only for a private local install
     CFG.update(allow_python=a.allow_python and loopback and not a.multi_user,
                allow_paths=loopback and not a.multi_user, persist=single,
-               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb)
+               single_user=single, upload_dir=a.upload_dir, max_mb=a.max_mb,
+               max_upload_storage_mb=a.max_upload_storage_mb, allow_legacy_rdb=a.allow_legacy_rdb and single)
     if a.allow_python and not loopback:
         print("rdis: --allow-python ignored on a non-loopback bind (it would be remote code execution)",
               flush=True)
@@ -592,7 +725,7 @@ def main(argv=None):
         _local.session = _get_session("local")
         open_doc(a.binary, arch=a.arch)
     url = f"http://{'127.0.0.1' if a.host == '0.0.0.0' else a.host}:{a.port}"
-    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    srv = BoundedThreadingHTTPServer((a.host, a.port), Handler, max_workers=CFG["max_workers"])
     print(f"rdis: serving {url}  (Ctrl-C to stop)" + (f"  -- opened {a.binary}" if a.binary else
           "\n      drop a binary, app or package on the page, or click Open file"))
     if a.desktop:

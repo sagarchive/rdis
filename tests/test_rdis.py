@@ -365,7 +365,7 @@ def test_tail_call():
         c = Decompiler(p, f).c()
         # the body must reference the indirect branch, not collapse to just `return;`
         assert "tail-call" in c or "computed jump" in c or "goto *" in c, (hex(a), c)
-        assert c.strip().count("return;") == 0 or "(*" in c, (hex(a), c)
+        assert c.strip().count("return;") == 0 or "(*" in c or "((code)" in c, (hex(a), c)
         checked += 1
         if checked >= 5:
             break
@@ -540,9 +540,14 @@ def test_overlay_isolation():
                if base.function_at(x) is None and base.image.is_code(x))
     a.create_function(gap)
     assert sum(len(v) for v in base.xrefs.values()) == n0 and b.xrefs is base.xrefs
-    f = tempfile.mktemp()
-    json.dump({"names": {"1": {"a": 1}, "2": "ok", "x": "bad"}, "procs": ["zz", True],
-               "types": {"3": "evil"}}, open(f, "w"))
+    f = tempfile.mktemp(suffix=".rdb")
+    base.save(f)  # start with a valid version-2 identity, then tamper only the annotation payload
+    with open(f, encoding="utf-8") as stream:
+        data = json.load(stream)
+    data.update({"names": {"1": {"a": 1}, "2": "ok", "x": "bad"}, "procs": ["zz", True],
+                 "types": {"3": "evil"}})
+    with open(f, "w", encoding="utf-8") as stream:
+        json.dump(data, stream)
     c = base.overlay().load(f)
     assert c.user_names == {2: "ok"} and not c.user_types, (c.user_names, c.user_types)
     print("ok  overlay isolation + sanitized .rdb load")

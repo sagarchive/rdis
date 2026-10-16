@@ -355,7 +355,22 @@ class Lifter:
         dst = self._canon(i.reg_name(ops[0].reg))
         root = None
         if i.mnemonic in self._DERIVE:
-            for op in ops[1:]:
+            # For arithmetic address formation, only the first source operand is the base.
+            # Treating *any* argument used by an ADD as the root incorrectly marks integer
+            # indices as pointers, e.g. AArch64 jump-table address + switch-key*entry-size.
+            # ORR with the zero register is the common register-copy alias and uses its other input.
+            candidates = ops[1:2]
+            if i.mnemonic == "orr" and len(ops) > 2:
+                first = ops[1]
+                first_name = self._canon(i.reg_name(first.reg)) if first.type == reg_t else None
+                if first_name in ("xzr", "wzr", "zero", "0"):
+                    candidates = ops[2:3]
+            elif i.mnemonic.startswith("add") and len(ops) > 2:
+                first = ops[1]
+                first_name = self._canon(i.reg_name(first.reg)) if first.type == reg_t else None
+                if first_name in ("xzr", "wzr", "zero", "0"):
+                    candidates = ops[2:3]
+            for op in candidates:
                 r = None
                 if op.type == reg_t:
                     r = self._canon(i.reg_name(op.reg))
@@ -580,8 +595,8 @@ class Lifter:
                 self.__dict__.setdefault("_temptype", {})[name] = t
         return name
 
-    _FLT = re.compile(r"\(\(f32x4\)|\b\d+\.\d*(?:e[-+]?\d+)?f\b|\(float\)")
-    _DBL = re.compile(r"\(\(f64x2\)|(?<![\w.])\d+\.\d+(?:e[-+]?\d+)?(?![\w])|\(double\)")
+    _FLT = re.compile(r"\(\(f32x4\)|\b\d+\.\d*(?:e[-+]?\d+)?f\b|\(float\)|\*\(\s*float\s*\*")
+    _DBL = re.compile(r"\(\(f64x2\)|(?<![\w.])\d+\.\d+(?:e[-+]?\d+)?(?![\w])|\(double\)|\*\(\s*double\s*\*")
     _TEMP = re.compile(r"\bt\d+\b")
 
     def _scalar_type(self, expr):
@@ -1224,8 +1239,10 @@ class Lifter:
         t = self._ptr_type(v)
         if t and t not in ("char *", "void *"):
             return f"(char *){v}" if self._atomic(v) else f"(char *)({v})"
-        if re.fullmatch(r"&[\w$.]+", v or ""):
-            return f"(char *){v}"              # &sym + n is bytes past the symbol
+        if (v or "").lstrip().startswith("&"):
+            # Address-of array elements/fields can be compound pointer expressions
+            # (e.g. &p[i]). Integer add/sub after LEA is byte arithmetic, not sizeof(T)-scaled.
+            return f"(char *){v}" if self._atomic(v) else f"(char *)({v})"
         return v
 
     _PTRISH = re.compile(r'^(\(char \*\)|"|&|@")')

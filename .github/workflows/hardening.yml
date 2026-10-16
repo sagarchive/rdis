@@ -1,0 +1,198 @@
+name: Hardening regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hardening:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Build wheel and verify packaged web assets
+        run: |
+          python -m pip install build
+          python -m build --wheel
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")
+          assert len(wheel) == 1, wheel
+          with zipfile.ZipFile(wheel[0]) as archive:
+              assert "rdis/web/index.html" in archive.namelist()
+          PY
+          python -m pip install --force-reinstall dist/*.whl
+          rdis --help
+          rdis-gui --help
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rdis-mcp
+      - name: Check app and GitHub Pages JavaScript syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          for source, target in [
+              (Path("rdis/web/index.html"), Path("/tmp/rdis-inline.js")),
+              (Path("docs/index.html"), Path("/tmp/rdis-pages-inline.js")),
+          ]:
+              html = source.read_text()
+              script_blocks = re.findall(r'<script([^>]*)>(.*?)</script>', html, re.S | re.I)
+              scripts = [
+                  body for attrs, body in script_blocks
+                  if not re.search(r"\bsrc\s*=", attrs, re.I)
+                  and not re.search(r"application/ld\+json", attrs, re.I)
+              ]
+              assert scripts, f"no inline application script found in {source}"
+              target.write_text("\n".join(scripts))
+          pages = Path("docs/index.html").read_text()
+          assert 'href="https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md"' in pages, "GitHub Pages roadmap link is missing"
+          assert 'href="https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md"' in pages, "GitHub Pages milestone link is missing"
+          assert Path("docs/audit/COMPETITIVE_ROADMAP.md").is_file(), "linked competitive roadmap is missing"
+          assert Path("docs/audit/MILESTONES.md").is_file(), "linked milestone register is missing"
+          for forbidden in ("COMPETITORS.md", "IR_ARCHITECTURE.md", "WORKLOG.md", "RESUME.md", "TEST_MATRIX.md", "THREAT_MODEL.md", "SEO_DEPLOYMENT.md", "KNOWN_LIMITATIONS.md"):
+              assert forbidden not in pages, f"stale removed-doc link: {forbidden}"
+          PY
+          node --check /tmp/rdis-inline.js
+          node --check /tmp/rdis-pages-inline.js
+
+      - name: Validate SEO metadata and discovery files
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          html = Path("docs/index.html").read_text()
+          assert "<title>RDIS — Open-Source Disassembler and Decompiler</title>" in html
+          assert '<link rel="canonical" href="https://sagarchive.github.io/rdis/">' in html
+          start = html.find('<script type="application/ld+json">')
+          assert start >= 0, "SoftwareApplication JSON-LD missing"
+          start = html.find(">", start) + 1
+          end = html.find("</script>", start)
+          assert end > start, "SoftwareApplication JSON-LD is not closed"
+          schema = json.loads(html[start:end])
+          assert schema["url"] == "https://sagarchive.github.io/rdis/"
+          assert schema["offers"]["price"] == "0"
+
+          root = ET.parse("docs/sitemap.xml").getroot()
+          ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+          urls = [node.text for node in root.findall(".//s:loc", ns)]
+          assert "https://sagarchive.github.io/rdis/" in urls
+          for url, target in [
+              ("https://sagarchive.github.io/rdis/", Path("docs/index.html")),
+              ("https://sagarchive.github.io/rdis/audit/COMPETITIVE_ROADMAP.html", Path("docs/audit/COMPETITIVE_ROADMAP.md")),
+              ("https://sagarchive.github.io/rdis/audit/MILESTONES.html", Path("docs/audit/MILESTONES.md")),
+              ("https://sagarchive.github.io/rdis/brand/", Path("docs/brand/index.html")),
+          ]:
+              assert url in urls and target.is_file(), f"unpublished sitemap route: {url}"
+          robots = Path("docs/robots.txt").read_text()
+          assert "User-agent: *" in robots and "Sitemap: https://sagarchive.github.io/rdis/sitemap.xml" in robots
+          llms = Path("docs/llms.txt").read_text()
+          assert "MILESTONES.md" in llms and "COMPETITIVE_ROADMAP.md" in llms
+          assert Path("llms.txt").is_file()
+          for stale in ("COMPETITORS.md", "IR_ARCHITECTURE.md", "WORKLOG.md", "RESUME.md", "TEST_MATRIX.md", "THREAT_MODEL.md", "SEO_DEPLOYMENT.md", "KNOWN_LIMITATIONS.md"):
+              assert stale not in llms, f"stale removed-doc link in docs/llms.txt: {stale}"
+          print("SEO/discovery files structurally validated")
+          PY
+
+      - name: Run hardening regressions
+        run: python -m unittest discover -s tests -p 'test_hardening.py' -v
+      - name: Run typed IR contract tests
+        run: python -m unittest discover -s tests -p 'test_ir_*.py' -v
+
+
+  browser-cfg:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install RDIS for real-binary integration test
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Compile deterministic CFG binary
+        run: cc -O0 -g -fno-inline -fno-pie -no-pie tests/fixtures/cfg_fixture.c -o /tmp/rdis-cfg-fixture
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install real browser test dependencies
+        run: npm install --no-save --no-package-lock playwright
+      - name: Install ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Test CFG rendering, fit, zoom, accessibility and SVG export
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: node tests/browser_cfg.mjs
+      - name: Upload CFG screenshots and SVG export
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-cfg-browser-${{ matrix.browser }}
+          path: artifacts/cfg-browser-${{ matrix.browser }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos-regression:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Run full product self-check
+        run: python tests/test_rdis.py
+      - name: Record reproducible analysis benchmark
+        run: python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3 --output /tmp/rdis-benchmark.json
+      - name: Show benchmark artifact in CI log
+        run: cat /tmp/rdis-benchmark.json
+      - name: Run execution-checked decompiler maturity suite
+        run: python tests/maturity.py
+      - name: Stress multi-visitor isolation and deterministic analysis
+        run: |
+          rdis-gui --multi-user --host 127.0.0.1 --port 8781 --no-open >/tmp/rdis-server.log 2>&1 &
+          server_pid=$!
+          (while kill -0 "$server_pid" 2>/dev/null; do
+            ps -o rss= -p "$server_pid" >>/tmp/rdis-server-rss.log
+            sleep 1
+          done) &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true; kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8781/ >/dev/null; then ready=1; break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/rdis-server.log; exit 1; fi
+          if ! python tests/concurrency_test.py http://127.0.0.1:8781; then
+            cat /tmp/rdis-server.log
+            echo "Server RSS samples (KiB):"
+            cat /tmp/rdis-server-rss.log || true
+            exit 1
+          fi

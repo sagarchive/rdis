@@ -21,6 +21,24 @@ PRELUDE = """#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+/* Clang releases before the generic bit-count builtins: preserve the zero fallback
+   argument and width semantics used by the decompiler's C output. */
+#if !__has_builtin(__builtin_clzg)
+#define RDIS_CLZG_ONE(x) ((x) == 0 ? (int)(sizeof(x) * CHAR_BIT) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#define RDIS_CLZG_TWO(x, fallback) ((x) == 0 ? (fallback) : (__builtin_clzll((unsigned long long)(x)) - (64 - (int)(sizeof(x) * CHAR_BIT))))
+#define RDIS_CLZG_PICK(_1, _2, NAME, ...) NAME
+#define __builtin_clzg(...) RDIS_CLZG_PICK(__VA_ARGS__, RDIS_CLZG_TWO, RDIS_CLZG_ONE)(__VA_ARGS__)
+#endif
+#if !__has_builtin(__builtin_ctzg)
+#define RDIS_CTZG_ONE(x) ((x) == 0 ? (int)(sizeof(x) * CHAR_BIT) : __builtin_ctzll((unsigned long long)(x)))
+#define RDIS_CTZG_TWO(x, fallback) ((x) == 0 ? (fallback) : __builtin_ctzll((unsigned long long)(x)))
+#define RDIS_CTZG_PICK(_1, _2, NAME, ...) NAME
+#define __builtin_ctzg(...) RDIS_CTZG_PICK(__VA_ARGS__, RDIS_CTZG_TWO, RDIS_CTZG_ONE)(__VA_ARGS__)
+#endif
 typedef void *id;
 typedef void *SEL;
 """
@@ -94,10 +112,53 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
                        capture_output=True, text=True)
     if r.returncode:
         errs = [ln for ln in r.stderr.splitlines() if "error:" in ln][:6]
-        return [f"decompiled C did not compile ({arch}): " + " | ".join(errs) + f"  [{hfile}]"]
+        lines = harness.splitlines()
+        context = []
+        for err in errs:
+            m = re.search(r":(\d+):\d+: error:", err)
+            if not m:
+                continue
+            line_no = int(m.group(1))
+            # Attribute a compiler diagnostic to the generated decompiler function, not only a
+            # temporary file line number. This makes semantic regressions actionable in CI.
+            owner = next((lines[i].strip() for i in range(min(line_no - 1, len(lines) - 1), -1, -1)
+                          if re.search(r"\bdec_[A-Za-z0-9_]+\s*\(", lines[i])
+                          and lines[i].rstrip().endswith("{")), "unknown generated function")
+            context.append(f"{owner} (harness line {line_no})")
+        detail = " | ".join(errs)
+        if context:
+            detail += " | generated function(s): " + ", ".join(dict.fromkeys(context))
+            match = re.search(r"\b(dec_[A-Za-z0-9_]+)\s*\(", context[0])
+            if match:
+                fn_name = match.group(1)
+                generated = next((d for d in decs
+                                  if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
+                if generated:
+                    detail += " | decompiled body: " + generated.replace("\n", " ; ")[:7000]
+                try:
+                    addr = prog.resolve("_" + fn_name[4:])
+                    func = prog.functions.get(addr)
+                    if func:
+                        asm = "; ".join(f"{ins.address:#x} {ins.mnemonic} {ins.op_str}"
+                                        for block in func.blocks.values() for ins in block.insns)
+                        detail += " | original instructions: " + asm[:2600]
+                except Exception:
+                    pass
+        return [f"decompiled C did not compile ({arch}): " + detail + f"  [{hfile}]"]
     r = subprocess.run(runner + [hbin], capture_output=True, text=True, timeout=8)
     out = r.stdout.splitlines()
     if "DONE" not in out:
         last = [ln for ln in r.stderr.splitlines() if ln.startswith("CALL ")][-1:] or ["?"]
         return [f"harness crashed ({arch}, rc={r.returncode}) in {last[0][5:]}  [{hfile}]"]
-    return [ln for ln in out if ln.startswith("MISMATCH")]
+    mismatches = [ln for ln in out if ln.startswith("MISMATCH")]
+    detailed = []
+    for line in mismatches:
+        match = re.match(r"MISMATCH\s+([A-Za-z0-9_]+)\(", line)
+        if match:
+            fn_name = "dec_" + match.group(1)
+            generated = next((d for d in decs
+                              if re.search(rf"\b{re.escape(fn_name)}\s*\(", d)), "")
+            if generated:
+                line += " | decompiled body: " + generated.replace("\n", " ; ")[:4000]
+        detailed.append(line)
+    return detailed

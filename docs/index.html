@@ -3,11 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>rdis</title>
+<title>RDIS — Open-Source Disassembler and Decompiler</title>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "RDIS",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "description": "Open-source multi-format disassembler and decompiler with a browser workspace, command-line interface, Python API and MCP server.",
+  "url": "https://sagarchive.github.io/rdis/",
+  "codeRepository": "https://github.com/sagarchive/rdis",
+  "license": "https://opensource.org/license/mit",
+  "isAccessibleForFree": true,
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
 <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
 <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#000000">
-<meta name="description" content="rdis disassembles and decompiles Mach-O, ELF, PE and WebAssembly for x86, ARM, MIPS and RISC-V in your browser, on macOS, Linux and Windows.">
+<meta name="author" content="RDIS contributors">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="keywords" content="open-source disassembler, binary decompiler, reverse engineering, control-flow graph, x86, ARM64, MIPS, RISC-V, WebAssembly, MCP">
+<link rel="canonical" href="https://sagarchive.github.io/rdis/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RDIS">
+<meta property="og:url" content="https://sagarchive.github.io/rdis/">
+<meta property="og:title" content="RDIS — Open-Source Disassembler and Decompiler">
+<meta property="og:description" content="Inspect binaries with an interactive control-flow graph, decompiler, CLI, Python API and MCP server.">
+<meta property="og:image" content="https://sagarchive.github.io/rdis/brand/apple-touch-icon.png">
+<meta property="og:image:alt" content="RDIS app icon">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="RDIS — Open-Source Disassembler and Decompiler">
+<meta name="twitter:description" content="Cross-platform binary analysis with an interactive CFG, Python API and MCP server.">
+<meta name="twitter:image" content="https://sagarchive.github.io/rdis/brand/apple-touch-icon.png">
+<meta name="description" content="RDIS is an open-source disassembler and decompiler for Mach-O, ELF, PE, WebAssembly and raw firmware, with an interactive CFG, CLI, Python API and MCP server.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -373,7 +407,7 @@ footer .links { display:flex; gap:20px; flex-wrap:wrap }
 
   <div class="hero wrap">
     <h1 class="enter">Read any binary.</h1>
-    <p class="lede enter">A disassembler and decompiler that runs in your browser. <strong>Mach-O, ELF, PE and WebAssembly</strong> for x86, ARM, MIPS and RISC-V, with an MCP server your AI agent can drive.</p>
+    <p class="lede enter">A disassembler and decompiler with interactive control-flow graphs, C-like output and a scriptable analysis engine. <strong>Mach-O, ELF, PE and WebAssembly</strong> for x86, ARM, MIPS and RISC-V—plus an MCP server your AI agent can drive.</p>
     <div class="ctas enter">
       <a class="pill lg" href="#install">Install rdis</a>
       <a href="https://github.com/sagarchive/rdis">View on GitHub</a>
@@ -587,7 +621,7 @@ x8 = <span class="t-fn">__builtin_reduce_add</span>((<span class="t-ty">u32x4</s
     <div class="duo">
       <article class="feat rise">
         <h3>See the shape of a function.</h3>
-        <p>Basic blocks, colored branches and loop back edges. Export any graph as Graphviz DOT with <code>--cfg</code>.</p>
+        <p>Explore basic blocks, conditional branches and loop back edges. Zoom around the pointer, drag to pan, fit large functions to the viewport, use the minimap to recenter large graphs, inspect instruction detail, select blocks by keyboard, and export a standalone SVG. For very tall or very wide functions, the entry-focused view plus minimap is usually more readable than fitting every block at once. For automation, export Graphviz DOT with <code>--cfg</code>.</p>
         <div class="vis cfg">
           <svg viewBox="0 0 440 392" role="img" aria-label="Control-flow graph of _djb2: an entry block, a loop block with a back edge, and an exit block">
             <defs>
@@ -763,7 +797,7 @@ rdis-gui ./MyApp</pre>
           <li><b>Mach-O, ELF, PE, WASM</b><span>Formats</span></li>
           <li><b>APK, IPA, DMG in place</b><span>Packages</span></li>
           <li><b>Browser, multi-user</b><span>Interface</span></li>
-          <li><b>Built in, no dependencies</b><span>MCP server</span></li>
+          <li><b>Built-in stdlib MCP endpoint</b><span>AI integration</span></li>
           <li><b>import rdis</b><span>Scripting</span></li>
         </ul>
       </div>
@@ -771,15 +805,16 @@ rdis-gui ./MyApp</pre>
         <h3>Hopper</h3>
         <p class="tag">Commercial</p>
         <ul>
-          <li><b>macOS, Linux</b><span>Platforms</span></li>
+          <li><b>Native desktop app</b><span>Interface</span></li>
           <li><b>Mach-O, ELF, PE</b><span>Formats</span></li>
           <li><b>Extract first</b><span>Packages</span></li>
           <li><b>Desktop, single user</b><span>Interface</span></li>
-          <li><b>Separate server</b><span>MCP server</span></li>
-          <li><b>Python API in the app</b><span>Scripting</span></li>
+          <li><b>Graph minimap, custom node actions</b><span>Graph workflow</span></li>
+          <li><b>In-app Python scripting API</b><span>Scripting</span></li>
         </ul>
       </div>
     </div>
+    <p class="honest">Both tools offer decompilation and graph navigation. rdis differentiates itself with a browser-first, cross-platform Python workflow, package-aware native-library loading and a built-in standard-library MCP endpoint; Hopper offers a mature native desktop workflow, graph minimap/custom node controls and in-app Python scripting. MCP integration is now documented by Hopper and Binary Ninja, and community adapters exist for IDA and Ghidra, so it is not a unique differentiator. RDIS needs to win on low setup, package-aware analysis and evidence-backed results, not the mere presence of an MCP endpoint. This feature-scope comparison makes no universal accuracy claim. Graph rendering, navigation and export are regression-tested in Chromium and Firefox; see the <a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">current browser and regression evidence</a>, the <a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md">engineering milestone tracker</a>, and the <a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md">Hopper, IDA, Ghidra and Binary Ninja feature-gap roadmap</a>.</p>
     <p class="honest">Decompiled output types its API calls from a library of 206 system prototypes (libc, POSIX, CoreFoundation and the Objective-C runtime), and Objective-C methods come out as valid Objective-C.</p>
   </section>
 
@@ -846,14 +881,14 @@ rdis-gui ./MyApp</pre>
         <button type="button" class="copy" id="copy">Copy</button>
       </div>
     </div>
-    <p class="reqs">Optional: <code>swift-demangle</code>, <code>c++filt</code>, <code>dot</code> and <code>lldb</code> add demangling, rendered graphs and the debugger. <code>pip install '.[ir]'</code> adds Ghidra’s P-code semantics.</p>
+    <p class="reqs">Optional: <code>swift-demangle</code>, <code>c++filt</code>, <code>dot</code> and <code>lldb</code> add demangling, rendered graphs and the debugger. <code>pip install '.[ir]'</code> installs <code>pypcode</code>, a SLEIGH/P-code frontend for RDIS-supported language IDs—not the entire Ghidra workbench or its full decompiler pipeline. RDIS’s downstream typed IR, data-flow and C reconstruction remain experimental and are validated separately.</p>
   </section>
 </main>
 
 <footer>
   <div class="mark" aria-hidden="true">rdis</div>
   <div class="in">
-    <div class="links"><a href="#lift">Decompiler</a><a href="#proof">Proof</a><a href="#formats">Formats</a><a href="#agents">Agents</a><a href="#install">Install</a><a href="#start">Usage</a><a href="https://github.com/sagarchive/rdis">GitHub</a><a href="brand/">Brand</a></div>
+    <div class="links"><a href="#lift">Decompiler</a><a href="#proof">Proof</a><a href="#formats">Formats</a><a href="#agents">Agents</a><a href="#install">Install</a><a href="#start">Usage</a><a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md">Competitor gaps and benchmarks</a><a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md">Engineering milestones</a><a href="https://github.com/sagarchive/rdis">GitHub</a><a href="brand/">Brand</a></div>
     <span>Built on Capstone and LIEF. MIT License, © 2026 the rdis authors.</span>
   </div>
 </footer>
