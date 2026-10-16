@@ -187,11 +187,23 @@ button:focus-visible,.tab .x:focus-visible{outline:2px solid var(--accent);outli
 #graph.panning{cursor:grabbing}
 #graph svg{position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;display:block}
 #ghud{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:1px;background:var(--panel);
-  border:1px solid var(--line);border-radius:8px;padding:2px;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+  border:1px solid var(--line);border-radius:8px;padding:2px;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:5}
 #ghud .z{font:600 11px var(--mono);color:var(--dim);min-width:44px;text-align:center;user-select:none}
 #glegend{position:absolute;bottom:10px;right:12px;display:flex;gap:12px;background:var(--panel);
-  border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:10.5px var(--mono);color:var(--dim)}
+  border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:10.5px var(--mono);color:var(--dim);z-index:4}
 #glegend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+#gminimap{position:absolute;left:12px;bottom:34px;width:172px;height:112px;overflow:hidden;
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 16px rgba(0,0,0,.24);
+  z-index:3;cursor:crosshair;opacity:.96}
+#gminimap:hover{opacity:1;border-color:var(--accent)}
+#gminimap svg{position:static!important;left:auto!important;top:auto!important;transform:none!important;
+  display:block;width:100%!important;height:100%!important;max-width:none!important;pointer-events:none}
+#gminimap svg text{display:none!important}
+#gminimap svg .node polygon,#gminimap svg .node path{fill:var(--canvas)!important;stroke:var(--faint)!important;stroke-width:.7!important;vector-effect:non-scaling-stroke}
+#gminimap svg .edge path{stroke-width:1.0!important;vector-effect:non-scaling-stroke}
+#gminimap svg .edge polygon{stroke-width:.8!important;vector-effect:non-scaling-stroke}
+#gminimap .minimap-viewport{fill:none;stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}
+@media(max-width:700px){#gminimap{width:128px;height:84px;left:8px;bottom:34px}}
 
 /* ── inspector ───────────────────────────────────────────────────────────── */
 #insp{width:308px;flex:0 0 auto;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:2px 0 24px}
@@ -879,18 +891,20 @@ async function showPseudo(addr) {
 function showDecl(it) { pseudoView(it.decl, it.name, ""); $("#crMode").textContent = "TYPE"; empty(false); }
 
 /* ─────────────── CFG (graph view) ─────────────── */
-async function showCFG(addr) {
-  const d = await api("cfg", {func: addr});
+async function showCFG(addr, detail = false) {
+  const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
   const v = $("#view");
-  v.innerHTML = `<div id="graph"><div id="ghud">
-      <button class="ib" id="zin" title="Zoom in">＋</button>
-      <button class="ib" id="zout" title="Zoom out">－</button>
+  v.innerHTML = `<div id="graph" role="region" aria-label="Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."><div id="ghud">
+      <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
+      <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
-      <button class="ib" id="zfit" title="Zoom to fit">⤢</button>
-      <button class="ib" id="z100" title="Reset to 100%">1:1</button>
-      <button class="ib" id="zsvg" title="Download SVG">⤓</button>
+      <button class="ib" id="zfit" aria-label="Fit graph to view" title="Zoom to fit">⤢</button>
+      <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
+      <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
+      <button class="ib" id="zsvg" aria-label="Download graph as SVG" title="Download SVG">⤓</button>
     </div>
-    <div id="glegend"><span><i style="background:var(--ok)"></i>taken</span><span><i style="background:var(--err)"></i>not taken</span><span><i style="background:var(--g-flow)"></i>flow</span></div>
+    <div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>
+    <div id="gminimap" role="region" aria-label="Graph minimap. Click to recenter the main graph." title="Minimap — click to recenter" style="display:none"></div>
   </div>`;
   const g = $("#graph");
   if (!d.dot) {  // WebAssembly: no CFG yet
@@ -903,7 +917,7 @@ async function showCFG(addr) {
     crumbs(d.name, d.addr, "");
     return;
   }
-  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · double-click a node for listing</div>`);
+  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing</div>`);
   let svg;
   try {
     S.viz = S.viz || await Viz.instance();
@@ -917,57 +931,297 @@ async function showCFG(addr) {
     return;
   }
   g.appendChild(svg);
+  // Viz.js lays out text using Graphviz font metrics, but browser font substitution can differ
+  // slightly. Keep node labels inside their painted shape so a long label cannot bleed across
+  // neighboring edges/nodes; preserve the original text as a hover title when compression is needed.
+  svg.querySelectorAll("g.node").forEach(node => {
+    const shape = node.querySelector("polygon, path");
+    if (!shape) return;
+    const box = shape.getBBox();
+    const pad = Math.min(4, box.width * 0.025);
+    const left = box.x + pad, right = box.x + box.width - pad;
+    node.querySelectorAll("text").forEach(text => {
+      let tb = text.getBBox();
+      if (tb.x >= left && tb.x + tb.width <= right) return;
+      const original = text.textContent;
+      const anchor = text.getAttribute("text-anchor") || "start";
+      if (anchor === "start" && tb.x < left) {
+        text.setAttribute("x", String(left));
+        tb = text.getBBox();
+      }
+      const available = anchor === "end" ? tb.x + tb.width - left :
+        anchor === "middle" ? (right - left) : right - tb.x;
+      if (tb.width > available && available > 1) {
+        let title = text.querySelector("title");
+        if (!title) { title = document.createElementNS("http://www.w3.org/2000/svg", "title"); text.appendChild(title); }
+        title.textContent = original;
+        text.setAttribute("textLength", String(available));
+        text.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
+    });
+  });
   crumbs(d.name, d.addr, "drag to pan · wheel to zoom");
 
   let scale = 1, tx = 0, ty = 0;
-  const apply = () => { svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; $("#zval").textContent = Math.round(scale * 100) + "%"; };
+  const miniHost = $("#gminimap");
+  let miniSvg = null, miniViewport = null, miniBox = null;
+  const graphTarget = svg.querySelector("g.graph") || svg;
+  if (svg.querySelectorAll("g.node").length > 12) {
+    let bb;
+    try {
+      // Graphviz transforms the graph group (including the Y-axis origin); getBBox() is local to
+      // that group, while the cloned SVG viewBox and minimap viewport rectangle use root-SVG
+      // coordinates. Transform all four corners through screen space back into the root viewBox.
+      const local = graphTarget.getBBox();
+      const graphCtm = graphTarget.getScreenCTM();
+      const rootInverse = svg.getScreenCTM().inverse();
+      const rootCorners = [
+        [local.x, local.y], [local.x + local.width, local.y],
+        [local.x, local.y + local.height], [local.x + local.width, local.y + local.height]
+      ].map(([x, y]) => {
+        const p = svg.createSVGPoint();
+        p.x = x; p.y = y;
+        return p.matrixTransform(graphCtm).matrixTransform(rootInverse);
+      });
+      const left = Math.min(...rootCorners.map(p => p.x));
+      const top = Math.min(...rootCorners.map(p => p.y));
+      const right = Math.max(...rootCorners.map(p => p.x));
+      const bottom = Math.max(...rootCorners.map(p => p.y));
+      bb = {x: left, y: top, width: right - left, height: bottom - top};
+    } catch { bb = null; }
+    if (bb && bb.width && bb.height) {
+      miniBox = {x: bb.x, y: bb.y, width: bb.width, height: bb.height};
+      // Give tall and wide graphs a useful minimap aspect ratio instead of shrinking either to a line.
+      const aspect = bb.width / bb.height;
+      const compact = g.clientWidth < 500;
+      // Tall CFGs need more vertical pixels than a conventional thumbnail: otherwise hundreds
+      // of tiny filled nodes merge into a single bar. Keep the minimap compact on narrow panes.
+      if (aspect < 0.7) {
+        miniHost.style.width = compact ? "96px" : "112px";
+        miniHost.style.height = compact ? "160px" : "260px";
+      } else if (aspect > 1.6) {
+        miniHost.style.width = compact ? "128px" : "172px";
+        miniHost.style.height = compact ? "84px" : "112px";
+      } else {
+        miniHost.style.width = compact ? "128px" : "150px";
+        miniHost.style.height = compact ? "84px" : "110px";
+      }
+      miniSvg = svg.cloneNode(true);
+      miniSvg.removeAttribute("style");
+      // A minimap is a topology/viewport navigator, not a second tiny copy of every instruction.
+      // Remove node/edge labels so block outlines and flow remain distinguishable on 100+ node CFGs.
+      miniSvg.querySelectorAll("text").forEach(el => el.remove());
+      miniSvg.setAttribute("viewBox", `${bb.x - 6} ${bb.y - 6} ${bb.width + 12} ${bb.height + 12}`);
+      miniSvg.setAttribute("width", "100%");
+      miniSvg.setAttribute("height", "100%");
+      // This is a schematic navigator, not a scale drawing: use the entire thumbnail frame so
+      // very tall CFGs don't collapse into a single sub-pixel line. Main-graph geometry is unchanged.
+      miniSvg.setAttribute("preserveAspectRatio", "none");
+      miniSvg.setAttribute("aria-hidden", "true");
+      miniSvg.setAttribute("focusable", "false");
+      miniSvg.querySelectorAll("g.node").forEach(n => {
+        n.removeAttribute("tabindex"); n.removeAttribute("role"); n.removeAttribute("aria-label");
+      });
+      miniViewport = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      miniViewport.setAttribute("class", "minimap-viewport");
+      miniSvg.appendChild(miniViewport);
+      miniHost.appendChild(miniSvg);
+      miniHost.style.display = "block";
+      miniHost.onclick = e => {
+        const ctm = miniSvg.getScreenCTM();
+        if (!ctm || !miniBox) return;
+        const p = miniSvg.createSVGPoint();
+        p.x = e.clientX; p.y = e.clientY;
+        const point = p.matrixTransform(ctm.inverse());
+        // The minimap viewBox uses the original SVG user coordinates; map the clicked point
+        // through the live main SVG CTM for accurate recentering at every zoom level.
+        const mainCtm = svg.getScreenCTM(), viewRect = g.getBoundingClientRect();
+        if (!mainCtm) return;
+        const mainPoint = svg.createSVGPoint();
+        mainPoint.x = point.x; mainPoint.y = point.y;
+        const screenPoint = mainPoint.matrixTransform(mainCtm);
+        tx += viewRect.left + g.clientWidth / 2 - screenPoint.x;
+        ty += viewRect.top + g.clientHeight / 2 - screenPoint.y;
+        apply();
+      };
+    }
+  }
+  const updateMini = () => {
+    if (!miniSvg || !miniViewport || !miniBox) return;
+    // Convert the visible graph viewport from screen pixels back into the *main SVG's user
+    // coordinates*. Proportions based on getBoundingClientRect() of the nested graph group are
+    // unreliable when its box is clipped by the SVG viewport; that made the minimap viewport
+    // rectangle cover nearly the whole thumbnail on very tall graphs.
+    const matrix = svg.getScreenCTM(), viewRect = g.getBoundingClientRect();
+    if (!matrix || !viewRect.width || !viewRect.height) return;
+    let inverse;
+    try { inverse = matrix.inverse(); } catch { return; }
+    const point = (x, y) => {
+      const p = svg.createSVGPoint();
+      p.x = x; p.y = y;
+      return p.matrixTransform(inverse);
+    };
+    const corners = [
+      point(viewRect.left, viewRect.top), point(viewRect.right, viewRect.top),
+      point(viewRect.left, viewRect.bottom), point(viewRect.right, viewRect.bottom)
+    ];
+    const minX = Math.max(miniBox.x, Math.min(...corners.map(p => p.x)));
+    const minY = Math.max(miniBox.y, Math.min(...corners.map(p => p.y)));
+    const maxX = Math.min(miniBox.x + miniBox.width, Math.max(...corners.map(p => p.x)));
+    const maxY = Math.min(miniBox.y + miniBox.height, Math.max(...corners.map(p => p.y)));
+    miniViewport.setAttribute("x", String(minX));
+    miniViewport.setAttribute("y", String(minY));
+    miniViewport.setAttribute("width", String(Math.max(0, maxX - minX)));
+    miniViewport.setAttribute("height", String(Math.max(0, maxY - minY)));
+  };
+  const apply = () => {
+    svg.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+    $("#zval").textContent = Math.round(scale * 100) + "%";
+    updateMini();
+  };
   const fit = (retry = true) => {
-    const bb = svg.getBBox();
-    if (!bb.width) { if (retry) requestAnimationFrame(() => fit(false)); return; }  // layout not ready yet
-    scale = Math.min((g.clientWidth - 48) / bb.width, (g.clientHeight - 48) / bb.height, 1.4);
-    tx = (g.clientWidth - bb.width * scale) / 2 - bb.x * scale;
-    ty = Math.max(16, (g.clientHeight - bb.height * scale) / 2) - bb.y * scale;
+    // Fit actual graph geometry (nodes, labels and edges), not the outer SVG viewport.
+    const target = svg.querySelector("g.graph") || svg;
+    // Graphviz uses point-based intrinsic SVG dimensions and a viewBox. getBBox() returns user
+    // units, not CSS pixels, so fitting from it can leave a graph clipped by a ~4/3 scale factor.
+    // Reset our CSS transform, measure the graph as actually painted, then fit in viewport pixels.
+    svg.style.transform = "none";
+    let rect, viewport;
+    try { rect = target.getBoundingClientRect(); viewport = g.getBoundingClientRect(); } catch { rect = viewport = null; }
+    if (!rect || !viewport || !rect.width || !rect.height) {
+      if (retry) requestAnimationFrame(() => fit(false));
+      return;
+    }
+    const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
+    scale = Math.max(0.005, Math.min(availW / rect.width, availH / rect.height, 1.25));
+    tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
+    ty = (g.clientHeight - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
+    apply();
+  };
+  const fitInitial = (retry = true) => {
+    // A fit-all overview is useful for short functions, but makes long linear/chain-like CFGs
+    // unreadable (e.g. a 50-block function becomes a thin strip). Start those at a readable scale
+    // near the entry block; the minimap navigates the rest and the explicit Fit control still fits all.
+    svg.style.transform = "none";
+    let rect, viewport;
+    try { rect = graphTarget.getBoundingClientRect(); viewport = g.getBoundingClientRect(); } catch { rect = viewport = null; }
+    if (!rect || !viewport || !rect.width || !rect.height) {
+      if (retry) requestAnimationFrame(() => fitInitial(false));
+      return;
+    }
+    const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
+    const tallAndNarrow = rect.height > availH * 1.15 && rect.width < availW * 0.8;
+    const tooWide = rect.width > availW * 1.15;
+    if (!tallAndNarrow && !tooWide) return fit();
+    // A full fit of a wide fan-out can be as unreadable as a tall chain. For wide graphs,
+    // reduce the initial scale enough to expose more of the entry's immediate fan-out while
+    // preserving readable labels; the minimap exposes distant branches and Fit shows all nodes.
+    scale = tallAndNarrow
+      ? Math.min(1, availW / rect.width)
+      : Math.max(0.6, Math.min(0.75, availW / (rect.width * 0.9)));
+    tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
+    ty = 44 - (rect.top - viewport.top) * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
-    const ns = Math.min(4, Math.max(0.08, scale * factor));
+    const ns = Math.min(4, Math.max(0.005, scale * factor));
     tx = cx - (cx - tx) * (ns / scale); ty = cy - (cy - ty) * (ns / scale);
     scale = ns; apply();
   };
   // pan
   let pan = null;
-  g.onpointerdown = e => { if (e.target.closest("#ghud") || e.target.closest(".node")) return;
+  g.onpointerdown = e => { if (e.target.closest("#ghud") || e.target.closest("#gminimap") || e.target.closest(".node")) return;
     pan = {x: e.clientX, y: e.clientY, tx, ty}; g.classList.add("panning"); g.setPointerCapture(e.pointerId); };
   g.onpointermove = e => { if (!pan) return; tx = pan.tx + e.clientX - pan.x; ty = pan.ty + e.clientY - pan.y; apply(); };
   g.onpointerup = g.onpointercancel = () => { pan = null; g.classList.remove("panning"); };
-  // wheel = pan the graph (natural scrolling); ⌘/Ctrl+wheel = zoom at the cursor
+  // Wheel zooms around the pointer; drag pans. Shift+wheel pans for trackpads and keyboards.
   g.onwheel = e => {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const r = g.getBoundingClientRect();
-      zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
-    } else { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+    if (e.shiftKey) {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) tx -= e.deltaX;
+      else ty -= e.deltaY;
+      apply();
+      return;
+    }
+    const r = g.getBoundingClientRect();
+    const delta = Math.max(-240, Math.min(240, e.deltaY + e.deltaX));
+    zoomAt(Math.pow(1.0018, -delta), e.clientX - r.left, e.clientY - r.top);
   };
   $("#zin").onclick = () => zoomAt(1.25, g.clientWidth / 2, g.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
-  $("#zsvg").onclick = () => { const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([svg.outerHTML], {type: "image/svg+xml"}));
-    a.download = `${d.name || "cfg"}.svg`; a.click(); };
+  $("#gdetail").onclick = () => showCFG(addr, !detail);
+  $("#gdetail").classList.toggle("on", detail);
+  $("#gdetail").setAttribute("aria-pressed", String(detail));
+  $("#zsvg").onclick = () => {
+    // Resolve theme variables in a cloned SVG; CSS custom properties are not defined in an
+    // external viewer, so the download must be self-contained and retain readable contrast.
+    const copy = svg.cloneNode(true);
+    const style = getComputedStyle(document.documentElement);
+    const keys = ["--g-node", "--g-edge", "--g-text", "--g-flow", "--accent", "--ok", "--err", "--faint", "--mono"];
+    const values = Object.fromEntries(keys.map(k => [k, style.getPropertyValue(k).trim()]));
+    const resolve = s => s.replace(/var\((--[\w-]+)(?:\s*,\s*([^)]*))?\)/g, (_, k, fallback) => values[k] || fallback || "currentColor");
+    copy.querySelectorAll("*").forEach(el => {
+      ["style", "fill", "stroke", "color"].forEach(a => { if (el.hasAttribute(a)) el.setAttribute(a, resolve(el.getAttribute(a))); });
+    });
+    copy.querySelectorAll("style").forEach(el => { el.textContent = resolve(el.textContent); });
+    // Measure the live graph, then transform its four corners into ROOT-SVG coordinates.
+    // Graphviz commonly translates g.graph (for example translate(18 298)); using its local
+    // getBBox() directly as the exported root viewBox crops the standalone SVG even though the
+    // in-app graph looks correct. A detached clone also cannot be relied on for getBBox().
+    const graph = svg.querySelector("g.graph");
+    let bb;
+    try {
+      const local = graph?.getBBox(), graphCtm = graph?.getScreenCTM(), rootCtm = svg.getScreenCTM();
+      if (local && graphCtm && rootCtm && local.width && local.height) {
+        const rootInverse = rootCtm.inverse();
+        const corners = [
+          [local.x, local.y], [local.x + local.width, local.y],
+          [local.x, local.y + local.height], [local.x + local.width, local.y + local.height]
+        ].map(([x, y]) => {
+          const p = svg.createSVGPoint();
+          p.x = x; p.y = y;
+          return p.matrixTransform(graphCtm).matrixTransform(rootInverse);
+        });
+        const left = Math.min(...corners.map(p => p.x)), top = Math.min(...corners.map(p => p.y));
+        const right = Math.max(...corners.map(p => p.x)), bottom = Math.max(...corners.map(p => p.y));
+        bb = {x: left, y: top, width: right - left, height: bottom - top};
+      }
+    } catch { bb = null; }
+    if (bb && bb.width && bb.height) {
+      copy.setAttribute("viewBox", [bb.x - 12, bb.y - 12, bb.width + 24, bb.height + 24].join(" "));
+      copy.setAttribute("width", String(Math.ceil(bb.width + 24)));
+      copy.setAttribute("height", String(Math.ceil(bb.height + 24)));
+    }
+    copy.removeAttribute("style");
+    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const blob = new Blob([new XMLSerializer().serializeToString(copy)], {type: "image/svg+xml;charset=utf-8"});
+    const url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = (d.name || "cfg").replace(/[^a-zA-Z0-9._-]+/g, "_") + ".svg"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   // node interactions
   svg.querySelectorAll("g.node").forEach(n => {
     n.style.cursor = "pointer";
+    const title = n.querySelector("title");
+    n.setAttribute("tabindex", "0");
+    n.setAttribute("role", "button");
+    n.setAttribute("aria-label", "Basic block " + (title?.textContent || ""));
     n.onclick = () => { const t = n.querySelector("title"); if (!t) return;
       svg.querySelectorAll(".node.cur").forEach(x => markNode(x, false));
       markNode(n, true);
       S.sel = t.textContent; inspectAddr(S.sel); statusCursor(S.sel); };
+    n.onkeydown = e => {
+      if (e.key === "Enter" && e.shiftKey && title) { e.preventDefault(); go(title.textContent, {mode: "listing"}); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true})); }
+    };
     n.ondblclick = () => { const t = n.querySelector("title"); if (t) go(t.textContent, {mode: "listing"}); };
     n.oncontextmenu = e => { e.preventDefault(); const t = n.querySelector("title"); if (t) { S.sel = t.textContent; navMenu(e, S.sel, ""); } };
   });
   const here = [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === S.sel);
   if (here) markNode(here, true);
-  fit();
+  fitInitial();
 }
 function themeGraph(svg) {
   // strip the white page background polygon; restyle nodes/edges/text to the active theme
@@ -975,15 +1229,17 @@ function themeGraph(svg) {
   if (bg) bg.remove();
   const css = document.createElement("style");
   css.textContent = `
-    .graph, .node polygon, .node path { fill: var(--g-node); stroke: var(--g-edge); stroke-width: 1.2; }
+    .node polygon, .node path { fill: var(--g-node); stroke: var(--g-edge); stroke-width: 1.2; }
     .cluster polygon { fill: none; stroke: var(--g-edge); }
-    text { fill: var(--g-text) !important; font-family: ${getComputedStyle(document.body).getPropertyValue("--mono")} !important; }
+    /* Preserve Graphviz-measured font metrics: overriding font-family here can make long labels overflow their node shapes. */
+    text { fill: var(--g-text) !important; }
     .graph > text { fill: var(--faint) !important; font-size: 13px; }
     .edge path { stroke-width: 1.6; fill: none; }
     .edge polygon { stroke: none; }
     .node { cursor: pointer; }
-    .node:hover polygon { stroke: var(--accent); }
-    .node.cur polygon { stroke: var(--accent); stroke-width: 2.2; }
+    .node:hover polygon, .node:hover path, .node:focus polygon, .node:focus path { stroke: var(--accent); stroke-width: 2.4; }
+    .node.entry polygon, .node.entry path { stroke: var(--accent); stroke-width: 2; }
+    .node.cur polygon, .node.cur path { stroke: var(--accent); stroke-width: 2.6; }
     .edge path[stroke="green"], .edge [stroke="green"] { stroke: var(--ok) !important; }
     .edge polygon[fill="green"] { fill: var(--ok) !important; }
     .edge path[stroke="red"], .edge [stroke="red"] { stroke: var(--err) !important; }
@@ -1007,6 +1263,7 @@ function retintGraph(svg) {
   svg.querySelectorAll(".node polygon, .node path").forEach(el => {
     el.setAttribute("fill", "var(--g-node)"); el.setAttribute("stroke", "var(--g-edge)");
   });
+  svg.querySelectorAll(".node.entry polygon, .node.entry path").forEach(el => el.setAttribute("stroke", "var(--accent)"));
   svg.querySelectorAll("g.graph > text").forEach(el => el.setAttribute("fill", "var(--faint)"));
   svg.querySelectorAll("g.node text").forEach(el => el.setAttribute("fill", "var(--g-text)"));
 }
@@ -1229,9 +1486,23 @@ $("#bExport").onclick = async () => {
 $("#bImport").onclick = () => { if (S.info) { $("#dbfile").value = ""; $("#dbfile").click(); } };
 $("#dbfile").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  try { await post("import", JSON.parse(await f.text())); log(`loaded analysis database ${f.name}`, "ok");
-        await refreshLists(); await show(); }
-  catch (err) { log("import failed: " + err.message, "err"); }
+  try {
+    const data = JSON.parse(await f.text());
+    const legacy = data.db_version !== 2 || !data.binary_sha256;
+    let query;
+    if (legacy) {
+      const accepted = confirm(
+        "This analysis database has no SHA-256 identity for the original binary. " +
+        "Its addresses and annotations may belong to a different build. Only continue if you " +
+        "have independently verified that it belongs to the currently open binary."
+      );
+      if (!accepted) return;
+      query = {allow_legacy: "1"};
+    }
+    await post("import", data, query);
+    log(`loaded analysis database ${f.name}`, "ok");
+    await refreshLists(); await show();
+  } catch (err) { log("import failed: " + err.message, "err"); }
 };
 $("#pathGo").onclick = () => $("#pathIn").value.trim() && openPath($("#pathIn").value.trim());
 $("#pathIn").onkeydown = e => e.key === "Enter" && $("#pathGo").click();

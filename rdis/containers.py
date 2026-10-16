@@ -7,6 +7,7 @@ member. `_extract` pulls one member into a content-addressed cache file.
 import hashlib
 import os
 import shutil
+import threading
 
 import lief
 
@@ -44,6 +45,31 @@ def _opener(head):
     return None, None
 
 
+def _file_digest(path):
+    """SHA-256 the actual file bytes; metadata alone is not a safe cache identity."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_bounded(src, dst, limit, expected_size=None):
+    """Stream at most limit bytes and reject oversized or truncated members."""
+    total = 0
+    while True:
+        chunk = src.read(min(1 << 20, limit - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise ValueError(f"expanded data exceeds the {limit} byte limit")
+        dst.write(chunk)
+    if expected_size is not None and total != expected_size:
+        raise ValueError(f"archive member size mismatch: expected {expected_size} bytes, got {total}")
+    return total
+
+
 def _peek_compressed(path):
     """gzip/xz/bzip2 single file: peek the decompressed header and offer to open it transparently."""
     with open(path, "rb") as fh:
@@ -61,35 +87,78 @@ def _peek_compressed(path):
     return [{**s, "entry": DECOMP, "label": f"{kind} → " + s["label"]} for s in _RAW]
 
 
-def _write_atomic(cache_dir, out, fill):
-    """Write `out` via a temp file + atomic rename; on failure (a truncated stream, a zip member
-    whose CRC fails at EOF, ...) remove the temp, or every bad upload leaves up to max_mb behind."""
+class StorageLimitError(ValueError):
+    """The shared extraction/upload directory has reached its configured disk quota."""
+
+
+_STORAGE_WRITE_LOCK = threading.Lock()
+
+
+def _validate_total_limit(max_total_mb):
+    if max_total_mb is not None and (
+        not isinstance(max_total_mb, int) or isinstance(max_total_mb, bool) or max_total_mb < 1
+    ):
+        raise ValueError("max_total_mb must be a positive integer")
+
+
+def _directory_size(path):
+    total = 0
+    if not os.path.isdir(path):
+        return 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                if not os.path.islink(os.path.join(root, name)):
+                    total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return total
+
+
+def _write_atomic(cache_dir, out, fill, max_total_bytes=None):
+    """Atomically write a cache result and enforce an optional aggregate directory quota."""
     import tempfile
-    fd, tmp = tempfile.mkstemp(dir=cache_dir)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            fill(f)
-        os.replace(tmp, out)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    os.makedirs(cache_dir, exist_ok=True)
+    with _STORAGE_WRITE_LOCK:
+        used = _directory_size(cache_dir) if max_total_bytes is not None else 0
+        old_size = os.path.getsize(out) if os.path.isfile(out) else 0
+        fd, tmp = tempfile.mkstemp(dir=cache_dir)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                fill(f)
+            if max_total_bytes is not None:
+                projected = used - old_size + os.path.getsize(tmp)
+                if projected > max_total_bytes:
+                    raise StorageLimitError(
+                        f"cache storage quota exceeded ({projected} > {max_total_bytes} bytes); "
+                        "remove unused files from the upload/cache directory or raise the configured limit"
+                    )
+            os.replace(tmp, out)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
-
-def _decompress(path, cache_dir, max_mb):
+def _decompress(path, cache_dir, max_mb, max_total_mb=None):
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
+    if max_total_mb is not None and (not isinstance(max_total_mb, int) or isinstance(max_total_mb, bool) or max_total_mb < 1):
+        raise ValueError("max_total_mb must be a positive integer")
     with open(path, "rb") as fh:
         head = fh.read(6)
     _, op = _opener(head)
     if op is None:
         return None
     os.makedirs(cache_dir, exist_ok=True)
-    st = os.stat(path)   # size+mtime too: a re-written local file must not reuse a stale output
-    tag = hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}|decomp".encode()).hexdigest()[:16]
+    # Include content and the configured cap: same-size/same-mtime rewrites must not reuse output,
+    # and a result produced under a larger limit must not bypass a smaller limit.
+    digest = _file_digest(path)
+    tag = hashlib.sha256(f"{os.path.abspath(path)}|{digest}|{max_mb}|decomp".encode()).hexdigest()[:24]
     out = os.path.join(cache_dir, f"{tag}-{os.path.basename(path).rsplit('.', 1)[0][:48] or 'bin'}")
     if not os.path.exists(out):
         def fill(w):
             with op(path, "rb") as r:
-                w.write(r.read(max_mb << 20))
-        _write_atomic(cache_dir, out, fill)
+                _copy_bounded(r, w, max_mb << 20)
+        _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 
@@ -124,20 +193,33 @@ def _tar_slices(path):
     return out or [{"arch": None, "disabled": True, "label": "No native binaries found in this tar archive."}]
 
 
-def _tar_extract(path, entry, cache_dir, max_mb):
+def _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=None):
     import tarfile
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
+    _validate_total_limit(max_total_mb)
     with tarfile.open(path) as t:
         m = next((m for m in _tar_members(t) if m.name == entry and m.isfile()), None)
         if m is None:
             raise KeyError(f"no such file in the tar archive: {entry}")
-        if m.size > max_mb << 20:
+        limit = max_mb << 20
+        if m.size > limit:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{m.size}".encode()).hexdigest()[:16]
+        # The archive digest avoids stale extraction when a member is replaced with same-size data.
+        tag = hashlib.sha256(
+            f"{os.path.abspath(path)}|{_file_digest(path)}|{entry}|{m.offset_data}|{m.size}|{max_mb}".encode()
+        ).hexdigest()[:24]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "bin"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == m.size):
-            _write_atomic(cache_dir, out, lambda f: f.write(t.extractfile(m).read(max_mb << 20)))
+            def fill(dst):
+                src = t.extractfile(m)
+                if src is None:
+                    raise ValueError(f"could not read archive member: {entry}")
+                with src:
+                    _copy_bounded(src, dst, limit, expected_size=m.size)
+            _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 
@@ -229,9 +311,10 @@ def _archive_slices(path):
     return out
 
 
-def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128):
+def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Attach a DMG read-only, enumerate native binaries (or extract one). Returns slice list, or
     the extracted file path when `_extract_entry` is given."""
+    _validate_total_limit(max_total_mb)
     import plistlib
     import subprocess
     try:
@@ -260,12 +343,22 @@ def _dmg_list(path, _extract_entry=None, cache_dir=".rdis_uploads", max_mb=128):
                     if magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe",
                                  b"\x7fELF") or magic[:2] == b"MZ":
                         if _extract_entry == rel:
-                            if os.path.getsize(full) > max_mb << 20:
+                            size = os.path.getsize(full)
+                            limit = max_mb << 20
+                            if size > limit:
                                 raise ValueError(f"disk image member larger than {max_mb} MB")
-                            dst = os.path.join(cache_dir,
-                                               hashlib.sha1((path + rel).encode()).hexdigest()[:16] + "-" + fn)
+                            # The image can be replaced while retaining its path; bind the extraction
+                            # cache to the image bytes and member identity, and write atomically.
+                            tag = hashlib.sha256(
+                                f"{os.path.abspath(path)}|{_file_digest(path)}|{rel}|{size}|{max_mb}".encode()
+                            ).hexdigest()[:24]
+                            dst = os.path.join(cache_dir, tag + "-" + fn)
                             os.makedirs(cache_dir, exist_ok=True)
-                            shutil.copy(full, dst)
+                            if not (os.path.exists(dst) and os.path.getsize(dst) == size):
+                                def fill(out):
+                                    with open(full, "rb") as src:
+                                        _copy_bounded(src, out, limit, expected_size=size)
+                                _write_atomic(cache_dir, dst, fill, (max_total_mb << 20) if max_total_mb is not None else None)
                             return dst
                         slices.append({"entry": rel, "arch": None,
                                        "label": f"{rel}  ({os.path.getsize(full):,} B)"})
@@ -283,41 +376,50 @@ def _arch_of(b):
         return b.header.cpu_type.__name__.lower()
 
 
-def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128):
+def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Extract one archive member to a content-addressed cache file; return its path. Guards against
     zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
+    _validate_total_limit(max_total_mb)
     import tarfile
     import zipfile
     if entry == DECOMP:
-        out = _decompress(path, cache_dir, max_mb)
+        out = _decompress(path, cache_dir, max_mb, max_total_mb=max_total_mb)
         if out is None:
             raise ValueError("could not decompress this file")
         return out
     # same detection order as slices(): a zip (APK) with "koly" in its trailing comment is a zip
     if not zipfile.is_zipfile(path):
         if _is_dmg(path):
-            out = _dmg_list(path, _extract_entry=entry, cache_dir=cache_dir, max_mb=max_mb)
+            out = _dmg_list(path, _extract_entry=entry, cache_dir=cache_dir, max_mb=max_mb, max_total_mb=max_total_mb)
             if out is None:
                 raise ValueError(f"could not extract {entry} from the disk image")
             return out
         try:
             if tarfile.is_tarfile(path):
-                return _tar_extract(path, entry, cache_dir, max_mb)
+                return _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=max_total_mb)
         except tarfile.TarError:
             pass
+    if not isinstance(max_mb, int) or isinstance(max_mb, bool) or max_mb < 1:
+        raise ValueError("max_mb must be a positive integer")
     with zipfile.ZipFile(path) as z:
         info = z.getinfo(entry)
-        if info.file_size > max_mb << 20:
+        limit = max_mb << 20
+        if info.file_size > limit:
             raise ValueError(f"archive member larger than {max_mb} MB")
         os.makedirs(cache_dir, exist_ok=True)
-        tag = hashlib.sha1(f"{os.path.abspath(path)}|{entry}|{info.CRC}|{info.file_size}".encode()).hexdigest()[:16]
+        tag = hashlib.sha256(
+            f"{os.path.abspath(path)}|{_file_digest(path)}|{entry}|{info.header_offset}|"
+            f"{info.CRC}|{info.file_size}|{max_mb}".encode()
+        ).hexdigest()[:24]
         safe = "".join(c for c in os.path.basename(entry) if c.isalnum() or c in "._-")[:64] or "lib"
         out = os.path.join(cache_dir, f"{tag}-{safe}")
         if not (os.path.exists(out) and os.path.getsize(out) == info.file_size):
-            def fill(f):
+            def fill(dst):
                 with z.open(entry) as src:
-                    f.write(src.read(max_mb << 20))
-            _write_atomic(cache_dir, out, fill)
+                    _copy_bounded(src, dst, limit, expected_size=info.file_size)
+            _write_atomic(cache_dir, out, fill, (max_total_mb << 20) if max_total_mb is not None else None)
     return out
 
 

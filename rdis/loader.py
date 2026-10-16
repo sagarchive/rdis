@@ -43,19 +43,28 @@ class Image:
         return int.from_bytes(self.read(va, self.arch.bits // 8), "little")
 
     def section_at(self, va):
-        # hot path (every decoded instruction asks is_code): bisect over sections sorted by start.
-        # Sections may overlap (ELF segment fallback), so scan back a few for the containing one.
+        # Hot path: bisect to the last section that starts at/before va. Sections can overlap,
+        # so also keep a prefix maximum of section ends. This lets us stop only when every earlier
+        # section has ended, rather than relying on a fixed (and format-independent) scan distance.
         idx = getattr(self, "_sidx", None)
         if idx is None or idx[0] is not self.sections or idx[1] != len(self.sections):
             order = sorted(self.sections, key=lambda s: s.va)
-            idx = self._sidx = (self.sections, len(self.sections), [s.va for s in order], order)
-        starts, order = idx[2], idx[3]
+            starts = [s.va for s in order]
+            max_ends = []
+            end = None
+            for section in order:
+                section_end = section.va + max(0, section.size)
+                end = section_end if end is None else max(end, section_end)
+                max_ends.append(end)
+            idx = self._sidx = (self.sections, len(self.sections), starts, order, max_ends)
+        starts, order, max_ends = idx[2], idx[3], idx[4]
         i = bisect.bisect_right(starts, va) - 1
         while i >= 0:
-            s = order[i]
-            if va < s.va + s.size:
-                return s
-            if starts[i] + 0x10000000 < va:   # ponytail: bounded backscan for overlapping sections
+            section = order[i]
+            if section.va <= va < section.va + section.size:
+                return section
+            # All sections through i end at or before va; no earlier interval can contain it.
+            if max_ends[i] <= va:
                 break
             i -= 1
         return None

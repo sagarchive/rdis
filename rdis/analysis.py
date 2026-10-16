@@ -1,17 +1,37 @@
 """Whole-program analysis: functions, basic blocks, cross-references, strings."""
 from collections import Counter, defaultdict
+from collections.abc import MutableSet
+from dataclasses import dataclass, field
+import hashlib
+import hmac
+import json
+import os
+import re
+import tempfile
+import threading
+import warnings
 
 import capstone as cs
-from dataclasses import dataclass, field
-import re
-import threading
 
 from .arch import CALL, RET, JMP, CJMP, IJMP
 from .demangle import demangle_all
 from .objc import ObjC
 from .swift import Swift
 
-MAX_INSNS = 50_000  # ponytail: per-function cap guards against runaway descent into data
+MAX_INSNS = 50_000  # Safety cap against runaway descent into data.
+
+
+def _canonical_binary_path(path):
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+
+
+def _binary_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as binary:
+        for chunk in iter(lambda: binary.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 
 
 @dataclass
@@ -43,9 +63,42 @@ class Function:
         return max(b.end for b in self.blocks.values())
 
 
+class _CowXrefSet(MutableSet):
+    """Set-like view that copies one shared xref set only when someone mutates it."""
+
+    def __init__(self, owner, key):
+        self._owner, self._key = owner, key
+
+    def _view(self):
+        if dict.__contains__(self._owner, self._key):
+            return dict.__getitem__(self._owner, self._key)
+        return self._owner.base.get(self._key, ())
+
+    def __contains__(self, value):
+        return value in self._view()
+
+    def __iter__(self):
+        return iter(self._view())
+
+    def __len__(self):
+        return len(self._view())
+
+    def add(self, value):
+        self._owner[self._key].add(value)
+
+    def discard(self, value):
+        if value in self._view():
+            self._owner[self._key].discard(value)
+
+    def clear(self):
+        self._owner[self._key].clear()
+
+    def __repr__(self):
+        return repr(set(self._view()))
+
+
 class _LayerXrefs(dict):
-    """A session's own xrefs on top of the shared analysis's: reads fall through to the base,
-    the first write to a target copies its set, so one visitor's procedure edits stay private."""
+    """Copy-on-write xrefs for per-session analysis overlays without mutable base aliases."""
 
     def __init__(self, base):
         super().__init__()
@@ -56,12 +109,17 @@ class _LayerXrefs(dict):
         return v
 
     def get(self, k, default=None):
-        return dict.get(self, k) if k in self else self.base.get(k, default)
+        if dict.__contains__(self, k):
+            return dict.__getitem__(self, k)
+        if k in self.base:
+            return _CowXrefSet(self, k)
+        return default
 
     def items(self):
         own = dict(dict.items(self))
-        return list(own.items()) + [(k, v) for k, v in self.base.items() if k not in own]
-
+        return list(own.items()) + [
+            (k, _CowXrefSet(self, k)) for k in self.base if k not in own
+        ]
 
 class Program:
     def __init__(self, image):
@@ -252,31 +310,97 @@ class Program:
             self.comments.pop(int(addr), None)
 
     def save(self, path):
-        import json
-        data = {"path": self.image.path, "format": self.image.format, "arch": self.arch.name,
-                "names": {str(k): v for k, v in self.user_names.items()},
-                "comments": {str(k): v for k, v in self.comments.items()},
-                "bookmarks": sorted(self.bookmarks),
-                "types": {str(k): v for k, v in self.user_types.items()},
-                "procs": sorted(self.user_procs), "removed": sorted(self.removed_procs)}
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+        """Atomically save annotations bound to the exact binary content and analysis identity."""
+        identity_path = _canonical_binary_path(self.image.path)
+        digest = _binary_sha256(self.image.path)
+        data = {
+            "rdb_version": 2,
+            "path": identity_path,
+            "format": self.image.format,
+            "arch": self.arch.name,
+            "binary_sha256": digest,
+            "names": {str(k): v for k, v in self.user_names.items()},
+            "comments": {str(k): v for k, v in self.comments.items()},
+            "bookmarks": sorted(self.bookmarks),
+            "types": {str(k): v for k, v in self.user_types.items()},
+            "procs": sorted(self.user_procs),
+            "removed": sorted(self.removed_procs),
+        }
+        target = os.path.abspath(os.fspath(path))
+        directory = os.path.dirname(target) or os.curdir
+        os.makedirs(directory, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".rdis-rdb-", suffix=".tmp", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, target)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
         return path
 
-    def load(self, path):
-        import json, os
-        if not os.path.exists(path):
-            return self
+    def load(self, path, *, allow_legacy=False):
+        """Load annotations only when their binary identity is verified.
+
+        Version-1 sidecars have no content digest. They are preserved on disk but ignored by
+        default because a same-path binary replacement cannot be detected retrospectively. A caller
+        that has independently verified the original binary can explicitly opt into legacy import.
+        """
         try:
-            data = json.load(open(path))
-        except (OSError, ValueError):
-            return self  # a corrupt sidecar must never block opening the binary
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return self
         if not isinstance(data, dict):
             return self
 
-        def strmap(key):   # a hand-edited / old sidecar must not inject non-string names
+        def reject(reason):
+            warnings.warn(f"Ignoring RDIS sidecar {os.fspath(path)!r}: {reason}",
+                          RuntimeWarning, stacklevel=2)
+            return self
+
+        saved_path = data.get("path")
+        try:
+            saved_path = _canonical_binary_path(saved_path) if isinstance(saved_path, str) else None
+            current_path = _canonical_binary_path(self.image.path)
+        except (OSError, TypeError, ValueError):
+            return reject("binary path identity is invalid")
+        if saved_path != current_path:
+            return reject("sidecar belongs to a different binary path")
+        if data.get("format") != self.image.format:
+            return reject("binary format does not match")
+        if data.get("arch") != self.arch.name:
+            return reject("architecture does not match")
+
+        version = data.get("rdb_version", 1)
+        if not isinstance(version, int) or isinstance(version, bool) or version not in (1, 2):
+            return reject("unsupported sidecar schema version")
+        if version == 1:
+            if not allow_legacy:
+                return reject("legacy sidecar has no binary content digest; pass allow_legacy=True only after verifying the original binary")
+            warnings.warn(f"Importing unverified legacy RDIS sidecar {os.fspath(path)!r}; binary content identity cannot be proven",
+                          RuntimeWarning, stacklevel=2)
+        else:
+            saved_digest = data.get("binary_sha256")
+            if not isinstance(saved_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", saved_digest):
+                return reject("binary content digest is malformed")
+            try:
+                current_digest = _binary_sha256(self.image.path)
+            except OSError:
+                return reject("source binary cannot be fingerprinted")
+            if not hmac.compare_digest(saved_digest, current_digest):
+                return reject("binary content digest does not match")
+
+        def strmap(key):
             out = {}
-            for k, v in (data.get(key) or {}).items() if isinstance(data.get(key), dict) else ():
+            values = data.get(key)
+            for k, v in values.items() if isinstance(values, dict) else ():
                 try:
                     if isinstance(v, str):
                         out[int(k)] = v
@@ -285,8 +409,8 @@ class Program:
             return out
 
         def addrs(key):
-            v = data.get(key) or []
-            return [a for a in v if isinstance(a, int) and not isinstance(a, bool)] if isinstance(v, list) else []
+            values = data.get(key)
+            return [a for a in values if isinstance(a, int) and not isinstance(a, bool)] if isinstance(values, list) else []
 
         self.user_names.update(strmap("names"))
         self.comments.update(strmap("comments"))
@@ -295,7 +419,7 @@ class Program:
         for a in addrs("procs")[:4096]:
             if a not in self.functions:
                 self.create_function(a)
-        for a in addrs("removed"):
+        for a in addrs("removed")[:4096]:
             self.remove_function(a)
         return self
 
@@ -393,12 +517,12 @@ class Program:
             constant read-only data bounded by a preceding compare (an optimized `switch` returning
             a value, a character-class table, etc.).
         self.jump_tables[ijmp_addr]  = {"base", "cases": {case_value: target}} -- a computed goto
-            through a table of int32 offsets relative to the table base.
+            through a table of int32 offsets relative to a code base (often an ADR target) recorded by the branch sequence.
         Jump-table case bodies are added to the owning function (rebuilt with them as extra seeds).
         """
         self.value_tables, self.jump_tables = {}, {}
         if not self.arch.name.startswith(("x86", "arm")):
-            return   # ponytail: table idioms below are x86/ARM operand shapes; MIPS/RISC-V switches show as goto *
+            return   # Table-pattern matching currently covers x86/ARM operand shapes; other ISAs retain indirect-goto output.
         for fa in list(self.functions):
             func = self.functions[fa]
             jt_targets = self._scan_tables(func)
@@ -419,6 +543,8 @@ class Program:
         set of registers holding constant addresses, so a table load sees a bound set a block
         earlier. State is reset at a join (a block with >1 predecessor) and after calls."""
         preds = Counter(s for b in func.blocks.values() for s in b.succs)
+        starts = sorted(self.functions)
+        func_end = next((a for a in starts if a > func.addr), None)
         bound, base, jt_targets = None, {}, []
         for addr in sorted(func.blocks):
             b = func.blocks[addr]
@@ -435,7 +561,7 @@ class Program:
                     if i.operands and i.operands[0].type == self._REG:
                         base[self._canon_reg(i.reg_name(i.operands[0].reg))] = r
                 if k == IJMP:
-                    self._jump_table(b, i, base, bound, jt_targets)
+                    self._jump_table(func, func_end, b, i, base, bound, jt_targets)
                 else:
                     self._value_table(i, base, bound)
         return jt_targets
@@ -465,33 +591,68 @@ class Program:
             signed = "ldrs" in i.mnemonic or (self.x86_like and i.mnemonic.startswith("movs"))
             self.value_tables[i.address] = (tbl, scale, bound[1] + 1, signed)
 
-    def _jump_table(self, b, i, base, bound, jt_targets):
-        """Computed goto through int32 offsets relative to the table base (the common clang/gcc
-        form). Reads the offsets, records the switch, and queues the case bodies for discovery."""
-        # a jump table may sit inside the code section (embedded after the branch); the strong
-        # guard is that every recovered offset lands on code, checked below.
-        cand = [a for a in base.values() if self.image.section_at(a)]
-        if not cand or bound is None or not (0 < bound[1] + 1 <= 8192):
+    def _jump_table(self, func, func_end, b, i, base, bound, jt_targets):
+        """Recover an int32-relative jump table only from the actual indexed load feeding
+        this indirect branch. Arbitrary address constants in the block are not table candidates:
+        interpreting them as table bases can turn adjacent function code into fake switch cases."""
+        if bound is None or not (0 < bound[1] + 1 <= 8192):
             return
-        tbl, cases = cand[-1], {}
-        for v in range(bound[1] + 1):
-            raw = self.image.read(tbl + v * 4, 4)
-            if len(raw) < 4:
-                return
-            t = tbl + int.from_bytes(raw, "little", signed=True)
-            if not self.image.is_code(t):
-                return
-            cases[v] = t
-        # the switch value is what indexes the table: find the load from `tbl` in this block and
-        # take its index register; fall back to the compared register.
-        index = self._canon_reg(i.reg_name(bound[0].reg)) if bound[0].type == self._REG else None
-        for j in b.insns:
-            mem = next((o for o in j.operands if o.type == self._MEM), None)
-            if mem is not None and mem.mem.index:        # the table-indexing load gives the real key
-                index = self._canon_reg(j.reg_name(mem.mem.index))
-                break
-        self.jump_tables[i.address] = {"base": tbl, "cases": cases, "index": index}
-        jt_targets.extend(cases.values())
+        # Relative offsets are not necessarily relative to the table itself. On AArch64, clang
+        # commonly loads int32 offsets from [table + index*4] and adds them to a separate ADR base
+        # before BR. Recover that target base from the ADD feeding the indirect branch.
+        target_reg = (self._canon_reg(i.reg_name(i.operands[-1].reg))
+                      if i.operands and i.operands[-1].type == self._REG else None)
+        target_base = None
+        if target_reg:
+            for insn in reversed(b.insns):
+                if insn.address >= i.address or not insn.operands or insn.operands[0].type != self._REG:
+                    continue
+                if self._canon_reg(insn.reg_name(insn.operands[0].reg)) != target_reg:
+                    continue
+                if not insn.mnemonic.startswith("add"):
+                    continue
+                for op in insn.operands[1:]:
+                    if op.type == self._REG:
+                        source_reg = self._canon_reg(insn.reg_name(op.reg))
+                        if source_reg in base:
+                            target_base = base[source_reg]
+                            break
+                if target_base is not None:
+                    break
+        if target_base is None:
+            return
+        candidates = []
+        for insn in b.insns:
+            for mem in (o for o in insn.operands if o.type == self._MEM and o.mem.index):
+                breg = self._canon_reg(insn.reg_name(mem.mem.base)) if mem.mem.base else None
+                table_addr = base.get(breg)
+                if table_addr is None or self.image.section_at(table_addr) is None:
+                    continue
+                scale = mem.mem.scale if self.x86_like else (
+                    1 << mem.shift.value if mem.shift.type == 1 else 1
+                )
+                if scale == 4:
+                    index = self._canon_reg(insn.reg_name(mem.mem.index))
+                    candidates.append((table_addr, index))
+        for table_addr, index in candidates:
+            cases = {}
+            for value in range(bound[1] + 1):
+                raw = self.image.read(table_addr + value * 4, 4)
+                if len(raw) < 4:
+                    break
+                target = target_base + int.from_bytes(raw, "little", signed=True)
+                # A recovered case must belong to this function's address range. Merely landing
+                # in any executable section is insufficient: it can accidentally absorb the next
+                # function and generate a plausible but semantically unrelated CFG.
+                if (not self.image.is_code(target) or target < func.addr or
+                        (func_end is not None and target >= func_end)):
+                    break
+                cases[value] = target
+            if len(cases) != bound[1] + 1:
+                continue
+            self.jump_tables[i.address] = {"base": table_addr, "target_base": target_base, "cases": cases, "index": index}
+            jt_targets.extend(cases.values())
+            return
 
     def _split(self, start, insns, delays=()):
         leaders = {start}

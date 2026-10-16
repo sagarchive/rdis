@@ -18,22 +18,25 @@ _MAX_LOCALS = 50000  # per-function local count cap (engines enforce the same): 
 
 def _uleb(data, p):
     r = s = 0
-    while True:
-        if s >= 7 * _LEB_MAX:
-            raise ValueError("LEB128 too long")
+    for _ in range(_LEB_MAX):
+        if p >= len(data):
+            raise ValueError("truncated unsigned LEB128")
         b = data[p]
         p += 1
         r |= (b & 0x7F) << s
         s += 7
         if not b & 0x80:
+            if s == 70 and b & 0x7E:
+                raise ValueError("unsigned LEB128 exceeds 64 bits")
             return r, p
+    raise ValueError("LEB128 too long")
 
 
 def _sleb(data, p):
     r = s = 0
-    while True:
-        if s >= 7 * _LEB_MAX:
-            raise ValueError("LEB128 too long")
+    for _ in range(_LEB_MAX):
+        if p >= len(data):
+            raise ValueError("truncated signed LEB128")
         b = data[p]
         p += 1
         r |= (b & 0x7F) << s
@@ -42,11 +45,15 @@ def _sleb(data, p):
             if b & 0x40:
                 r |= -(1 << s)
             return r, p
+    raise ValueError("LEB128 too long")
 
 
-def _name(data, p):
+def _name(data, p, end=None):
     n, p = _uleb(data, p)
-    return data[p:p + n].decode("utf-8", "replace"), p + n
+    stop = p + n
+    if stop > len(data) or (end is not None and stop > end):
+        raise ValueError("truncated WebAssembly name")
+    return data[p:stop].decode("utf-8", "replace"), stop
 
 
 _VALTYPE = {0x7F: "i32", 0x7E: "i64", 0x7D: "f32", 0x7C: "f64", 0x7B: "v128",
@@ -74,7 +81,10 @@ class WasmModule:
         self.start = None
         if data[:4] != b"\0asm":
             raise ValueError("not a WebAssembly module")
+        if len(data) < 8:
+            raise ValueError("truncated WebAssembly header")
         self.version = struct.unpack_from("<I", data, 4)[0]
+        self.errors = []
         self._parse_sections()
         self.funcs = self._build_funcs()
 
@@ -86,10 +96,13 @@ class WasmModule:
             sid = data[p]
             size, p = _uleb(data, p + 1)
             body_end = p + size
+            if body_end > n:
+                raise ValueError(f"WebAssembly section {sid} exceeds module bounds")
             try:
                 self._section(sid, p, body_end)
-            except Exception:
-                pass  # a malformed section must not sink the whole module
+            except (IndexError, struct.error, ValueError) as exc:
+                # Keep the module inspectable but never silently hide that metadata was malformed.
+                self.errors.append(f"section {sid}: {exc}")
             p = body_end
 
     def _section(self, sid, p, end):
@@ -97,7 +110,8 @@ class WasmModule:
         if sid == 1:    # type: vec of func types
             count, p = _uleb(data, p)
             for _ in range(count):
-                assert data[p] == 0x60
+                if p >= end or data[p] != 0x60:
+                    raise ValueError("invalid function type form")
                 p += 1
                 np, p = _uleb(data, p)
                 params = [_VALTYPE.get(data[p + i], "?") for i in range(np)]
@@ -109,11 +123,32 @@ class WasmModule:
         elif sid == 2:  # import
             count, p = _uleb(data, p)
             for _ in range(count):
-                mod, p = _name(data, p)
-                field, p = _name(data, p)
+                mod, p = _name(data, p, end)
+                field, p = _name(data, p, end)
+                if p >= end:
+                    raise ValueError("truncated import descriptor")
                 kind = data[p]
                 p += 1
-                idx, p = _uleb(data, p)
+                if kind == 0:  # function type index
+                    idx, p = _uleb(data, p)
+                elif kind == 1:  # table type: reference type + limits
+                    if p >= end:
+                        raise ValueError("truncated table import")
+                    p += 1
+                    p = self._skip_limits(p, end)
+                    idx = -1
+                elif kind == 2:  # memory limits
+                    p = self._skip_limits(p, end)
+                    idx = -1
+                elif kind == 3:  # global type + mutability
+                    if p + 2 > end:
+                        raise ValueError("truncated global import")
+                    p += 2
+                    idx = -1
+                else:
+                    raise ValueError(f"unknown import kind {kind}")
+                if p > end:
+                    raise ValueError("import descriptor exceeds section bounds")
                 self.imports.append({"module": mod, "field": field, "kind": _EXPORT_KIND.get(kind, "?"),
                                      "type": idx})
         elif sid == 3:  # function: type index per defined func
@@ -124,7 +159,7 @@ class WasmModule:
         elif sid == 7:  # export
             count, p = _uleb(data, p)
             for _ in range(count):
-                nm, p = _name(data, p)
+                nm, p = _name(data, p, end)
                 kind = data[p]
                 idx, p = _uleb(data, p + 1)
                 self.exports.append({"name": nm, "kind": _EXPORT_KIND.get(kind, "?"), "index": idx})
@@ -141,21 +176,41 @@ class WasmModule:
             for _ in range(count):
                 flags, p = _uleb(data, p)
                 if flags == 0:       # active, memory 0, offset expr
-                    p = self._skip_expr(p)
+                    p = self._skip_expr(p, end)
+                elif flags == 1:  # passive data segment: no offset expression
+                    pass
                 elif flags == 2:
                     _, p = _uleb(data, p)
-                    p = self._skip_expr(p)
+                    p = self._skip_expr(p, end)
+                else:
+                    raise ValueError(f"unsupported data segment flags {flags}")
                 ln, p = _uleb(data, p)
+                if p + ln > end:
+                    raise ValueError("data segment exceeds section bounds")
                 self.data_segments.append((p, data[p:p + ln]))
                 p += ln
         elif sid == 0:  # custom: the "name" section maps indices to names
-            nm, p = _name(data, p)
+            nm, p = _name(data, p, end)
             if nm == "name":
                 self._name_section(p, end)
+        if p > end:
+            raise ValueError(f"section {sid} exceeds its declared size")
+        return p
 
-    def _skip_expr(self, p):
-        while self.data[p] != 0x0B:   # end
+    def _skip_limits(self, p, end):
+        flags, p = _uleb(self.data, p)
+        _, p = _uleb(self.data, p)  # minimum
+        if flags & 1:
+            _, p = _uleb(self.data, p)  # maximum
+        if p > end:
+            raise ValueError("limits exceed section bounds")
+        return p
+
+    def _skip_expr(self, p, end):
+        while p < end and self.data[p] != 0x0B:  # end
             p += 1
+        if p >= end:
+            raise ValueError("unterminated constant expression")
         return p + 1
 
     def _name_section(self, p, end):
@@ -164,11 +219,13 @@ class WasmModule:
             sub, p = data[p], p + 1
             sz, p = _uleb(data, p)
             stop = p + sz
+            if stop > end:
+                raise ValueError("name subsection exceeds custom section bounds")
             if sub == 1:  # function names
                 count, p = _uleb(data, p)
                 for _ in range(count):
                     idx, p = _uleb(data, p)
-                    nm, p = _name(data, p)
+                    nm, p = _name(data, p, stop)
                     self.func_names[idx] = nm
             p = stop
 
