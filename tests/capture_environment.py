@@ -62,6 +62,27 @@ def redact_pip_freeze(text: str) -> str:
     return text
 
 
+def pull_request_shas() -> dict:
+    """Read PR head/base identity from the runner's event payload, if this is a PR run."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return {}
+    try:
+        payload = json.loads(Path(event_path).read_text())
+        pull_request = payload.get("pull_request") or {}
+        head = pull_request.get("head") or {}
+        base = pull_request.get("base") or {}
+        if not head and not base:
+            return {}
+        return {
+            "head_sha": head.get("sha"),
+            "base_sha": base.get("sha"),
+            "number": pull_request.get("number"),
+        }
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def package_versions() -> dict[str, str]:
     wanted = {
         "rdis", "capstone", "lief", "pypcode", "pywebview", "playwright",
@@ -128,6 +149,7 @@ def main() -> int:
     if not git_sha:
         git = probe(["git", "rev-parse", "HEAD"])
         git_sha = git.get("stdout") if git.get("returncode") == 0 else None
+    pr_identity = pull_request_shas()
 
     safe_ci_env = (
         "GITHUB_ACTIONS", "GITHUB_WORKFLOW", "GITHUB_JOB", "GITHUB_RUN_ID",
@@ -141,6 +163,10 @@ def main() -> int:
         "job": args.job,
         "git": {
             "sha": git_sha,
+            "tested_checkout_sha": git_sha,
+            "pull_request_head_sha": pr_identity.get("head_sha") or git_sha,
+            "pull_request_base_sha": pr_identity.get("base_sha"),
+            "pull_request_number": pr_identity.get("number"),
             "ref": os.environ.get("GITHUB_REF"),
             "run_id": os.environ.get("GITHUB_RUN_ID"),
             "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
