@@ -503,6 +503,10 @@ try {
   // The interprocedural Calls view should preserve node kinds, direction/depth controls, and SVG export.
   await page.locator('#modes button[data-mode="callgraph"]').click();
   await page.locator("#graph > svg g.graph").waitFor();
+  const initialCallgraphRequest = callgraphQueries.at(-1);
+  const initialCallgraphRoot = await page.locator("#graph > svg g.node.cg-root title").textContent();
+  assert.equal(initialCallgraphRoot, initialCallgraphRequest.addr,
+    "the selected function's address must be the root of the rendered call graph");
   assert.equal(await page.locator("#cgDirection").inputValue(), "both");
   assert.equal(await page.locator("#cgDepth").inputValue(), "1");
   assert(await page.locator("#graph > svg g.node.cg-function").count() >= 2);
@@ -532,6 +536,9 @@ try {
   // Inspect the public GitHub Pages section that documents the shipped call-graph workflow.
   const pagesPage = await browser.newPage({viewport: {width: 1440, height: 1000}, deviceScaleFactor: 1});
   pagesPage.on("pageerror", e => { throw e; });
+  // Disable scroll-timeline entrance animations in screenshot CI so the artifact depicts settled
+  // product content instead of a transient, partially transparent frame.
+  await pagesPage.emulateMedia({reducedMotion: "reduce"});
   await pagesPage.goto("http://127.0.0.1:8765/docs/index.html", {waitUntil: "domcontentloaded"});
   await pagesPage.locator("#calls-h").waitFor();
   await pagesPage.locator("#calls-h").scrollIntoViewIfNeeded();
