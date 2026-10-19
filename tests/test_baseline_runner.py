@@ -64,7 +64,9 @@ class BaselineCorpusTests(unittest.TestCase):
         self.assertIn("certifi==2026.7.22", macos)
 
         workflow = (root / ".github" / "workflows" / "hardening.yml").read_text(encoding="utf-8")
-        self.assertIn("CONSTRAINTS_OVERLAY: constraints/baseline-linux-py${{ matrix.python-version }}.txt", workflow)
+        self.assertIn("constraints-overlay: constraints/baseline-linux-py310.txt", workflow)
+        self.assertIn("constraints-overlay: constraints/baseline-linux-py312.txt", workflow)
+        self.assertIn("CONSTRAINTS_OVERLAY: ${{ matrix.constraints-overlay }}", workflow)
         self.assertIn("CONSTRAINTS_OVERLAY: constraints/baseline-linux-py312.txt", workflow)
         self.assertIn("CONSTRAINTS_OVERLAY: constraints/baseline-macos-arm64-py312.txt", workflow)
         self.assertIn('--constraints-file "$CONSTRAINTS_OVERLAY"', workflow)
