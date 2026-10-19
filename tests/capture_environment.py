@@ -151,7 +151,7 @@ def main() -> int:
         try:
             data = constraint_path.read_bytes()
             constraint_records.append({
-                "path": raw_path.replace("\\\\", "/"),
+                "path": Path(raw_path).as_posix(),
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "size_bytes": len(data),
             })
