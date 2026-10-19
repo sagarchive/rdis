@@ -66,8 +66,8 @@ It also reports 124/124 execution-checked maturity cases. Compile rate measures 
 
 These are open gates, not failures in the passing workflow:
 
-1. **No full dependency lock/snapshot is attached.** The workflow upgrades pip and installs minimum-compatible packages dynamically; pyproject.toml declares ranges, not exact versions. The observed outputs do not provide a complete pip freeze for each job.
-2. **No single machine-readable run manifest.** The benchmark JSON captures its own environment/input data, but test, browser and dependency facts are scattered through workflow logs.
+1. **No committed replayable dependency lock exists yet.** The runner now archives a redacted, hashed pip-freeze file per job, so each CI environment is auditable. pyproject.toml deliberately retains compatibility ranges for users; a reviewed platform/Python-specific constraints strategy is still needed for repeatable future benchmark runs.
+2. **The first machine-readable baseline record now exists; a cross-run scorecard does not.** Per-job environment manifests plus the baseline runner's summary.json capture source/corpus hashes, PR/base/tested-checkout identities, environment-manifest digest, pass/skip/fail results, durations, output fingerprints and raw-log paths. A normalized comparison across multiple corpus versions and architectures remains future work.
 3. **No architecture-wide correctness scorecard.** Function-discovery precision/recall, CFG node/edge F1, decoder mismatch rates and type-recovery scores are not currently calculated across a truth-labelled corpus.
 4. **No apples-to-apples competitor scorecard.** Vendor docs confirm documented capabilities, not comparative correctness or performance.
 5. **No sustained fuzzing gate.** Deterministic malformed-WebAssembly mutation tests are useful; time-bounded fuzz campaigns, coverage trends, crash minimization and corpus retention still need to be implemented.
@@ -95,7 +95,7 @@ Artifacts are uploaded with 30-day retention. They are reproducibility evidence 
 
 ## 8. M00 exit status
 
-**M00: PARTIAL — runtime manifests and raw CI artifacts are working and inspected; the clean-room corpus baseline is still incomplete.**
+**M00: PARTIAL — initial corpus, no-shell runner, raw command logs, environment-linked machine-readable summaries and an initial source-linked support matrix are implemented and CI-verified. M00 remains open for broader ground-truth corpus coverage, reviewed baseline promotion/retention, and a committed replayable dependency-constraints strategy.**
 
 ### Completed with CI evidence
 
@@ -105,14 +105,42 @@ Artifacts are uploaded with 30-day retention. They are reproducibility evidence 
 - [x] Record actual Playwright browser versions in the browser manifests.
 - [x] Archive the macOS benchmark JSON and server RSS/logs alongside the runtime manifest.
 - [x] Test manifest identity and redaction behavior on the hardening Python matrix.
-- [x] Confirm all five jobs pass on [run 39262871176](https://github.com/sagarchive/rdis/actions/runs/39262871176), with the latest documentation-only head also green on [run 39263076792](https://github.com/sagarchive/rdis/actions/runs/39263076792).
+- [x] Confirm all five jobs pass on the initial artifact-inspection run [39262871176](https://github.com/sagarchive/rdis/actions/runs/39262871176).
+- [x] Add versioned corpus manifest, bounded no-shell command runner, input SHA-256/Git-blob checks, timeout handling, raw stdout/stderr files and machine-readable pass/skip/fail summary linked to the environment-manifest SHA.
+- [x] Add runner regressions for correct source fingerprints, intentional hash mismatch, profile inheritance/architecture aliases, argv safety, recorded-output hashes, timeout handling and environment-manifest linkage.
+- [x] Execute the portable runner in Python 3.10 and 3.12 CI and the extended profile on macOS arm64. [Run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036) passed all five jobs on runner head 24cfdc9e0f1786bc89984aee1ff9f76fb3b7113a.
+- [x] Inspect current-run baseline artifacts: [Python 3.10](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12192808301), [Python 3.12](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12192828699), [macOS arm64](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12193303015). The Python profiles each report 9 passed / 1 platform skip / 0 failures; macOS reports 12 passed / 1 platform skip / 0 failures. The C source SHA and pinned macOS /bin/ls SHA/size matched the manifest.
+- [x] Add the initial source-linked [FEATURE_SUPPORT_MATRIX.md](FEATURE_SUPPORT_MATRIX.md); it explicitly separates bounded verified behaviors from partial, unverified and unsupported claims. Exact-head CI for this matrix addition is tracked separately from the runner's green run.
 
 ### Still required before M00 is DONE
 
-- [ ] Create a versioned, deterministic corpus manifest for representative small/medium/large and per-architecture binaries, with license/provenance, SHA-256 and expected analysis facts.
-- [ ] Execute the documented baseline command set on a fresh, clean checkout and retain raw stdout/stderr, skips and optional-tool availability.
-- [ ] Define a durable retention/promotion rule for the baseline manifests and benchmark outputs; 30-day CI artifacts alone are not a permanent baseline.
-- [ ] Establish the source/decoder/function/CFG/decompiler support matrix and current measured coverage per architecture, so M01 can use evidence rather than broad marketing text.
-- [ ] Decide and document dependency pinning strategy (lock file or repeatable constraints); recording `pip freeze` makes a run auditable but does not itself make later installs reproducible.
+- [ ] Expand the corpus beyond the initial checked-in branch/loop C fixture plus host-local macOS /bin/ls: add independently checked small/medium inputs for additional formats/ISAs, with license/provenance, SHA-256, generation command and expected function/CFG/analysis facts.
+- [ ] Adopt and implement a durable promotion rule: keep per-run CI artifacts as short-lived diagnostics (30 days for baseline bundles; 14 days for browser screenshots) and promote only reviewed, accepted baselines into a versioned repository path containing summaries, environment manifests, constraints hashes and benchmark JSON. Never commit binaries without redistribution rights.
+- [ ] Implement the chosen pinning policy for benchmark jobs: retain pyproject compatibility ranges for consumer installs, add reviewed platform/Python-specific constraints for reproducible CI baselines, and update pins only in deliberate dependency-upgrade changes. Current pip-freeze artifacts document the resolved environment but are not themselves a committed lock.
+- [ ] Keep measuring support by architecture; the new matrix is only an initial inventory. Function-discovery precision/recall, CFG edge F1, decode/opcode coverage and decompiler semantic rates remain M01/M03–M05 exit gates.
 
-**Next atomic action:** create the licensed corpus manifest and a baseline command runner that verifies each input hash before running the documented test commands, writes machine-readable pass/skip/fail results, and emits a summary keyed to the source and environment manifests. Then review whether M00's exit gates are met. Do not call M00 complete yet.
+**Next atomic action:** expand the versioned corpus with one independently truth-checked non-x86_64 fixture (prefer a small ARM64 or PE/ELF fixture depending on a reproducible compiler/toolchain), then add the baseline promotion/retention policy and platform-specific constraints files. Re-run the runner and CI, inspect the artifacts, and keep M00 PARTIAL until those remaining gates are satisfied.
+
+
+## 9. Current baseline runner evidence — PR #4
+
+**Exact tested revision:** PR head `24cfdc9e0f1786bc89984aee1ff9f76fb3b7113a`, base main `96b931d32c807c5430518be6c280c98fb995ebb2`, tested merge checkout `84daa61bf91428d8d1781e89ab9fcda50cf8049f`, run `39266670036`. The [five-job CI run passed](https://github.com/sagarchive/rdis/actions/runs/39266670036).
+
+| Profile artifact | Runner summary | Input evidence | Link |
+|---|---|---|---|
+| Python 3.10 on Linux x86_64 | 9 passed / 1 platform skip / 0 failed | C fixture SHA-256 `242c4bbcb9ba9641e826f04d5a4fa3d41e4c20e62eba9469bbd2420908023484`, 566 bytes; compiled fixture recorded at 17,312 bytes with hash `caa4210c09c24dadeb4f78158c2a0eb937f83fdfcbfbdb80742429f7219afca4` | [Artifact](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12192808301) |
+| Python 3.12 on Linux x86_64 | 9 passed / 1 platform skip / 0 failed | Same C source and generated ELF fingerprints as the Python 3.10 profile | [Artifact](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12192828699) |
+| macOS arm64 / CPython 3.12.10 | 12 passed / 1 platform skip / 0 failed | /bin/ls SHA-256 `5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b`, size 154,352 bytes; benchmark JSON retained | [Artifact](https://github.com/sagarchive/rdis/actions/runs/39266670036/artifacts/12193303015) |
+
+Each artifact includes manifest.json, pip-freeze.txt, run/summary.json, command stdout/stderr logs, and generated outputs where applicable. The summary records the corpus-manifest SHA-256 `d7a28de12fcb44aae67ea4523b4a8661bb132cf7754c545153407aa6b8f05334`, PR head/base, tested checkout SHA, and environment-manifest digest. Counts above describe baseline runner entries and commands, not the number of assertions inside each test suite.
+
+### Policy decision
+
+- Every CI run uploads baseline evidence for 30 days; browser screenshots/export artifacts use the configured 14-day diagnostic retention.
+- A baseline is promoted only after a reviewed PR and green CI. Promotion should commit the corpus version, source/host input fingerprints, summary.json, redacted pip-freeze/environment manifest, benchmark JSON and a README with generation commands under a versioned `benchmarks/baselines/<corpus-id>/<baseline-label>/` directory. Raw binaries are committed only when licensing permits; otherwise store source/generation instructions and hashes.
+- Keep pyproject.toml dependency ranges for consumer compatibility. Reproducible benchmark/test jobs will use reviewed, platform/Python-specific constraints files; the current per-run pip-freeze is audit evidence, not a dependency lock. A pin change requires deliberate review and a fresh baseline run.
+- The policy is documented here; the first committed promoted baseline bundle and actual constraints files remain open work.
+
+### Current evidence boundary
+
+The support matrix was added on the subsequent PR branch revision `4faac5aaf2648e11de79871ef29b7b2096107132` and CI passed on that matrix revision in [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715). The roadmap/report updates after that matrix revision are being revalidated on the latest PR head; do not infer that a queued run has passed.
