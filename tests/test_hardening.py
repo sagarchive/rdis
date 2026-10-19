@@ -965,8 +965,21 @@ class CallGraphSurfaceTests(unittest.TestCase):
         self.assertIn('digraph "callgraph"', result["dot"])
         self.assertEqual(result["direction"], "callers")
         self.assertEqual(result["depth"], 2)
-        self.assertEqual(result["node_limit"], 64)
+        self.assertEqual(result["node_limit"], render.CALLGRAPH_MAX_NODES)
         self.assertIn("callgraph", mcp_server.TOOLS)
+        listed = mcp_server._handle({"method": "tools/list", "params": {}})
+        tool = next(t for t in listed["tools"] if t["name"] == "callgraph")
+        self.assertEqual(tool["inputSchema"]["properties"]["direction"]["type"], "string")
+        self.assertEqual(tool["inputSchema"]["properties"]["depth"]["type"], "integer")
+        with mock.patch.object(mcp_server, "_prog", return_value=self.prog):
+            response = mcp_server._handle({"method": "tools/call", "params": {
+                "name": "callgraph", "arguments": {
+                    "path": "fixture.bin", "func": "0x1000", "direction": "callees", "depth": 2
+                }
+            }})
+        rpc_result = json.loads(response["content"][0]["text"])
+        self.assertIn('digraph "callgraph"', rpc_result["dot"])
+        self.assertEqual(rpc_result["direction"], "callees")
 
     def test_mcp_callgraph_rejects_bad_arguments_before_loading_binary(self):
         for args in ({"direction": "up"}, {"depth": 0}, {"depth": 5}, {"depth": "bad"}, {"depth": True}):
