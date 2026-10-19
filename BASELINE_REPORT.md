@@ -75,6 +75,24 @@ These are open gates, not failures in the passing workflow:
 7. **Accessibility evidence is incomplete.** Browser interaction screenshots do not replace keyboard-only task review, screen-reader/manual inspection, zoomed text review or broad OS/browser coverage.
 8. **Security/retention review is incomplete.** The existing guards are valuable, but route-by-route deployment, upload retention, quotas, public-service authentication/authorization, project data lifecycle and plugin trust still require explicit tests.
 
+## 7. Baseline artifact inspection
+
+The CI manifest/artifact pipeline was exercised on [run 39262355129](https://github.com/sagarchive/rdis/actions/runs/39262355129); all five jobs passed and the artifacts were downloaded for inspection.
+
+| Artifact | Contents inspected | Observed facts |
+|---|---|---|
+| [Python 3.10 manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12189898955) | `manifest.json`, `pip-freeze.txt` | Runner reported Linux, CPython 3.10.22; manifest SHA-256 matched the exact freeze file. |
+| [Python 3.12 manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12190418418) | `manifest.json`, `pip-freeze.txt` | Separate runtime inventory and hashed freeze file are produced. |
+| [Chromium manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12190413389) | `manifest.json`, `pip-freeze.txt` | Browser version recorded as 156.0.8078.4; freeze digest matched. |
+| [Firefox manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12191996829) | `manifest.json`, `pip-freeze.txt` | A browser-specific manifest/freeze artifact is produced. |
+| [macOS baseline bundle](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12189929202) | `manifest.json`, `pip-freeze.txt`, `benchmark.json`, `server-rss-kib.log`, `server.log` | Runner reported macOS 14.8.9 arm64 / CPython 3.12.10; freeze digest matched and benchmark/raw server evidence was included. |
+
+### Provenance correction discovered during artifact review
+
+The first manifests recorded `GITHUB_SHA`, which is the synthetic merge-checkout SHA for a `pull_request` workflow, not the source branch's PR head SHA. That is the right identity for the tested merge tree but is ambiguous if stored alone. The capture code now records separate fields for the tested checkout SHA, pull-request head SHA, pull-request base SHA and PR number by reading the runner's event payload. A regression test supplies a synthetic event and checks these fields. The current-head CI rerun must pass before that provenance correction is considered verified.
+
+The artifact review demonstrates that exact pip-freeze hashes and useful environment metadata are being saved. It does not yet prove all artifacts have the correct head/base identity on the latest branch commit; that is the next verification gate.
+
 ## 6. M00 exit status
 
 **M00: PARTIAL — CI baseline recorded; machine-readable environment capture is implemented in the active PR but awaits current-head CI and artifact inspection.**
