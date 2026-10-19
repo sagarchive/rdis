@@ -294,7 +294,7 @@ def callgraph(prog, func, direction="both", depth=1):
                 else:
                     prog.arch.data_refs(insn, regs)
         return [
-            (address, target, next(iter(sorted(target_kinds.get(target, {"call"})))),
+            (address, target, next(iter(sorted(target_kinds.get(target) or {"call"}))),
              sorted(target_sites.get(target, ())))
             for target in sorted(target_sites)
         ]
