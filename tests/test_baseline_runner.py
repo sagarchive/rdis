@@ -25,16 +25,49 @@ class BaselineCorpusTests(unittest.TestCase):
         manifest = json.loads(raw.decode("utf-8"))
         baseline.validate_manifest(manifest)
         entries, by_id = baseline.verify_entries(manifest, root, baseline.host_context())
-        self.assertEqual(by_id["cfg-fixture-source"]["status"], "passed")
-        self.assertEqual(
-            by_id["cfg-fixture-source"]["sha256"],
-            next(e["sha256"] for e in manifest["entries"] if e["id"] == "cfg-fixture-source"),
-        )
+        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v2")
+        for identifier in ("cfg-fixture-source", "arm64-branch-fixture"):
+            with self.subTest(entry=identifier):
+                self.assertEqual(by_id[identifier]["status"], "passed", by_id[identifier])
+                self.assertEqual(
+                    by_id[identifier]["sha256"],
+                    next(e["sha256"] for e in manifest["entries"] if e["id"] == identifier),
+                )
         self.assertEqual(
             hashlib.sha256(raw).hexdigest(),
             hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         )
         self.assertTrue(entries)
+
+    def test_platform_constraint_overlays_match_captured_environment_profiles(self):
+        root = SCRIPT.parents[1]
+        common_path = root / "constraints" / "baseline-ci.txt"
+        common = common_path.read_text(encoding="utf-8")
+        self.assertIn("capstone==5.0.9", common)
+        self.assertIn("lief==1.0.0", common)
+        self.assertIn("pip==26.2.1", common)
+        self.assertNotIn("certifi==", common, "host-observed certifi pin belongs in the macOS overlay")
+
+        overlays = {
+            "linux-py310": root / "constraints" / "baseline-linux-py310.txt",
+            "linux-py312": root / "constraints" / "baseline-linux-py312.txt",
+            "macos-arm64-py312": root / "constraints" / "baseline-macos-arm64-py312.txt",
+        }
+        for profile, path in overlays.items():
+            with self.subTest(profile=profile):
+                self.assertTrue(path.is_file(), f"missing constraints overlay: {path}")
+                self.assertTrue(path.read_text(encoding="utf-8").startswith("#"))
+        py310 = overlays["linux-py310"].read_text(encoding="utf-8")
+        self.assertIn("setuptools==79.0.1", py310)
+        self.assertIn("tomli==2.5.0", py310)
+        macos = overlays["macos-arm64-py312"].read_text(encoding="utf-8")
+        self.assertIn("certifi==2026.7.22", macos)
+
+        workflow = (root / ".github" / "workflows" / "hardening.yml").read_text(encoding="utf-8")
+        for overlay in overlays.values():
+            self.assertIn(overlay.relative_to(root).as_posix(), workflow)
+        self.assertIn('--constraints-file "$CONSTRAINTS_OVERLAY"', workflow)
+        self.assertIn('-c "$CONSTRAINTS_OVERLAY"', workflow)
 
     def test_hash_mismatch_is_reported_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as td:
