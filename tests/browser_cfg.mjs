@@ -40,6 +40,48 @@ function dotGraph(count, detail = false) {
   return lines.join("\n");
 }
 
+function dotCallGraph(direction = "both", depth = 1) {
+  const nodes = new Map([[0x1000, {name: "branch_loop_fixture", kind: "function", root: true}]]);
+  const edges = [];
+  const add = (addr, name, kind = "function") => nodes.set(addr, {name, kind, root: false});
+  if (direction !== "callees") {
+    add(0x3000, "caller_fixture");
+    edges.push([0x3000, 0x1000, "caller"]);
+    if (depth >= 2) {
+      add(0x4000, "grandcaller_fixture");
+      edges.push([0x4000, 0x3000, "call"]);
+    }
+  }
+  if (direction !== "callers") {
+    add(0x2000, "callee_fixture");
+    edges.push([0x1000, 0x2000, "call"]);
+    if (depth >= 2) {
+      add(0x9000, "puts", "import");
+      add(0xA000, "unresolved_external", "unresolved");
+      edges.push([0x2000, 0x9000, "call"], [0x2000, 0xA000, "unresolved"]);
+    }
+  }
+  const lines = [
+    'digraph "callgraph" {',
+    'graph [rankdir=LR, bgcolor="transparent", nodesep=0.45, ranksep=0.72, pad=0.24];',
+    'node [shape=box, style="rounded,filled", fillcolor="#222834", color="#4b5566", fontcolor="#e4eaf2", fontname="monospace", fontsize=10, margin="0.16,0.10"];',
+    'edge [color="blue", arrowsize=0.72, fontname="monospace", fontsize=9];'
+  ];
+  for (const [addr, node] of nodes) {
+    const classes = "cg-" + node.kind + (node.root ? " cg-root" : "");
+    const styles = node.root ? ', color="#d9974f", penwidth=2.2' :
+      node.kind === "import" ? ', shape=component, style="rounded,dashed,filled"' :
+      node.kind === "unresolved" ? ', style="rounded,dashed,filled"' : "";
+    const label = node.name + "\\l0x" + addr.toString(16) + " · " + node.kind + "\\l";
+    lines.push('"0x' + addr.toString(16) + '" [label="' + label + '", id="cg_' + node.kind + '_' + addr.toString(16) + '", class="' + classes + '"' + styles + "];");
+  }
+  for (const [source, target, kind] of edges) {
+    lines.push('"0x' + source.toString(16) + '" -> "0x' + target.toString(16) + '" [color="' + (kind === "unresolved" ? "gray" : "blue") + '", label="' + kind + '"];');
+  }
+  lines.push("}");
+  return lines.join("\\n");
+}
+
 function dotWideGraph() {
   const lines = [
     "digraph wide_cfg {",
@@ -77,6 +119,7 @@ try {
   // The browser CI job has network access; no alternate renderer is substituted.
   let opened = false;
   const apiPosts = [];
+  const callgraphQueries = [];
   const fixtureInfo = {
     id: "doc-1", name: "fixture.bin", path: "fixture.bin", format: "elf", arch: "x86_64",
     entry: "0x1000", base: "0x0", counts: {functions: 1, strings: 1, imports: 1, classes: 0},
@@ -129,6 +172,17 @@ try {
       rows: [{addr: "0x1000", hex: "90 c3", ascii: ".."}]};
     else if (endpoint === "export") body = {version: 1, name: "fixture.bin", annotations: []};
     else if (endpoint === "mark") body = {output: "marked " + (payload?.kind || "")};
+    else if (endpoint === "callgraph") {
+      const addr = url.searchParams.get("func") || "0x1000";
+      const direction = url.searchParams.get("direction") || "both";
+      const depth = Number(url.searchParams.get("depth") || "1");
+      callgraphQueries.push({addr, direction, depth});
+      const dot = dotCallGraph(direction, depth);
+      body = {name: "branch_loop_fixture", addr, dot, direction, depth,
+        nodes: (dot.match(/\\[label=/g) || []).length,
+        edges: (dot.match(/ -> /g) || []).length,
+        truncated: false, node_limit: 64, edge_limit: 128};
+    }
     else if (endpoint === "cfg") {
       const addr = url.searchParams.get("func") || "0x1000";
       const count = addr === "0x2100" ? 180 : addr === "0x2000" ? 48 : 7;
@@ -439,6 +493,35 @@ try {
     expectedExportBounds.width + 24, expectedExportBounds.height + 24];
   expectedViewBox.forEach((value, i) => assert(Math.abs(viewBox[i] - value) < 2,
     "export viewBox must use transformed root-SVG bounds; expected " + expectedViewBox + " got " + viewBox));
+
+  // The interprocedural Calls view should preserve node kinds, direction/depth controls, and SVG export.
+  await page.locator('#modes button[data-mode="callgraph"]').click();
+  await page.locator("#graph > svg g.graph").waitFor();
+  assert.equal(await page.locator("#cgDirection").inputValue(), "both");
+  assert.equal(await page.locator("#cgDepth").inputValue(), "1");
+  assert(await page.locator("#graph > svg g.node.cg-function").count() >= 2);
+  assert.equal(await page.locator("#graph > svg g.node.cg-import").count(), 0);
+  await page.screenshot({path: out + "/callgraph-both-depth1.png", fullPage: false});
+
+  await page.locator("#cgDirection").selectOption("callers");
+  await page.locator("#cgDepth").selectOption("2");
+  await page.waitForFunction(() => document.querySelectorAll("#graph > svg g.node.cg-function").length === 3);
+  assert(callgraphQueries.some(q => q.direction === "callers" && q.depth === 2),
+    "changing call graph direction/depth should issue an API request");
+  assert.equal(await page.locator("#graph > svg g.node.cg-import").count(), 0);
+  assert.equal(await page.locator("#graph > svg g.node.cg-unresolved").count(), 0);
+  await page.screenshot({path: out + "/callgraph-callers-depth2.png", fullPage: false});
+
+  await page.locator("#cgDirection").selectOption("callees");
+  await page.locator("#cgDepth").selectOption("2");
+  await page.waitForFunction(() => document.querySelectorAll("#graph > svg g.node.cg-import").length === 1);
+  assert.equal(await page.locator("#graph > svg g.node.cg-unresolved").count(), 1);
+  assert(callgraphQueries.some(q => q.direction === "callees" && q.depth === 2));
+  await page.screenshot({path: out + "/callgraph-callees-depth2.png", fullPage: false});
+  const callsSvgPromise = page.waitForEvent("download");
+  await page.locator("#zsvg").click();
+  const callsSvg = await callsSvgPromise;
+  assert(callsSvg.suggestedFilename().endsWith("-callgraph.svg"));
 
   // End-to-end smoke: real compiled ELF -> RDIS server/analysis/render -> real Chromium CFG.
   // This complements the synthetic large-graph fixtures above, which isolate layout behavior.
