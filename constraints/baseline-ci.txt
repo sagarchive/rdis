@@ -9,7 +9,6 @@
 # genuinely needs a different transitive pin, split this file by OS/Python only in a reviewed PR.
 build==1.6.1
 capstone==5.0.9
-certifi==2026.7.22
 lief==1.0.0
 packaging==26.3
 pip==26.2.1
