@@ -268,6 +268,20 @@ def _api_doc(route, q, arg, P):
                   "decl": c.declaration()} for c in P.objc.protocols + P.objc.classes]
         items += [{"name": t.name, "type": t.kind, "decl": t.declaration()} for t in P.swift.types]
         return {"items": items}
+    if route == "callgraph":
+        f = _func(P, arg("func"))
+        if getattr(P, "wasm", False):
+            return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": None,
+                    "direction": arg("direction", "both"), "depth": 1, "nodes": 1,
+                    "edges": 0, "truncated": False,
+                    "note": "WebAssembly call-graph edges are not yet reconstructed from validated module call indices."}
+        direction = arg("direction", "both")
+        raw_depth = arg("depth", "1")
+        try:
+            depth = int(raw_depth)
+        except (TypeError, ValueError):
+            raise ValueError("call graph depth must be an integer from 1 to 4") from None
+        return render.callgraph(P, f, direction=direction, depth=depth)
     if route in ("listing", "pseudo", "cfg"):
         f = _func(P, arg("func"))
         if getattr(P, "wasm", False):   # WebAssembly: disassembly listing only
