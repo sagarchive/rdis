@@ -354,7 +354,7 @@ def callgraph(prog, func, direction="both", depth=1):
             attrs.extend(['shape=component', 'style="rounded,dashed,filled"'])
         elif kind == "unresolved":
             attrs.extend(['style="rounded,dashed,filled"'])
-        out.append(f'  "n_{address:x}" [{", ".join(attrs)}];')
+        out.append(f'  "{address:#x}" [{", ".join(attrs)}];')
 
     for (source, target), edge in sorted(edges.items()):
         if source not in nodes or target not in nodes:
@@ -366,7 +366,7 @@ def callgraph(prog, func, direction="both", depth=1):
         elif len(edge["sites"]) > 1:
             label = f' label="{len(edge["sites"])} sites"'
         color = "gray" if nodes[target]["kind"] != "function" else "blue"
-        out.append(f'  "n_{source:x}" -> "n_{target:x}" [color={color}{label}];')
+        out.append(f'  "{source:#x}" -> "{target:#x}" [color={color}{label}];')
 
     dot = "\n".join(out + ["}"])
     return {
