@@ -11,7 +11,7 @@
   "name": "RDIS",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "description": "Open-source multi-format disassembler and decompiler with a browser workspace, command-line interface, Python API and MCP server.",
+  "description": "Open-source multi-format disassembler and decompiler with interactive control-flow and caller/callee graphs, bounded CLI and MCP workflows, and a browser workspace.",
   "url": "https://sagarchive.github.io/rdis/",
   "codeRepository": "https://github.com/sagarchive/rdis",
   "license": "https://opensource.org/license/mit",
@@ -28,20 +28,20 @@
 <meta name="theme-color" content="#000000">
 <meta name="author" content="RDIS contributors">
 <meta name="robots" content="index,follow,max-image-preview:large">
-<meta name="keywords" content="open-source disassembler, binary decompiler, reverse engineering, control-flow graph, x86, ARM64, MIPS, RISC-V, WebAssembly, MCP">
+<meta name="keywords" content="open-source disassembler, binary decompiler, reverse engineering, control-flow graph, call graph, cross references, x86, ARM64, MIPS, RISC-V, WebAssembly, MCP">
 <link rel="canonical" href="https://sagarchive.github.io/rdis/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="RDIS">
 <meta property="og:url" content="https://sagarchive.github.io/rdis/">
 <meta property="og:title" content="RDIS — Open-Source Disassembler and Decompiler">
-<meta property="og:description" content="Inspect binaries with an interactive control-flow graph, decompiler, CLI, Python API and MCP server.">
+<meta property="og:description" content="Inspect binaries with interactive control-flow and caller/callee graphs, a decompiler, CLI, Python API and MCP integration.">
 <meta property="og:image" content="https://sagarchive.github.io/rdis/brand/apple-touch-icon.png">
 <meta property="og:image:alt" content="RDIS app icon">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="RDIS — Open-Source Disassembler and Decompiler">
-<meta name="twitter:description" content="Cross-platform binary analysis with an interactive CFG, Python API and MCP server.">
+<meta name="twitter:description" content="Cross-platform binary analysis with interactive CFG and call graphs, Python API, CLI and MCP workflows.">
 <meta name="twitter:image" content="https://sagarchive.github.io/rdis/brand/apple-touch-icon.png">
-<meta name="description" content="RDIS is an open-source disassembler and decompiler for Mach-O, ELF, PE, WebAssembly and raw firmware, with an interactive CFG, CLI, Python API and MCP server.">
+<meta name="description" content="RDIS is an open-source disassembler and decompiler for Mach-O, ELF, PE, WebAssembly and raw firmware, with interactive CFG/call graphs, a CLI, Python API and MCP tools.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -676,6 +676,62 @@ x8 = <span class="t-fn">__builtin_reduce_add</span>((<span class="t-ty">u32x4</s
     </div>
   </section>
 
+  <section class="wrap" aria-labelledby="calls-h">
+    <div class="head">
+      <h2 id="calls-h">Follow a function through the program.</h2>
+      <p>The CFG answers “where can execution go next?” The <strong>Calls</strong> view answers “who calls this function, and what does it call?” Explore a bounded caller/callee neighborhood, including imports and unresolved targets, then jump into the function or export the graph for review.</p>
+    </div>
+    <div class="duo">
+      <article class="feat rise">
+        <h3>Interprocedural, not just local flow.</h3>
+        <p>Pick <strong>Callers</strong>, <strong>Callees</strong>, or <strong>Both</strong> and a depth from 1–4. The graph labels local functions, imports and unresolved targets separately. Resource limits are explicit; a truncated graph says so instead of pretending it contains every relationship.</p>
+        <div class="vis cfg">
+          <svg viewBox="0 0 600 330" role="img" aria-label="Call graph with a selected parse_packet function, its caller, a decode_payload callee, an imported puts target and an unresolved external target">
+            <defs>
+              <marker id="call-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="call-arrowhead"/></marker>
+            </defs>
+            <path class="e e-call" d="M150 112 V90 H230 V78" marker-end="url(#call-arrow)"/>
+            <path class="e e-call" d="M370 78 V100 H448 V122" marker-end="url(#call-arrow)"/>
+            <path class="e e-external" d="M448 184 V216" marker-end="url(#call-arrow)"/>
+            <path class="e e-unresolved" d="M506 184 V252" marker-end="url(#call-arrow)"/>
+            <rect class="blk" x="35" y="25" width="180" height="60" rx="8"/>
+            <text x="50" y="49" class="lab">caller_fixture</text>
+            <text x="50" y="69">0x4030 · function</text>
+            <rect class="blk n-root" x="215" y="25" width="180" height="60" rx="8"/>
+            <text x="230" y="49" class="lab">parse_packet</text>
+            <text x="230" y="69">0x4010 · selected</text>
+            <rect class="blk" x="365" y="122" width="200" height="62" rx="8"/>
+            <text x="380" y="146" class="lab">decode_payload</text>
+            <text x="380" y="166">0x4150 · function</text>
+            <rect class="blk n-import" x="365" y="216" width="200" height="38" rx="8"/>
+            <text x="380" y="240" class="lab">puts · import</text>
+            <rect class="blk n-unknown" x="365" y="270" width="200" height="38" rx="8"/>
+            <text x="380" y="294">unresolved target</text>
+          </svg>
+          <div class="legend"><span><i style="background:var(--mnem)"></i>function call</span><span><i style="background:var(--amber)"></i>import / external</span><span><i style="background:var(--faint)"></i>unresolved</span></div>
+        </div>
+      </article>
+      <article class="feat rise">
+        <h3>One analysis surface across workflows.</h3>
+        <p>Use the <strong>Calls</strong> toolbar mode, or request the same bounded graph from the CLI, in-app console, or MCP. The result includes DOT plus node/edge counts, depth and truncation metadata; it is not a claim that every indirect call has been resolved.</p>
+        <div class="vis">
+<pre class="pcode"><span class="t-cm"># Two call edges around parse_packet</span>
+rdis app.bin -f parse_packet \\
+  --callgraph \\
+  --callgraph-direction both \\
+  --callgraph-depth 2 \\
+  | dot -Tsvg -o calls.svg
+
+<span class="t-cm"># In-app console</span>
+callgraph parse_packet callers 2
+
+<span class="t-cm"># MCP tool</span>
+callgraph(path, func, direction="callees", depth=2)</pre>
+        </div>
+      </article>
+    </div>
+  </section>
+
   <section class="wrap" aria-labelledby="ty-h">
     <div class="head">
       <h2 id="ty-h">Structs come back as structs.</h2>
@@ -796,9 +852,9 @@ rdis-gui ./MyApp</pre>
           <li><b>macOS, Linux, Windows</b><span>Platforms</span></li>
           <li><b>Mach-O, ELF, PE, WASM</b><span>Formats</span></li>
           <li><b>APK, IPA, DMG in place</b><span>Packages</span></li>
-          <li><b>Browser, multi-user</b><span>Interface</span></li>
-          <li><b>Built-in stdlib MCP endpoint</b><span>AI integration</span></li>
-          <li><b>import rdis</b><span>Scripting</span></li>
+          <li><b>Browser, multi-session</b><span>Interface</span></li>
+          <li><b>CFG + bounded caller/callee graph</b><span>Graph workflow</span></li>
+          <li><b>Built-in MCP, CLI, console + Python API</b><span>Automation</span></li>
         </ul>
       </div>
       <div class="col them rise">
@@ -808,13 +864,13 @@ rdis-gui ./MyApp</pre>
           <li><b>Native desktop app</b><span>Interface</span></li>
           <li><b>Mach-O, ELF, PE</b><span>Formats</span></li>
           <li><b>Extract first</b><span>Packages</span></li>
-          <li><b>Desktop, single user</b><span>Interface</span></li>
-          <li><b>Graph minimap, custom node actions</b><span>Graph workflow</span></li>
-          <li><b>In-app Python scripting API</b><span>Scripting</span></li>
+          <li><b>Native desktop workbench</b><span>Interface</span></li>
+          <li><b>Editable graph nodes + PDF export</b><span>Graph workflow</span></li>
+          <li><b>Integrated MCP + Python API</b><span>Automation</span></li>
         </ul>
       </div>
     </div>
-    <p class="honest">Both offer decompilation and graph navigation. rdis graph rendering, navigation and export are regression-tested in Chromium and Firefox on every change (<a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">CI</a>).</p>
+    <p class="honest">Both products offer decompilation, graph navigation and MCP integration. rdis emphasizes a browser-first, multi-session workspace and one bounded caller/callee graph exposed consistently in the GUI, CLI, console and MCP. Hopper emphasizes a native analyst workflow with editable graph nodes and PDF export. This is a feature-scope comparison, not an accuracy ranking. Graph rendering and navigation are regression-tested in Chromium and Firefox (<a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">CI</a>).</p>
     <p class="honest">Decompiled output types its API calls from a library of 206 system prototypes (libc, POSIX, CoreFoundation and the Objective-C runtime), and Objective-C methods come out as valid Objective-C.</p>
   </section>
 
