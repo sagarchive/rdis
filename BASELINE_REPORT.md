@@ -77,40 +77,42 @@ These are open gates, not failures in the passing workflow:
 
 ## 7. Baseline artifact inspection
 
-The CI manifest/artifact pipeline was exercised on [run 39262355129](https://github.com/sagarchive/rdis/actions/runs/39262355129); all five jobs passed and the artifacts were downloaded for inspection.
+The CI manifest/artifact pipeline was inspected on [run 39262355129](https://github.com/sagarchive/rdis/actions/runs/39262355129) and then re-verified with the pull-request head/base identity fix on [run 39262871176](https://github.com/sagarchive/rdis/actions/runs/39262871176). All five jobs passed on run 39262871176. The subsequent [current-head run 39263076792](https://github.com/sagarchive/rdis/actions/runs/39263076792) also passed all five jobs on commit `039ea242e418d346702e96959479b81bcdd4fa2d`.
 
-| Artifact | Contents inspected | Observed facts |
+### Inspected artifacts — run 39262871176
+
+| Artifact | Contents inspected | Verified observations |
 |---|---|---|
-| [Python 3.10 manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12189898955) | `manifest.json`, `pip-freeze.txt` | Runner reported Linux, CPython 3.10.22; manifest SHA-256 matched the exact freeze file. |
-| [Python 3.12 manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12190418418) | `manifest.json`, `pip-freeze.txt` | Separate runtime inventory and hashed freeze file are produced. |
-| [Chromium manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12190413389) | `manifest.json`, `pip-freeze.txt` | Browser version recorded as 156.0.8078.4; freeze digest matched. |
-| [Firefox manifest](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12191996829) | `manifest.json`, `pip-freeze.txt` | A browser-specific manifest/freeze artifact is produced. |
-| [macOS baseline bundle](https://github.com/sagarchive/rdis/actions/runs/39262355129/artifacts/12189929202) | `manifest.json`, `pip-freeze.txt`, `benchmark.json`, `server-rss-kib.log`, `server.log` | Runner reported macOS 14.8.9 arm64 / CPython 3.12.10; freeze digest matched and benchmark/raw server evidence was included. |
+| [Python 3.10 manifest](https://github.com/sagarchive/rdis/actions/runs/39262871176/artifacts/12190843008) | `manifest.json`, `pip-freeze.txt` | CPython 3.10.22 on Linux; freeze file SHA-256 matches the manifest. |
+| [Python 3.12 manifest](https://github.com/sagarchive/rdis/actions/runs/39262871176/artifacts/12190788396) | `manifest.json`, `pip-freeze.txt` | CPython 3.12.15; freeze file SHA-256 matches. |
+| [Chromium manifest](https://github.com/sagarchive/rdis/actions/runs/39262871176/artifacts/12190179276) | `manifest.json`, `pip-freeze.txt` | Chromium 156.0.8078.4; freeze file SHA-256 matches. |
+| [Firefox manifest](https://github.com/sagarchive/rdis/actions/runs/39262871176/artifacts/12191578243) | `manifest.json`, `pip-freeze.txt` | Firefox 157.0; freeze file SHA-256 matches. |
+| [macOS baseline bundle](https://github.com/sagarchive/rdis/actions/runs/39262871176/artifacts/12191228180) | `manifest.json`, `pip-freeze.txt`, `benchmark.json`, `server-rss-kib.log`, `server.log` | macOS 14.8.9 arm64 / CPython 3.12.10; freeze hash matches; benchmark and raw server evidence are present. |
 
-### Provenance correction discovered during artifact review
+For all five manifests I downloaded and inspected, the fields `pull_request_head_sha`, `pull_request_base_sha`, `tested_checkout_sha`, `pull_request_number` and `run_id` were present. The PR head matched `25a6aeb885fe1c7765c5abe16722a85e822aedf4`; the base matched current main `96b931d32c807c5430518be6c280c98fb995ebb2`; the tested checkout SHA was the synthetic merge commit `571b7755c953fa57a8a5b3fd2d9e622aeaddd638`; the run ID was `39262871176`. This distinction is intentional: `GITHUB_SHA` is the tested PR merge checkout, while the source branch head is recorded separately. The baseline collector does not dump the full process environment. The regression tests also check URL user-info and common secret/token query-parameter redaction.
 
-The first manifests recorded `GITHUB_SHA`, which is the synthetic merge-checkout SHA for a `pull_request` workflow, not the source branch's PR head SHA. That is the right identity for the tested merge tree but is ambiguous if stored alone. The capture code now records separate fields for the tested checkout SHA, pull-request head SHA, pull-request base SHA and PR number by reading the runner's event payload. A regression test supplies a synthetic event and checks these fields. The current-head CI rerun must pass before that provenance correction is considered verified.
+Artifacts are uploaded with 30-day retention. They are reproducibility evidence for a particular CI run; do not assume they are permanent archival records. Release/benchmark decisions should retain the exact needed artifacts or publish a versioned artifact bundle.
 
-The artifact review demonstrates that exact pip-freeze hashes and useful environment metadata are being saved. It does not yet prove all artifacts have the correct head/base identity on the latest branch commit; that is the next verification gate.
+## 8. M00 exit status
 
-## 6. M00 exit status
+**M00: PARTIAL — runtime manifests and raw CI artifacts are working and inspected; the clean-room corpus baseline is still incomplete.**
 
-**M00: PARTIAL — CI baseline recorded; machine-readable environment capture is implemented in the active PR but awaits current-head CI and artifact inspection.**
+### Completed with CI evidence
 
-Before M00 can be closed:
-- [ ] Verify the CI-captured clean-environment manifests include OS/CPU, Python/Node/browser/compiler versions, pip freeze and exact source SHA.
-- [ ] Inspect the new artifacts for every relevant job, and verify their recorded SHA matches the corresponding run.
-- [ ] Keep raw benchmark JSON, RSS/server logs and browser artifacts indexed by workflow run/commit; add hashes and clear retention instructions.
-- [ ] Run the complete baseline command set on a clean checkout and distinguish passes, skips and unavailable optional tools.
-- [ ] Confirm the manifest-capture regression tests pass on Python 3.10 and 3.12 and that URLs with credentials/query tokens are redacted.
-- [ ] Keep the main baseline SHA and all comparison inputs immutable for future trend reports.
+- [x] Collect machine-readable environment manifests and exact `pip freeze` per Python/browser/macOS job.
+- [x] Record tested checkout SHA separately from PR head/base SHAs and PR number.
+- [x] Verify SHA-256 of the emitted `pip-freeze.txt` against each inspected manifest.
+- [x] Record actual Playwright browser versions in the browser manifests.
+- [x] Archive the macOS benchmark JSON and server RSS/logs alongside the runtime manifest.
+- [x] Test manifest identity and redaction behavior on the hardening Python matrix.
+- [x] Confirm all five jobs pass on [run 39262871176](https://github.com/sagarchive/rdis/actions/runs/39262871176), with the latest documentation-only head also green on [run 39263076792](https://github.com/sagarchive/rdis/actions/runs/39263076792).
 
-### M00 follow-up implementation (current PR branch; pending CI)
+### Still required before M00 is DONE
 
-- `tests/capture_environment.py` writes `manifest.json` and a hashed `pip-freeze.txt`, records source/CI/runtime metadata and selected tool/browser versions, and avoids a full process-environment dump.
-- The pip-freeze sanitizer redacts URL user-info and common secret/token query parameters before writing the artifact.
-- `tests/test_baseline_capture.py` tests manifest/freeze hashing, secret-safe output and the redaction rules.
-- `.github/workflows/hardening.yml` now uploads baseline-manifest artifacts for the Python 3.10/3.12 jobs, Chromium/Firefox browser jobs and macOS test/benchmark job. The macOS artifact also captures the raw benchmark and server RSS/logs where present.
-- These changes are not yet marked verified until the current-head CI passes and the generated artifacts are inspected.
+- [ ] Create a versioned, deterministic corpus manifest for representative small/medium/large and per-architecture binaries, with license/provenance, SHA-256 and expected analysis facts.
+- [ ] Execute the documented baseline command set on a fresh, clean checkout and retain raw stdout/stderr, skips and optional-tool availability.
+- [ ] Define a durable retention/promotion rule for the baseline manifests and benchmark outputs; 30-day CI artifacts alone are not a permanent baseline.
+- [ ] Establish the source/decoder/function/CFG/decompiler support matrix and current measured coverage per architecture, so M01 can use evidence rather than broad marketing text.
+- [ ] Decide and document dependency pinning strategy (lock file or repeatable constraints); recording `pip freeze` makes a run auditable but does not itself make later installs reproducible.
 
-**Next action:** wait only in the sense of checking current tool state—not background work: query the newest PR CI run now, fix any failing test/workflow, then inspect the resulting artifacts and update this report/cursor. Do not mark M00 done until the above checklist is satisfied.
+**Next atomic action:** create the licensed corpus manifest and a baseline command runner that verifies each input hash before running the documented test commands, writes machine-readable pass/skip/fail results, and emits a summary keyed to the source and environment manifests. Then review whether M00's exit gates are met. Do not call M00 complete yet.
