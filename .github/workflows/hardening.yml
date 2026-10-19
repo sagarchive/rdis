@@ -104,6 +104,8 @@ jobs:
 
       - name: Run hardening regressions
         run: python -m unittest discover -s tests -p 'test_hardening.py' -v
+      - name: Test environment manifest capture and redaction
+        run: python -m unittest discover -s tests -p 'test_baseline_capture.py' -v
       - name: Run typed IR contract tests
         run: python -m unittest discover -s tests -p 'test_ir_*.py' -v
 
