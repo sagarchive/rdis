@@ -4,8 +4,8 @@ Drop-in for lift.Lifter behind the Decompiler: same signature/block/condition/re
 interface, so the existing structurer (loops, if/else, switch, gotos) is reused unchanged. What the
 IR adds over the per-ISA pattern lifter:
 
-* ISA-generic semantics (any Ghidra language through pypcode; MIPS/RISC-V natively), so a branch
-  condition is just the expression the ISA computes — no flag pattern matching.
+* Architecture-independent handling of the operations emitted by the configured P-code frontend (or native MIPS/RISC-V frontend), so a branch
+  condition is represented as the expression the frontend emits; supported languages and instruction coverage remain frontend-dependent.
 * Stack frame recovery: the stack pointer is tracked as `entry_sp + k` across blocks, sp-relative
   accesses become named locals, callee-saved spills/restores disappear.
 * Struct recovery: per-parameter field accesses become a `struct` with typed fields, merged across
@@ -92,17 +92,34 @@ def mk(op, a, b, size):
     """Build a binary expression, simplifying as we go (constant folding and the identities that
     compilers' lowering leaves behind: x+0, x^x, (a-b)==0, sp arithmetic ...)."""
     c = _BINOP[op] if op in _BINOP else op
-    if a[0] == "c" and b[0] == "c" and op.startswith("INT"):
-        x, y = a[1], b[1]
-        sx, sy = _signed(x, a[2]), _signed(y, b[2])
+    if a[0] == "c" and b[0] == "c" and op.startswith("INT") and a[2] > 0 and b[2] > 0:
+        ux, uy = _mask(a[1], a[2]), _mask(b[1], b[2])
+        sx, sy = _signed(ux, a[2]), _signed(uy, b[2])
+        shift = uy
+        width = 8 * a[2]
+        def trunc_div(x, y):
+            if y == 0:
+                return None
+            q = abs(x) // abs(y)
+            return -q if (x < 0) != (y < 0) else q
         try:
-            v = {"INT_ADD": x + y, "INT_SUB": x - y, "INT_MULT": x * y, "INT_AND": x & y, "INT_OR": x | y,
-                 "INT_XOR": x ^ y, "INT_LEFT": x << (y & 63), "INT_RIGHT": x >> (y & 63),
-                 "INT_SRIGHT": sx >> (y & 63), "INT_EQUAL": int(x == y), "INT_NOTEQUAL": int(x != y),
-                 "INT_LESS": int(x < y), "INT_SLESS": int(sx < sy), "INT_LESSEQUAL": int(x <= y),
-                 "INT_SLESSEQUAL": int(sx <= sy), "INT_DIV": x // y if y else None,
-                 "INT_REM": x % y if y else None}.get(op)
-        except Exception:
+            v = {
+                "INT_ADD": ux + uy, "INT_SUB": ux - uy, "INT_MULT": ux * uy,
+                "INT_AND": ux & uy, "INT_OR": ux | uy, "INT_XOR": ux ^ uy,
+                # P-code shifts use the full unsigned shift amount. Masking it by 63 is
+                # incorrect for 32-bit operands shifted by 32 or 64.
+                "INT_LEFT": 0 if shift >= width else ux << shift,
+                "INT_RIGHT": 0 if shift >= width else ux >> shift,
+                "INT_SRIGHT": (-1 if sx < 0 else 0) if shift >= width else sx >> shift,
+                "INT_EQUAL": int(ux == uy), "INT_NOTEQUAL": int(ux != uy),
+                "INT_LESS": int(ux < uy), "INT_SLESS": int(sx < sy),
+                "INT_LESSEQUAL": int(ux <= uy), "INT_SLESSEQUAL": int(sx <= sy),
+                "INT_DIV": (ux // uy) if uy else None,
+                "INT_REM": (ux % uy) if uy else None,
+                "INT_SDIV": trunc_div(sx, sy),
+                "INT_SREM": (sx - trunc_div(sx, sy) * sy) if sy else None,
+            }.get(op)
+        except (ArithmeticError, OverflowError, ValueError):
             v = None
         if v is not None:
             return ("c", _mask(v, size), size)
@@ -237,6 +254,7 @@ class IRLifter:
         self._pcode = {}            # (addr, thumb) -> (ops, covered)
         self.live_out = self.entry_names = self.def_names = None
         self._temps, self._ptrvars, self._locals = set(), {}, {}
+        self._expr_types = {}
         self._last_regs, self._bstate = {}, {}
         self._ret_void, self._ret_fp = False, False
         self._tn = 0
@@ -246,11 +264,23 @@ class IRLifter:
         self.gp = _global_pointer(prog) if self.front else None
         self.structs = getattr(prog, "_ir_structs", None)
         if self.structs is None:
-            self.structs = prog._ir_structs = StructDB()
+            self.structs = prog._ir_structs = StructDB(self.w)
 
     @staticmethod
     def supports(arch):
         return ir_front.frontend(arch) is not None
+
+    def canonical_ir(self, func=None):
+        """Return validated, provenance-preserving IR for a function without changing C output.
+
+        This exposes the new IR contract to test harnesses and analysis tools while keeping the
+        legacy structurer/decompiler as the default until the new pipeline passes semantic gates.
+        """
+        from .ir_model import build_function_ir
+        target = func or self.func
+        if target is None:
+            raise ValueError("canonical_ir requires a function")
+        return build_function_ir(self.prog, target, self.front)
 
     # -- per-instruction ops ------------------------------------------------
     def _thumb(self, i):
@@ -381,6 +411,7 @@ class IRLifter:
     def signature(self, func, name):
         from .decompile import webs
         self.func = func
+        self._expr_types = {}
         self._sp = self._sp_deltas(func)
         self._saves = set()
         rt = self._returns(func)
@@ -396,7 +427,7 @@ class IRLifter:
         self.params = [self._canon(r) for r in self.arch.args[:argc]]
         self._entry_vals = set(self.entry_names.get(func.addr, {}).values()) | {"ra"}
         # pass 1: lift every block silently to collect field accesses and callee links
-        self._collect = {"acc": [], "links": []}
+        self._collect = {"acc": [], "links": [], "types": []}
         self._defs = {}
         for a in sorted(func.blocks):
             try:
@@ -406,6 +437,9 @@ class IRLifter:
         for r, off, size in self._collect["acc"]:
             if r in self.params:
                 self.structs.access((func.addr, self.params.index(r)), off, size)
+        for r, off, ctype in self._collect["types"]:
+            if r in self.params:
+                self.structs.access_type((func.addr, self.params.index(r)), off, ctype)
         for r, callee, k in self._collect["links"]:
             if r in self.params:
                 self._scan_callee(callee)
@@ -577,7 +611,7 @@ class IRLifter:
                     self._out.append(f"{n} = {self.render(e)};")
                     d[k] = ("v", n, _size(e))
 
-    def _store(self, addr, val, size):
+    def _store(self, addr, val, size, type_hint=None):
         if addr[0] == "sp" and val[0] == "c" and val[1] in (self.gp, self._gp_now):
             return                                   # MIPS .cprestore of gp
         if addr[0] == "sp":
@@ -586,15 +620,35 @@ class IRLifter:
                 self._slots[addr[1]] = val
                 return
             self._slots[addr[1]] = val
-        self._note_access(addr, size)
+        self._note_access(addr, size, type_hint)
         self._out.append(f"{self._lvalue(addr, size)} = {self.render(val)};")
 
-    def _note_access(self, addr, size):
+    def _note_access(self, addr, size, type_hint=None):
         if self._collect is None:
             return
         base, off = self._base_off(addr)
         if base is not None:
             self._collect["acc"].append((base, off, size))
+            if type_hint:
+                self._collect["types"].append((base, off, type_hint))
+
+    def _note_expr_type(self, expr, type_hint):
+        """Record type constraints on recovered fields when an expression reveals its use."""
+        if self._collect is None or not type_hint:
+            return
+        seen = set()
+        def visit(node):
+            if not isinstance(node, tuple) or not node or id(node) in seen:
+                return
+            seen.add(id(node))
+            if node[0] == "ld" and len(node) >= 3:
+                base, off = self._base_off(node[1])
+                if base is not None:
+                    self._collect["types"].append((base, off, type_hint))
+            for item in node[1:]:
+                if isinstance(item, tuple):
+                    visit(item)
+        visit(expr)
 
     @staticmethod
     def _base_off(addr):
@@ -724,6 +778,8 @@ class IRLifter:
             elif addr[0] == "c" and o[2] == self.w and self._got(addr[1]) is not None:
                 val = ("c", self._got(addr[1]), self.w)   # GOT slot: a constant pointer
             else:
+                # If the value came from a field and is now used as an address, that field is pointer-like.
+                self._note_expr_type(addr, "pointer")
                 self._note_access(addr, o[2])
                 val = ("ld", addr, o[2]) if addr[0] != "sp" else ("v", self._local(addr[1], o[2]), o[2])
             self._write(o, val, env, tmp)
@@ -731,12 +787,22 @@ class IRLifter:
             addr = self._read(ins[0], env, tmp)
             val = self._read(ins[1], env, tmp)
             self._flush_loads(env, tmp)
-            self._store(addr, val, ins[1][2])
+            self._store(addr, val, ins[1][2], self._expr_types.get(val))
         elif op in _BINOP:
             a, b2 = self._read(ins[0], env, tmp), self._read(ins[1], env, tmp)
-            self._write(o, mk(op, a, b2, o[2]), env, tmp)
+            hint = ("float" if o[2] == 4 else "double") if op.startswith("FLOAT_") else (
+                "signed" if op in {"INT_SDIV", "INT_SREM", "INT_SRIGHT", "INT_SLESS", "INT_SLESSEQUAL"} else
+                "unsigned" if op in {"INT_DIV", "INT_REM", "INT_RIGHT", "INT_LESS", "INT_LESSEQUAL"} else None)
+            if hint:
+                self._note_expr_type(a, hint)
+                self._note_expr_type(b2, hint)
+            value = mk(op, a, b2, o[2])
+            if hint in {"float", "double"}:
+                self._expr_types[value] = hint
+            self._write(o, value, env, tmp)
         elif op in ("INT_ZEXT", "INT_SEXT"):
             a = self._read(ins[0], env, tmp)
+            self._note_expr_type(a, "signed" if op == "INT_SEXT" else "unsigned")
             if a[0] == "c":
                 v = _signed(a[1], a[2]) if op == "INT_SEXT" else a[1]
                 val = ("c", _mask(v, o[2]), o[2])
@@ -1045,63 +1111,193 @@ def _subst(e, name, rep):
 
 
 class StructDB:
-    """Recovered struct layouts, keyed by (function, parameter index), merged across call links
-    with union-find so a pointer handed from caller to callee gets one shared type."""
+    """Recovered layouts keyed by (function, parameter index), merged through call links.
 
-    def __init__(self):
+    Access widths and type evidence are retained separately. Overlapping accesses are emitted as
+    explicit unions/views, and packed layout preserves observed byte offsets instead of letting the
+    host compiler silently insert alignment padding.
+    """
+
+    def __init__(self, word_size=8):
         self.parent, self.fields, self.order = {}, {}, {}
+        self.access_sizes, self.field_types = {}, {}
+        self.word_size = int(word_size or 8)
 
-    def _find(self, k):
-        self.parent.setdefault(k, k)
-        while self.parent[k] != k:
-            self.parent[k] = self.parent[self.parent[k]]
-            k = self.parent[k]
-        return k
+    def _find(self, key):
+        self.parent.setdefault(key, key)
+        while self.parent[key] != key:
+            self.parent[key] = self.parent[self.parent[key]]
+            key = self.parent[key]
+        return key
 
     def access(self, key, off, size):
-        if off < 0 or off > 0x10000:
+        if off < 0 or off > 0x10000 or size <= 0 or size > 0x10000:
             return
-        r = self._find(key)
-        f = self.fields.setdefault(r, {})
-        f[off] = max(f.get(off, 0), size)
+        root = self._find(key)
+        fields = self.fields.setdefault(root, {})
+        fields[off] = max(fields.get(off, 0), size)
+        self.access_sizes.setdefault(root, {}).setdefault(off, set()).add(size)
+
+    def access_type(self, key, off, kind):
+        """Record an observed use type; conflicting observations remain ambiguous."""
+        if off < 0 or off > 0x10000 or kind not in {"signed", "unsigned", "float", "double", "pointer"}:
+            return
+        root = self._find(key)
+        self.field_types.setdefault(root, {}).setdefault(off, set()).add(kind)
 
     def link(self, a, b):
         ra, rb = self._find(a), self._find(b)
         if ra == rb:
             return
         self.parent[rb] = ra
-        f = self.fields.setdefault(ra, {})
-        for off, s in self.fields.pop(rb, {}).items():
-            f[off] = max(f.get(off, 0), s)
+        fields = self.fields.setdefault(ra, {})
+        for off, size in self.fields.pop(rb, {}).items():
+            fields[off] = max(fields.get(off, 0), size)
+        sizes = self.access_sizes.setdefault(ra, {})
+        for off, values in self.access_sizes.pop(rb, {}).items():
+            sizes.setdefault(off, set()).update(values)
+        types = self.field_types.setdefault(ra, {})
+        for off, values in self.field_types.pop(rb, {}).items():
+            types.setdefault(off, set()).update(values)
 
     def name(self, key):
-        r = self._find(key)
-        f = self.fields.get(r, {})
-        if len(f) < 2 and not any(off > 0 for off in f):   # one access at +0: just a pointer
+        root = self._find(key)
+        fields = self.fields.get(root, {})
+        if len(fields) < 2 and not any(off > 0 for off in fields):
             return None
-        fa, k = r
-        return f"s_{fa:x}_{k}"
+        func_addr, param_index = root
+        return f"s_{func_addr:x}_{param_index}"
+
+    def _intervals(self, root):
+        sizes = self.access_sizes.get(root, {})
+        items = [(off, size) for off, ss in sizes.items() for size in ss]
+        if not items:
+            items = [(off, size) for off, size in self.fields.get(root, {}).items()]
+        return sorted(set(items))
+
+    def array_candidates(self, key):
+        """Report possible repeated-index layouts without silently declaring a C array.
+
+        Three or more same-width accesses at a stable stride are evidence worth presenting to a
+        type solver or analyst, but adjacent struct fields can look identical. Callers must treat
+        each result as a hypothesis and must not rewrite the declaration automatically.
+        """
+        root = self._find(key)
+        observations = self.access_sizes.get(root, {})
+        candidates = []
+        widths = sorted({size for sizes in observations.values() for size in sizes})
+        for size in widths:
+            offsets = sorted(off for off, sizes in observations.items() if size in sizes)
+            for i in range(len(offsets) - 2):
+                stride = offsets[i + 1] - offsets[i]
+                if stride <= 0:
+                    continue
+                # Start only at the beginning of a run; do not emit every suffix as a duplicate.
+                if i > 0 and offsets[i] - offsets[i - 1] == stride:
+                    continue
+                run = [offsets[i], offsets[i + 1]]
+                j = i + 2
+                while j < len(offsets) and offsets[j] - offsets[j - 1] == stride:
+                    run.append(offsets[j])
+                    j += 1
+                if len(run) >= 3:
+                    candidates.append({
+                        "offset": run[0],
+                        "element_size": size,
+                        "stride": stride,
+                        "count": len(run),
+                        "observed_offsets": tuple(run),
+                        "confidence": "candidate",
+                    })
+        return sorted(candidates, key=lambda item: (item["offset"], item["element_size"], item["stride"]))
+
+    def _groups(self, root):
+        groups = []
+        for item in self._intervals(root):
+            off, size = item
+            end = off + size
+            if groups and off < max(a + n for a, n in groups[-1]):
+                groups[-1].append(item)
+            else:
+                groups.append([item])
+        return groups
+
+    def _ctype(self, root, off, size):
+        evidence = self.field_types.get(root, {}).get(off, set())
+        if evidence == {"float"} and size == 4:
+            return "float"
+        if evidence == {"double"} and size == 8:
+            return "double"
+        if evidence == {"pointer"}:
+            # Only use a C pointer when it has the recovered target width. For cross-width output,
+            # preserve the observed storage width rather than emitting a host-width pointer.
+            if size == self.word_size:
+                return "void *"
+            return _UINT.get(size, "uint8_t")
+        if evidence == {"signed"}:
+            return _SINT.get(size, "uint8_t")
+        if evidence == {"unsigned"}:
+            return _UINT.get(size, "uint8_t")
+        # Mixed/unknown evidence is intentionally signless in the C declaration.
+        return _UINT.get(size, "uint8_t")
+
+    @staticmethod
+    def _member_name(group, off, size):
+        same_offset = [item for item in group if item[0] == off]
+        return f"f_{off:x}_as_{size}" if len(same_offset) > 1 else f"f_{off:x}"
 
     def field(self, st, off, size):
+        root = next((key for key in self.fields if self.name(key) == st), None)
+        if root is None:
+            return f"f_{off:x}"
+        for group in self._groups(root):
+            if (off, size) not in group:
+                continue
+            if len(group) == 1:
+                return f"f_{off:x}"
+            start = min(a for a, _ in group)
+            if off == start:
+                return f"_overlay_{start:x}." + self._member_name(group, off, size)
+            return f"_overlay_{start:x}.view_{off:x}_{size}.f_{off:x}"
         return f"f_{off:x}"
 
     def used(self, counts):
         names = set()
-        for r in list(self.fields):
-            n = self.name(r)
-            if n and counts.get(n):
-                names.add(n)
+        for root in list(self.fields):
+            name = self.name(root)
+            if name and counts.get(name):
+                names.add(name)
         return sorted(names)
 
     def decl(self, st):
-        r = next(k for k in self.fields if self.name(k) == st)
-        out, pos = [f"struct {st} {{   /* recovered from field accesses */"], 0
-        for off in sorted(self.fields[r]):
-            size = self.fields[r][off]
-            if off < pos:
-                continue                           # overlapping access (union-like): keep the first
-            if off > pos:
-                out.append(f"    uint8_t _pad_{pos:x}[{off - pos}];")
-            out.append(f"    {_SINT.get(size, 'int64_t')} f_{off:x};   /* +{off:#x} */")
-            pos = off + size
-        return out + ["};"]
+        root = next(key for key in self.fields if self.name(key) == st)
+        out = ["#pragma pack(push, 1)", f"struct {st} {{   /* inferred from field accesses */"]
+        pos = 0
+        for group in self._groups(root):
+            start = min(off for off, _ in group)
+            end = max(off + size for off, size in group)
+            if start > pos:
+                out.append(f"    uint8_t _pad_{pos:x}[{start - pos}];")
+            if len(group) == 1:
+                off, size = group[0]
+                out.append(f"    {self._ctype(root, off, size)} f_{off:x};   /* +{off:#x} */")
+            else:
+                out.append(f"    union {{   /* overlapping access views: {start:#x}..{end:#x} */")
+                out.append(f"        uint8_t _bytes[{end - start}];")
+                for off, size in group:
+                    ctype = self._ctype(root, off, size)
+                    name = self._member_name(group, off, size)
+                    if off == start:
+                        out.append(f"        {ctype} {name};   /* +{off:#x}, {size} bytes */")
+                    else:
+                        pad = off - start
+                        out.append("        struct {")
+                        if pad:
+                            out.append(f"            uint8_t _pad[{pad}];")
+                        out.append(f"            {ctype} f_{off:x};")
+                        out.append(f"        }} view_{off:x}_{size};")
+                # Field expressions emitted by field() address this named union member.
+                out.append(f"    }} _overlay_{start:x};")
+            if end > pos:
+                pos = end
+        return out + ["};", "#pragma pack(pop)"]

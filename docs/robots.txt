@@ -1,0 +1,7 @@
+# Project-site crawler policy.
+# The authoritative robots.txt for a github.io project site is at the host root
+# (https://sagarchive.github.io/robots.txt); this file controls only the /rdis/ path.
+User-agent: *
+Allow: /
+
+Sitemap: https://sagarchive.github.io/rdis/sitemap.xml

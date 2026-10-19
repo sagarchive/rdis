@@ -118,10 +118,10 @@ def _dot_label(s, limit=90):
     escaped or the label terminates early and the node box renders with text spilling outside it."""
     if len(s) > limit:
         s = s[:limit - 1] + "…"
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
 
 
-def _cfg_block_label(prog, b, limit=64, max_lines=42):
+def _cfg_block_label(prog, b, limit=72, max_lines=42):
     """Left-justified basic-block body for a CFG node: `addr  mnemonic operands  ; target`.
     Long blocks are capped so one merged block can't blow up the whole layout."""
     insns = b.shown
@@ -137,30 +137,40 @@ def _cfg_block_label(prog, b, limit=64, max_lines=42):
     return "".join(l + "\\l" for l in lines)
 
 
-def to_dot(prog, func):
+def to_dot(prog, func, detail=False):
     """Control-flow graph as Graphviz DOT. IDA edge convention: green = branch taken,
     red = not taken, blue = unconditional / normal flow. A loop back-edge (to an earlier
     block) is drawn non-constraining so the top-down ranking stays clean."""
     entry = func.addr
+    # A CFG is a control-flow map first, not a second disassembly listing. The UI exposes
+    # a detail toggle when the user wants more instructions in each node.
+    line_limit, line_count = (72, 42) if detail else (54, 12)
     out = ['digraph "cfg" {',
            '  bgcolor="transparent";',
-           # fontname "Courier": viz.js has exact metrics for it and sizes each box a touch WIDE,
-           # while the page renders the (narrower) app monospace — so text always fits, never clips.
-           '  graph [rankdir=TB nodesep=0.3 ranksep="0.42 equally" splines=polyline fontname="Courier"];',
-           '  node [shape=box style="rounded" fontname="Courier" fontsize=10 margin="0.16,0.08"];',
-           '  edge [arrowsize=0.7 penwidth=1.2];']
+           # More breathing room keeps loop-heavy graphs readable; non-constraining back-edges
+           # preserve a clean top-down rank layout without forcing cycles into the main flow.
+           '  graph [rankdir=TB nodesep=0.42 ranksep="0.62 equally" splines=polyline fontname="Courier", pad=0.22];',
+           '  node [shape=box style="rounded" fontname="Courier" fontsize=10 margin="0.18,0.10"];',
+           '  edge [arrowsize=0.72 penwidth=1.35];']
     for a in sorted(func.blocks):
         b = func.blocks[a]
-        body = _cfg_block_label(prog, b)
+        body = _cfg_block_label(prog, b, limit=line_limit, max_lines=line_count)
         attrs = f'label="{body}" id="n{a:#x}"'
         if a == entry:
-            attrs += ' root=true penwidth=2'   # entry block stands out
+            attrs += ' class="entry" root=true penwidth=2 color="#d9974f"'   # entry block stands out
         out.append(f'  "{a:#x}" [{attrs}];')
         last = b.insns[-1]
         taken = prog.arch.target(last)
         k = prog.arch.kind(last)
         for s in b.succs:
-            color = "green" if k == CJMP and s == taken else "red" if k == CJMP else "blue"
+            branch_known = k == CJMP and taken is not None and taken in b.succs
+            if branch_known:
+                color = "green" if s == taken else "red"
+                label = ' label="T"' if s == taken else ' label="F"'
+            elif k == CJMP:
+                color, label = "gray", ""  # do not claim taken/not-taken when the target is unresolved
+            else:
+                color, label = "blue", ""
             back = " constraint=false" if s <= a else ""   # loop edge: don't distort the ranks
-            out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{back}];')
+            out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{label}{back}];')
     return "\n".join(out + ["}"])

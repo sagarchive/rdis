@@ -27,7 +27,8 @@ def build(args, path):
     if args.base:
         opts["base"] = args.base
     prog = cache.analyze(open_image(path, arch=args.arch, **opts))
-    prog.load(prog.rdb_path())  # CLI owns one workspace: restore saved renames/comments
+    if isinstance(prog, Program):
+        prog.load(prog.rdb_path(), allow_legacy=args.allow_legacy_rdb)  # local native workspace; legacy migration is opt-in
     return prog
 
 
@@ -58,6 +59,8 @@ def main(argv=None):
     p.add_argument("--arch", help="slice to use for a fat Mach-O (x86_64, arm64, ...)")
     p.add_argument("--loader", help="force a plugin loader (e.g. raw)")
     p.add_argument("--base", help="load address for --loader raw")
+    p.add_argument("--allow-legacy-rdb", action="store_true",
+                   help="import an old sidecar without a content hash (verify the original binary first)")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
     try:

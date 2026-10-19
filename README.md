@@ -8,6 +8,13 @@ Hopper. Pure Python over [Capstone](https://www.capstone-engine.org/) (decoding)
 Hopper-style web workspace, a CLI, an importable library, or a zero-dependency MCP server an AI
 agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 
+## Engineering roadmap
+
+- [Milestones and current evidence](docs/audit/MILESTONES.md) is the single source of truth for what is done, open or blocked.
+- [Competitor gaps and feature roadmap](docs/audit/COMPETITIVE_ROADMAP.md) records official references, product gaps and the real benchmark protocol.
+
+RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend for supported architecture mappings. That reuses Ghidra's instruction-semantics descriptions; it is not evidence that RDIS has surpassed Ghidra's decompiler. RDIS's downstream IR, data-flow, struct recovery and output are still being validated against executable ground truth.
+
 ## Features
 
 | Capability | rdis | Hopper |
@@ -18,12 +25,12 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
-| Control-flow graph | Graphviz DOT, colored edges | yes (native view) |
-| C pseudo-code | structuring + symbolic lifter (x86/ARM) and an **IR decompiler** (Ghidra P-code via `pypcode`, or our own MIPS/RISC-V frontend). **Checked by execution:** 124 `-O2`/`-O3`, vectorized and struct cases recompile and match; 96% / 95% of real arm64 / x86-64 functions compile | yes |
+| Control-flow graph | Interactive browser CFG, zoom-to-fit, pointer-centered zoom, keyboard block selection, standalone SVG + DOT export | Interactive native CFG + PDF export |
+| C pseudo-code | CFG structuring and symbolic lifting (x86/ARM); optional SLEIGH/P-code frontend through `pypcode` for architectures mapped by RDIS; native MIPS/RISC-V frontend; experimental typed IR contract and field-layout recovery. Execution suite: 124 optimized, vectorized and struct cases are compiled and compared against reference results; real-binary compile rate is measured separately from semantic correctness | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
 | Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
-| Struct/field reconstruction | declared `struct`s with typed fields (width, sign, float, **self-referential pointers** like `next`); IR path merges layouts **across calls** | yes |
+| Struct/field reconstruction | heuristic access-based layouts with observed widths and some type evidence; overlapping views and call-linked layouts are supported; incomplete inference is explicitly experimental | yes |
 | SIMD | **lane-exact, compilable C** for NEON and SSE via vector extensions (`(u32x4)a + (u32x4)b`, `__builtin_reduce_add`), not pseudo-intrinsics | intrinsics |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
@@ -31,12 +38,12 @@ agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 | Strings | ASCII + UTF-16 | yes |
 | Scripting | import `rdis` as a library | Python API |
 | Plugin SDK | custom loaders, CPUs, tools | SDK |
-| AI integration | **built-in MCP server, zero deps** | MCP server |
+| AI integration | **built-in standard-library MCP server** | Integrated MCP server |
 | Debugger | LLDB batch wrapper (static + live) | LLDB/GDB |
 | GUI | web three-pane (navigator / asm / pseudo-CFG), or native window | native app |
 | Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP; **content-addressed analysis cache** (`.rdis_cache/`) reopens a 9 MB Flutter lib in 0.6s instead of 31s | yes |
 | Android JNI | **`env->FindClass(...)` naming for all 229 JNIEnv slots; `RegisterNatives` tables found and their natives named + typed** | no |
-| Runs on Linux | **yes** | no (macOS only) |
+| Runs on Linux | **yes** | **yes** ([supported Linux builds](https://www.hopperapp.com/download)) |
 
 How the decompiler is checked, reproducibly:
 
@@ -62,6 +69,7 @@ python3 -m venv ~/rdis-env
 source ~/rdis-env/bin/activate
 pip install "git+https://github.com/sagarchive/rdis.git"
 rdis-gui                         # opens http://127.0.0.1:8000, then drop a binary on the page
+rdis-gui --max-mb 128 --max-upload-storage-mb 1024  # per-file/member cap + aggregate cache quota
 ```
 
 Windows (PowerShell):
@@ -80,7 +88,7 @@ its path: `rdis-gui path/to/YourApp`. To update, run
 
 From source: `git clone https://github.com/sagarchive/rdis.git && cd rdis`, then `pip install .` inside
 the environment. Extras: `pip install '.[desktop]'` (native window), `pip install '.[ir]'`
-(Ghidra P-code semantics for the IR decompiler).
+(optional `pypcode`/SLEIGH semantics for architectures mapped by RDIS). This reuses Ghidra's instruction semantics through a supported adapter; it does **not** add Ghidra's entire analysis/decompiler pipeline. RDIS's own typed IR is experimental, and its downstream data-flow, stack recovery, structuring and C rendering still need broader semantic parity evidence.
 
 Optional external tools unlock more: `swift-demangle`, `c++filt` (demangling), `dot` (rendered
 graphs), `lldb` (debugger).
@@ -97,6 +105,7 @@ python -m rdis BIN --strings
 python -m rdis BIN --classes            # Objective-C / Swift declarations
 python -m rdis BIN --imports
 python -m rdis BIN --arch arm64 ...     # pick a fat Mach-O slice
+python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar's original binary
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
 ```
 
@@ -109,11 +118,19 @@ rdis-gui /path/to/binary --arch arm64        # opens http://127.0.0.1:8000 in yo
 rdis-gui /path/to/binary --desktop           # native window (needs the [desktop] extra)
 ```
 
-Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter) · disassembly with
-clickable call targets · inspector (binary info, sections, cross-references). The top toggle
-switches **Assembly / Pseudo-code / CFG / Hex**. Double-click a function to rename it; double-click an
-instruction address to comment. Renames and comments save to `<binary>.rdb` next to the binary and
-reload automatically.
+Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter), disassembly with
+clickable call targets, and an inspector for binary info, sections and cross-references. The top
+toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview; use
+**Detail** for more instructions, **Fit** for the full graph, and the minimap to recenter large
+functions. Click or keyboard-focus a block to inspect it; double-click (or press Shift+Enter on a
+focused block) to jump to its listing. The mouse wheel zooms around the pointer, drag pans, and
+Shift+wheel pans. Conditional edges show **T/F** only when the branch target is known; unresolved
+edges remain neutral and the entry block is highlighted. Fit-to-view uses rendered pixel bounds;
+exported SVG resolves theme colors for standalone viewing. Chromium CI tests graph geometry,
+keyboard selection, zoom, minimap navigation, light/dark label contrast, SVG export, and a real
+compiled binary rendered through the live RDIS server.
+Double-click a function to rename it; double-click an instruction address to comment. Renames and
+comments save to `<binary>.rdb` next to the binary and reload automatically. Version-2 sidecars are tied to a SHA-256 digest of the exact input bytes; replacing a binary at the same path therefore cannot silently attach stale annotations. Legacy sidecars without a content digest are ignored by default. Use `rdis BIN --allow-legacy-rdb` or `rdis-gui --allow-legacy-rdb` only after independently confirming that the old sidecar belongs to the current binary; this migration cannot be verified automatically.
 
 Drop any file on the page: native binaries (Mach-O/ELF/PE/`.so`/`.dylib`) open directly;
 **APK/IPA/AAR/JAR/ZIP**, **DMG** images and **tar** archives show a loader dialog listing the native

@@ -4,8 +4,8 @@ An op is `(opcode, out, ins)`; varnodes are `("reg", name, size)`, `("const", va
 `("tmp", key, size)` or `("ram", addr, size)`. Opcode names follow Ghidra P-code (INT_ADD, LOAD,
 CBRANCH, CALL, RETURN, ...), so both frontends feed the same lifter:
 
-* PcodeFront — Ghidra's SLEIGH semantics via `pypcode` (every ISA Ghidra knows, exact flags).
-* NativeFront — our own, dependency-free semantics for MIPS and RISC-V, used when pypcode is absent.
+* PcodeFront — SLEIGH/P-code semantics through `pypcode` for the architecture IDs explicitly mapped by `_lang`; this is not a bridge for every Ghidra language.
+* NativeFront — a dependency-free MIPS/RISC-V instruction subset used when a P-code frontend is unavailable.
 
 For delay-slot ISAs a branch's translation includes its delay slot (executed after the condition
 is computed, before control transfers), and `covered` lists every instruction address consumed.
@@ -66,26 +66,50 @@ class PcodeFront:
         return ("ram", v.offset, v.size)
 
     def translate(self, code, addr, thumb=False):
+        ops, covered, _ = self.translate_with_provenance(code, addr, thumb)
+        return ops, covered
+
+    def translate_with_provenance(self, code, addr, thumb=False):
+        """Translate to P-code while reporting only source addresses the frontend can prove.
+
+        A multi-address IMARK represents a delayed-control-flow bundle. pypcode exposes the source
+        instruction addresses in that marker, but does not expose an origin address on each PcodeOp.
+        Operations within such a bundle are marked ambiguous unless they are the control transfer.
+        """
         ctx = self._context(thumb)
         try:
             tr = ctx.translate(code, addr, max_instructions=1)
         except Exception:
-            return None, []
-        ops, covered = [], []
+            return None, [], []
+        ops, covered, op_addresses = [], [], []
+        current_sources = ()
         for op in tr.ops:
             name = op.opcode.name
             if name == "IMARK":
-                covered += [v.offset for v in op.inputs]
+                # Each IMARK input encodes one source instruction as ram[address:length].
+                # Varnode.offset is the address; Varnode.size is the instruction length.
+                current_sources = tuple(dict.fromkeys(int(v.offset) for v in op.inputs))
+                for source in current_sources:
+                    if source not in covered:
+                        covered.append(source)
                 continue
             ins = [self._vn(ctx, v) for v in op.inputs]
             if name in ("LOAD", "STORE"):
                 ins = ins[1:]                      # drop the address-space id
-            elif name == "CALLOTHER":            # user-op name: `ecall()`, `out = sqrt(x)`
+            elif name == "CALLOTHER":
                 m = re.match(r"(?:.*? = )?(\w+)\(", str(op))
                 ins = [("const", m.group(1) if m else "intrinsic", 0)] + ins[1:]
             out = self._vn(ctx, op.output) if op.output is not None else None
             ops.append((name, out, ins))
-        return ops, covered
+            if len(current_sources) == 1:
+                op_addresses.append(current_sources[0])
+            elif len(current_sources) > 1 and name in {"BRANCH", "CBRANCH", "BRANCHIND", "CALL", "CALLIND", "RETURN"}:
+                op_addresses.append(current_sources[0])
+            else:
+                op_addresses.append(None)
+        if not covered and ops:
+            covered.append(int(addr))
+        return ops, covered, op_addresses
 
 
 # ---- NativeFront: our own semantics for MIPS / RISC-V -------------------------------------------
@@ -202,15 +226,21 @@ class NativeFront:
         return [("ASM", None, [f"{i.mnemonic} {i.op_str}".strip()])]
 
     def translate(self, code, addr, thumb=False):
+        ops, covered, _ = self.translate_with_provenance(code, addr, thumb)
+        return ops, covered
+
+    def translate_with_provenance(self, code, addr, thumb=False):
+        """Native translation with exact origins for bundled delay-slot operations."""
         insns = list(self.arch.md.disasm(code, addr, 2 if self.arch.delay_slot else 1))
         if not insns:
-            return None, []
+            return None, [], []
         i = insns[0]
         k = self.arch.kind(i)
         if k == "other":
-            return self._ops_of(i, 0), [i.address]
+            ops = self._ops_of(i, 0)
+            return ops, [i.address], [i.address] * len(ops)
         w = self.w
-        ops, covered = [], [i.address]
+        ops, covered, op_addresses = [], [i.address], []
         m = i.mnemonic.removeprefix("c.")
         o = i.operands
         reg = lambda k_: ("const", 0, w) if i.reg_name(o[k_].reg) == "zero" else ("reg", i.reg_name(o[k_].reg), w)
@@ -225,27 +255,37 @@ class NativeFront:
                 a, b = b, a
             cond = ("tmp", ("c", 0), 1)
             ops.append((op, cond, [a, b]))       # condition is read before the delay slot runs
+            op_addresses.append(i.address)
         elif k == CALL and m in ("jalr",) or (k == CALL and t is None):
             tgt = ("tmp", ("c", 1), w)
             r = next((reg(n) for n in range(len(o)) if o[n].type == 1 and i.reg_name(o[n].reg) != "ra"), None)
             ops.append(("COPY", tgt, [r or ("const", 0, w)]))
+            op_addresses.append(i.address)
         elif k == IJMP:
             tgt = ("tmp", ("c", 1), w)
             ops.append(("COPY", tgt, [reg(len(o) - 1) if o else ("const", 0, w)]))
+            op_addresses.append(i.address)
         if self.arch.delay_slot and len(insns) > 1:
-            ops += self._ops_of(insns[1], 1)
+            delay_ops = self._ops_of(insns[1], 1)
+            ops += delay_ops
+            op_addresses += [insns[1].address] * len(delay_ops)
             covered.append(insns[1].address)
         if k == CJMP:
             ops.append(("CBRANCH", None, [("ram", t, w), cond]))
+            op_addresses.append(i.address)
         elif k == JMP:
             ops.append(("BRANCH", None, [("ram", t, w)]))
+            op_addresses.append(i.address)
         elif k == CALL:
             ops.append(("CALL", None, [("ram", t, w)]) if t is not None else ("CALLIND", None, [tgt]))
+            op_addresses.append(i.address)
         elif k == RET:
             ops.append(("RETURN", None, [("reg", "ra", w)]))
+            op_addresses.append(i.address)
         elif k == IJMP:
             ops.append(("BRANCHIND", None, [tgt]))
-        return ops, covered
+            op_addresses.append(i.address)
+        return ops, covered, op_addresses
 
 
 def frontend(arch):

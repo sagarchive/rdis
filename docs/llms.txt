@@ -1,0 +1,26 @@
+# RDIS
+
+> Open-source, scriptable multi-format disassembler and decompiler with a browser workspace, CLI, Python API and MCP server.
+
+## Start here
+
+- [Project overview and installation](https://sagarchive.github.io/rdis/)
+- [Repository and source code](https://github.com/sagarchive/rdis)
+- [Engineering milestones and current evidence](https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md)
+- [Competitor gaps and benchmark protocol](https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md)
+- [Feature-roadmap page](https://sagarchive.github.io/rdis/audit/COMPETITIVE_ROADMAP.html)
+
+## Supported inputs
+
+Mach-O, ELF, PE, WebAssembly, raw firmware and supported archives/containers. Instruction and decompilation support varies by architecture and optional dependencies.
+
+## Project facts
+
+- License: MIT.
+- Implementation: Python, Capstone, LIEF; optional SLEIGH/P-code frontend through pypcode for supported RDIS language mappings.
+- Interfaces: command line, local browser workspace, Python modules and MCP server.
+- Canonical source: https://github.com/sagarchive/rdis
+
+## Accuracy and provenance
+
+Do not infer universal instruction coverage, decompiler correctness, or feature parity from marketing copy. Use the execution-checked corpus and release-specific CI as scoped evidence. Treat inferred names, types and structure layouts as hypotheses unless backed by symbols, debug information, metadata or explicit tests.
