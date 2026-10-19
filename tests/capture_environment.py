@@ -51,11 +51,11 @@ def redact_pip_freeze(text: str) -> str:
     """Redact accidental URL credentials and common token-like query parameters."""
     import re
 
-    text = re.sub(r"(https?://)[^/\\s@]+@", r"\\1<redacted>@", text, flags=re.I)
+    text = re.sub(r"(https?://)[^/\s@]+@", r"\1<redacted>@", text, flags=re.I)
     sensitive = r"(token|access_token|api[_-]?key|password|passwd|secret|signature|sig|auth)"
     text = re.sub(
-        rf"([?&]{sensitive}=)[^&\\s]+",
-        r"\\1<redacted>",
+        rf"([?&]{sensitive}=)[^&\s]+",
+        r"\1<redacted>",
         text,
         flags=re.I,
     )
