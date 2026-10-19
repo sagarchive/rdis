@@ -46,7 +46,7 @@ class EnvironmentCaptureTests(unittest.TestCase):
                 }
             }))
             constraints_path = Path(td) / "baseline-constraints.txt"
-            constraints_bytes = b"capstone==5.0.9\\nlief==1.0.0\\n"
+            constraints_bytes = b"capstone==5.0.9\nlief==1.0.0\n"
             constraints_path.write_bytes(constraints_bytes)
             env = os.environ.copy()
             env.update({
