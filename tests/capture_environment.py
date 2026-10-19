@@ -47,6 +47,21 @@ def maybe_version(name: str, args: list[str] | None = None) -> dict:
     return result
 
 
+def redact_pip_freeze(text: str) -> str:
+    """Redact accidental URL credentials and common token-like query parameters."""
+    import re
+
+    text = re.sub(r"(https?://)[^/\\s@]+@", r"\\1<redacted>@", text, flags=re.I)
+    sensitive = r"(token|access_token|api[_-]?key|password|passwd|secret|signature|sig|auth)"
+    text = re.sub(
+        rf"([?&]{sensitive}=)[^&\\s]+",
+        r"\\1<redacted>",
+        text,
+        flags=re.I,
+    )
+    return text
+
+
 def package_versions() -> dict[str, str]:
     wanted = {
         "rdis", "capstone", "lief", "pypcode", "pywebview", "playwright",
@@ -105,7 +120,7 @@ def main() -> int:
     errors: list[str] = []
 
     freeze = probe([sys.executable, "-m", "pip", "freeze", "--all"], timeout=60)
-    freeze_text = freeze.get("stdout", "")
+    freeze_text = redact_pip_freeze(freeze.get("stdout", ""))
     (out / "pip-freeze.txt").write_text(freeze_text + ("\n" if freeze_text else ""))
     freeze_bytes = (out / "pip-freeze.txt").read_bytes()
 
@@ -164,6 +179,7 @@ def main() -> int:
             "pip_freeze_sha256": hashlib.sha256(freeze_bytes).hexdigest(),
             "pip_freeze_returncode": freeze.get("returncode"),
             "pip_freeze_error": freeze.get("error"),
+            "pip_freeze_redacted": True,
         },
         "commands": args.command,
         "curated_ci_environment": {
