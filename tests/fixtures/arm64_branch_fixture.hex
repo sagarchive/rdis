@@ -1,0 +1,15 @@
+# Hand-encoded AArch64 A64 instructions, little-endian words, loaded at 0x1000.
+# Encoding reference: Arm Architecture Reference Manual for A-profile architecture:
+# https://developer.arm.com/documentation/ddi0487/latest
+# 0x1000: CMP W0, #0       word 0x7100001f
+# 0x1004: B.EQ 0x1010      word 0x54000060 (imm19=3 => PC + 12)
+# 0x1008: ADD W0, W0, #1   word 0x11000400
+# 0x100c: B 0x1014          word 0x14000002 (imm26=2 => PC + 8)
+# 0x1010: SUB W0, W0, #1   word 0x51000400
+# 0x1014: RET               word 0xd65f03c0
+1f 00 00 71
+60 00 00 54
+00 04 00 11
+02 00 00 14
+00 04 00 51
+c0 03 5f d6
