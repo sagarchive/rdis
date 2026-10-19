@@ -2,7 +2,8 @@
 
   rdis BIN                      list functions (addr, name)
   rdis BIN -f main              disassemble a function
-  rdis BIN -f main --cfg        control-flow graph as Graphviz DOT
+  rdis BIN -f main --cfg        intraprocedural control-flow graph as Graphviz DOT
+  rdis BIN -f main --callgraph  caller/callee graph as Graphviz DOT (direction/depth configurable)
   rdis BIN -f main -d           C pseudo-code (decompile)
   rdis BIN --strings            all strings
   rdis BIN --classes            Objective-C / Swift type declarations
@@ -49,7 +50,12 @@ def main(argv=None):
     p.add_argument("binary")
     p.add_argument("-f", "--func", help="function name, sub_xxx, or 0xADDR")
     p.add_argument("-d", "--decompile", action="store_true", help="emit C pseudo-code")
-    p.add_argument("--cfg", action="store_true", help="emit control-flow graph (Graphviz DOT)")
+    p.add_argument("--cfg", action="store_true", help="emit control-flow graph for one function (Graphviz DOT)")
+    p.add_argument("--callgraph", action="store_true", help="emit bounded interprocedural caller/callee graph (Graphviz DOT)")
+    p.add_argument("--callgraph-direction", choices=("both", "callers", "callees"), default="both",
+                   help="call graph neighborhood direction (default: both)")
+    p.add_argument("--callgraph-depth", type=int, choices=range(1, 5), default=1, metavar="{1,2,3,4}",
+                   help="maximum number of call edges from the selected function (default: 1)")
     p.add_argument("--strings", action="store_true")
     p.add_argument("--classes", action="store_true", help="Objective-C / Swift declarations")
     p.add_argument("--imports", action="store_true")
@@ -63,6 +69,12 @@ def main(argv=None):
                    help="import an old sidecar without a content hash (verify the original binary first)")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+    if a.callgraph and not a.func:
+        p.error("--callgraph requires -f/--func")
+    if a.callgraph and (a.cfg or a.decompile):
+        p.error("--callgraph cannot be combined with --cfg or --decompile")
+    if not a.callgraph and (a.callgraph_direction != "both" or a.callgraph_depth != 1):
+        p.error("--callgraph-direction and --callgraph-depth require --callgraph")
     try:
         path = a.binary
         if a.entry:
@@ -110,6 +122,18 @@ def main(argv=None):
         sys.exit(f"no function at {a.func}")
     if a.decompile:
         print(Decompiler(prog, func).c())
+    elif a.callgraph:
+        if getattr(prog, "wasm", False):
+            message = "WebAssembly call-graph edges are not yet reconstructed from validated module call indices"
+            if a.json:
+                print(json.dumps({"name": prog.display(addr), "addr": hex(addr), "dot": None,
+                                  "direction": a.callgraph_direction, "depth": a.callgraph_depth,
+                                  "nodes": 1, "edges": 0, "truncated": False, "note": message}))
+            else:
+                sys.exit(f"rdis: {message}")
+            return
+        result = render.callgraph(prog, func, direction=a.callgraph_direction, depth=a.callgraph_depth)
+        print(json.dumps(result, sort_keys=True) if a.json else result["dot"])
     elif a.cfg:
         print(render.to_dot(prog, func))
     elif a.json:
