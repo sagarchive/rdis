@@ -40,25 +40,30 @@ function dotGraph(count, detail = false) {
   return lines.join("\n");
 }
 
-function dotCallGraph(direction = "both", depth = 1) {
-  const nodes = new Map([[0x1000, {name: "branch_loop_fixture", kind: "function", root: true}]]);
+function dotCallGraph(rootAddress = 0x1000, rootName = "branch_loop_fixture", direction = "both", depth = 1) {
+  const callerAddress = rootAddress + 0x3000;
+  const grandcallerAddress = rootAddress + 0x4000;
+  const calleeAddress = rootAddress + 0x1000;
+  const importAddress = rootAddress + 0x8000;
+  const unresolvedAddress = rootAddress + 0x9000;
+  const nodes = new Map([[rootAddress, {name: rootName, kind: "function", root: true}]]);
   const edges = [];
   const add = (addr, name, kind = "function") => nodes.set(addr, {name, kind, root: false});
   if (direction !== "callees") {
-    add(0x3000, "caller_fixture");
-    edges.push([0x3000, 0x1000, "caller"]);
+    add(callerAddress, "caller_fixture");
+    edges.push([callerAddress, rootAddress, "caller"]);
     if (depth >= 2) {
-      add(0x4000, "grandcaller_fixture");
-      edges.push([0x4000, 0x3000, "call"]);
+      add(grandcallerAddress, "grandcaller_fixture");
+      edges.push([grandcallerAddress, callerAddress, "call"]);
     }
   }
   if (direction !== "callers") {
-    add(0x2000, "callee_fixture");
-    edges.push([0x1000, 0x2000, "call"]);
+    add(calleeAddress, "callee_fixture");
+    edges.push([rootAddress, calleeAddress, "call"]);
     if (depth >= 2) {
-      add(0x9000, "puts", "import");
-      add(0xA000, "unresolved_external", "unresolved");
-      edges.push([0x2000, 0x9000, "call"], [0x2000, 0xA000, "unresolved"]);
+      add(importAddress, "puts", "import");
+      add(unresolvedAddress, "unresolved_external", "unresolved");
+      edges.push([calleeAddress, importAddress, "call"], [calleeAddress, unresolvedAddress, "unresolved"]);
     }
   }
   const lines = [
@@ -81,7 +86,6 @@ function dotCallGraph(direction = "both", depth = 1) {
   lines.push("}");
   return lines.join("\n");
 }
-
 function dotWideGraph() {
   const lines = [
     "digraph wide_cfg {",
@@ -177,8 +181,10 @@ try {
       const direction = url.searchParams.get("direction") || "both";
       const depth = Number(url.searchParams.get("depth") || "1");
       callgraphQueries.push({addr, direction, depth});
-      const dot = dotCallGraph(direction, depth);
-      body = {name: "branch_loop_fixture", addr, dot, direction, depth,
+      const addrNum = Number(BigInt(addr));
+      const rootName = addr.toLowerCase() === "0x1000" ? "branch_loop_fixture" : "selected_function";
+      const dot = dotCallGraph(addrNum, rootName, direction, depth);
+      body = {name: rootName, addr, dot, direction, depth,
         nodes: dot.split("\n").filter(line => line.includes("[label=")).length,
         edges: (dot.match(/ -> /g) || []).length,
         truncated: false, node_limit: 64, edge_limit: 128};
