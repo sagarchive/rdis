@@ -16,6 +16,17 @@
       "required": true
     },
     {
+      "id": "arm64-branch-fixture",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/arm64_branch_fixture.hex",
+      "sha256": "d3385b3eecfb111332509618159db25e0559e733d525e94de1d535d69678a86e",
+      "git_blob_sha1": "fb92226133e03d9f1458868551e4f0eb0c698c05",
+      "size_bytes": 594,
+      "license": "Hand-authored fixture under the RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual.",
+      "purpose": "Independent AArch64 little-endian byte fixture: CMP, conditional branch to 0x1010, fall-through ADD, unconditional branch to 0x1014, SUB and RET. Regression asserts exact instruction boundaries, flow kinds and PC-relative targets; no compiled cross-toolchain required.",
+      "required": true
+    },
+    {
       "id": "macos-arm64-system-ls",
       "kind": "host-system-binary",
       "path": "/bin/ls",
@@ -141,7 +152,10 @@
             "-v"
           ],
           "timeout_seconds": 120,
-          "required": true
+          "required": true,
+          "requires_entries": [
+            "arm64-branch-fixture"
+          ]
         },
         {
           "id": "compile-cfg-fixture",
