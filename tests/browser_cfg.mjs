@@ -523,6 +523,17 @@ try {
   const callsSvg = await callsSvgPromise;
   assert(callsSvg.suggestedFilename().endsWith("-callgraph.svg"));
 
+  // Inspect the public GitHub Pages section that documents the shipped call-graph workflow.
+  const pagesPage = await browser.newPage({viewport: {width: 1440, height: 1000}, deviceScaleFactor: 1});
+  pagesPage.on("pageerror", e => { throw e; });
+  await pagesPage.goto("http://127.0.0.1:8765/docs/index.html", {waitUntil: "domcontentloaded"});
+  await pagesPage.locator("#calls-h").waitFor();
+  await pagesPage.locator("#calls-h").scrollIntoViewIfNeeded();
+  assert(await pagesPage.getByText("Follow a function through the program.", {exact: true}).isVisible());
+  assert.equal(await pagesPage.locator('svg[aria-label*="Call graph with a selected parse_packet function"]').count(), 1);
+  await pagesPage.waitForTimeout(150);
+  await pagesPage.screenshot({path: out + "/github-pages-callgraph-feature.png", fullPage: false});
+
   // End-to-end smoke: real compiled ELF -> RDIS server/analysis/render -> real Chromium CFG.
   // This complements the synthetic large-graph fixtures above, which isolate layout behavior.
   assert(fs.existsSync("/tmp/rdis-cfg-fixture"), "compiled real-binary fixture is missing");
