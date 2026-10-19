@@ -45,6 +45,9 @@ class EnvironmentCaptureTests(unittest.TestCase):
                     "base": {"sha": "test-base-head"},
                 }
             }))
+            constraints_path = Path(td) / "baseline-constraints.txt"
+            constraints_bytes = b"capstone==5.0.9\\nlief==1.0.0\\n"
+            constraints_path.write_bytes(constraints_bytes)
             env = os.environ.copy()
             env.update({
                 "GITHUB_SHA": "synthetic-merge-checkout-sha",
@@ -58,6 +61,7 @@ class EnvironmentCaptureTests(unittest.TestCase):
                     "--output-dir", td,
                     "--job", "capture-test",
                     "--command", "python -m unittest example",
+                    "--constraints-file", str(constraints_path),
                 ],
                 capture_output=True,
                 text=True,
@@ -85,6 +89,14 @@ class EnvironmentCaptureTests(unittest.TestCase):
                 hashlib.sha256(freeze).hexdigest(),
             )
             self.assertTrue(manifest["dependencies"]["pip_freeze_redacted"])
+            self.assertEqual(
+                manifest["dependencies"]["constraints_files"],
+                [{
+                    "path": str(constraints_path),
+                    "sha256": hashlib.sha256(constraints_bytes).hexdigest(),
+                    "size_bytes": len(constraints_bytes),
+                }],
+            )
             self.assertNotIn("RDIS_PRIVATE_SENTINEL", manifest["curated_ci_environment"])
             self.assertNotIn("must-not-be-recorded", manifest_path.read_text())
             self.assertNotIn("must-not-be-recorded", freeze_path.read_text())
