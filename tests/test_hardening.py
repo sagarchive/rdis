@@ -18,7 +18,8 @@ from rdis import containers, server as rdis_server
 from rdis.analysis import Program, _LayerXrefs
 from rdis.loader import Image, Section
 from rdis.wasm import WasmModule, _name, _uleb
-from rdis.render import _dot_label
+from rdis.render import _dot_label, callgraph
+from rdis.arch import CALL
 from rdis import mcp_server
 
 
@@ -750,6 +751,141 @@ class RenderingSafetyTests(unittest.TestCase):
         self.assertIn("\\n", label)
         self.assertIn('\\"quoted\\"', label)
         self.assertIn("\\\\", label)
+
+
+
+class CallGraphTests(unittest.TestCase):
+    class FakeImage:
+        def __init__(self, functions):
+            self.imports = {0x9000: "puts"}
+            self.symbols = {}
+            self._functions = functions
+
+        def is_code(self, addr):
+            return addr in self._functions
+
+    class FakeArch:
+        def kind(self, insn):
+            return insn.kind
+
+        def target(self, insn):
+            return insn.target
+
+        def data_refs(self, insn, state):
+            return []
+
+    class FakeProgram:
+        def __init__(self, function_specs, xrefs, site_owners, names=None):
+            self.functions = {}
+            self.names = names or {}
+            self.xrefs = xrefs
+            self.site_owners = site_owners
+            self.arch = CallGraphTests.FakeArch()
+            self.image = None
+            for addr, spec in function_specs.items():
+                blocks = {}
+                for site, target, kind in spec.get("insns", []):
+                    insn = SimpleNamespace(address=site, target=target, kind=kind,
+                                           mnemonic="call", op_str=hex(target))
+                    blocks.setdefault(site, SimpleNamespace(addr=site, end=site + 1, insns=[])).insns.append(insn)
+                    self.site_owners[site] = addr
+                self.functions[addr] = SimpleNamespace(addr=addr, calls=set(spec.get("calls", ())), blocks=blocks)
+            self.image = CallGraphTests.FakeImage(self.functions)
+
+        def display(self, addr):
+            return self.names.get(addr, "")
+
+        def xrefs_to(self, addr):
+            return sorted(self.xrefs.get(addr, ()))
+
+        def function_at(self, addr):
+            owner = self.site_owners.get(addr)
+            return self.functions.get(owner)
+
+        def call_target(self, insn, regs=None):
+            return insn.target
+
+    @classmethod
+    def make_program(cls):
+        specs = {
+            0x1000: {"calls": {0x1000, 0x2000}, "insns": [
+                (0x1004, 0x2000, CALL), (0x1008, 0x1000, CALL), (0x100C, 0x9000, CALL)
+            ]},
+            0x2000: {"calls": set(), "insns": [(0x2004, 0x9000, CALL)]},
+            0x3000: {"calls": {0x1000}, "insns": [(0x3010, 0x1000, CALL)]},
+            0x4000: {"calls": {0x3000}, "insns": [(0x4010, 0x3000, CALL)]},
+        }
+        xrefs = {
+            0x1000: [(0x1008, "call"), (0x3010, "call")],
+            0x2000: [(0x1004, "call")],
+            0x3000: [(0x4010, "call")],
+            0x9000: [(0x100C, "call"), (0x2004, "call")],
+        }
+        return cls.FakeProgram(specs, xrefs, {})
+
+    def test_callgraph_has_addressed_callers_callees_imports_and_recursion(self):
+        prog = self.make_program()
+        result = callgraph(prog, prog.functions[0x1000], direction="both", depth=1)
+        self.assertEqual(result["addr"], "0x1000")
+        self.assertFalse(result["truncated"])
+        self.assertIn('digraph "callgraph"', result["dot"])
+        self.assertIn('"0x3000" -> "0x1000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x2000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x9000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x1000"', result["dot"], "recursive edge should be preserved")
+        self.assertIn('class="cg-import"', result["dot"])
+        self.assertEqual(result["nodes"], 4)
+
+    def test_callgraph_depth_and_direction_limit_neighborhood(self):
+        prog = self.make_program()
+        callers = callgraph(prog, prog.functions[0x1000], direction="callers", depth=1)
+        self.assertIn('"0x3000" -> "0x1000"', callers["dot"])
+        self.assertNotIn('"0x1000" -> "0x2000"', callers["dot"])
+        self.assertNotIn('"0x1000" -> "0x9000"', callers["dot"])
+        self.assertNotIn('"0x4000" -> "0x3000"', callers["dot"])
+
+        deeper = callgraph(prog, prog.functions[0x1000], direction="callers", depth=2)
+        self.assertIn('"0x4000" -> "0x3000"', deeper["dot"])
+        self.assertEqual(deeper["depth"], 2)
+
+        callees = callgraph(prog, prog.functions[0x1000], direction="callees", depth=1)
+        self.assertIn('"0x1000" -> "0x2000"', callees["dot"])
+        self.assertNotIn('"0x3000" -> "0x1000"', callees["dot"])
+
+    def test_callgraph_bounds_large_neighborhood_and_reports_truncation(self):
+        specs = {0x1000: {"calls": set(range(0x2000, 0x2082)), "insns": []}}
+        for addr in range(0x2000, 0x2082):
+            specs[addr] = {"calls": set(), "insns": []}
+        prog = self.FakeProgram(specs, {}, {})
+        result = callgraph(prog, prog.functions[0x1000], direction="callees", depth=1)
+        self.assertEqual(result["nodes"], result["node_limit"])
+        self.assertLessEqual(result["edges"], result["edge_limit"])
+        self.assertTrue(result["truncated"])
+        self.assertLessEqual(result["nodes"], 120)
+
+    def test_callgraph_dot_escapes_untrusted_names_and_rejects_bad_controls(self):
+        prog = self.make_program()
+        prog.names[0x1000] = 'evil"\\n"; injected [shape=plaintext]'
+        result = callgraph(prog, prog.functions[0x1000])
+        self.assertIn('id="cg_function_1000"', result["dot"])
+        self.assertNotIn('evil"\\n"; injected [shape=plaintext]', result["dot"])
+        self.assertIn('evil\\\\"', result["dot"])
+
+    def test_callgraph_api_validates_direction_and_depth(self):
+        from rdis.server import _api_doc
+
+        prog = self.make_program()
+        query = {"func": ["0x1000"], "direction": ["callees"], "depth": ["2"]}
+        arg = lambda key, default=None: query.get(key, [default])[0]
+        result = _api_doc("callgraph", query, arg, prog)
+        self.assertEqual(result["direction"], "callees")
+        self.assertEqual(result["depth"], 2)
+        for bad in ({"func": ["0x1000"], "direction": ["up"]},
+                    {"func": ["0x1000"], "depth": ["9"]},
+                    {"func": ["0x1000"], "depth": ["not-a-number"]}):
+            bad_arg = lambda key, default=None, q=bad: q.get(key, [default])[0]
+            with self.subTest(query=bad), self.assertRaises(ValueError):
+                _api_doc("callgraph", bad, bad_arg, prog)
 
 
 if __name__ == "__main__":
