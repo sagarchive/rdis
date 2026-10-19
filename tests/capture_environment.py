@@ -61,6 +61,17 @@ def package_versions() -> dict[str, str]:
     return dict(sorted(versions.items()))
 
 
+def node_package_version(name: str) -> dict:
+    package_json = Path("node_modules") / name / "package.json"
+    if not package_json.is_file():
+        return {"available": False}
+    try:
+        data = json.loads(package_json.read_text())
+        return {"available": True, "version": data.get("version"), "path": str(package_json)}
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def capture_browser_version(browser: str) -> dict:
     """Ask the same installed Playwright package used by the browser suite."""
     script = (
@@ -140,7 +151,7 @@ def main() -> int:
             "python_pip": probe([sys.executable, "-m", "pip", "--version"]),
             "node": maybe_version("node"),
             "npm": maybe_version("npm"),
-            "npx_playwright": maybe_version("npx", ["playwright", "--version"]),
+            "playwright_node_package": node_package_version("playwright"),
             "cc": maybe_version("cc"),
             "clang": maybe_version("clang"),
             "gcc": maybe_version("gcc"),
