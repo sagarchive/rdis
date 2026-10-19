@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "corpus_id": "rdis-baseline-corpus-v1",
-  "description": "Small, license-aware baseline inputs and deterministic command profiles. Platform-specific system binaries are fingerprinted in place and never redistributed.",
+  "corpus_id": "rdis-baseline-corpus-v2",
+  "description": "Expanded, license-aware baseline inputs and deterministic command profiles. Version 2 adds a hand-encoded AArch64 conditional/unconditional branch fixture; platform-local system binaries are fingerprinted in place and never redistributed.",
   "source_repository_license": "MIT",
   "entries": [
     {
