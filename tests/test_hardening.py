@@ -21,7 +21,7 @@ from rdis.loader import Image, Section
 from rdis.wasm import WasmModule, _name, _uleb
 from rdis.render import _dot_label, callgraph
 from rdis.arch import CALL
-from rdis import mcp_server, console, __main__ as rdis_cli
+from rdis import mcp_server, console, render, __main__ as rdis_cli
 
 
 class ExportImportIdentityTests(unittest.TestCase):
