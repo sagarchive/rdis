@@ -20,7 +20,8 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
-| Control-flow graph | Interactive browser CFG, fit/zoom/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |\n| Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
+| Control-flow graph | Interactive browser CFG, fit/zoom/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
+| Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
 | C pseudo-code | CFG structuring and symbolic lifting (x86/ARM); optional SLEIGH/P-code frontend through `pypcode` for architectures mapped by RDIS; native MIPS/RISC-V frontend; experimental typed IR contract and field-layout recovery. Execution suite: 124 optimized, vectorized and struct cases are compiled and compared against reference results; real-binary compile rate is measured separately from semantic correctness | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
