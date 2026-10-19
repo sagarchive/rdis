@@ -269,8 +269,7 @@ def callgraph(prog, func, direction="both", depth=1):
         for target in owner.calls:
             target = int(target)
             target_sites.setdefault(target, set())
-            target_kinds.setdefault(target, set()).add("tail" if target not in owner.blocks
-                                                       and target in getattr(prog.image, "imports", {}) else "call")
+            target_kinds.setdefault(target, set())
         # Include known call targets which are imports or indirect targets that are not local
         # Function.calls. Reset address-tracking state per block, matching Program._build.
         for block in owner.blocks.values():
@@ -369,7 +368,7 @@ def callgraph(prog, func, direction="both", depth=1):
         color = "gray" if nodes[target]["kind"] != "function" else "blue"
         out.append(f'  "n_{source:x}" -> "n_{target:x}" [color={color}{label}];')
 
-    dot = "\\n".join(out + ["}"])
+    dot = "\n".join(out + ["}"])
     return {
         "name": prog.display(root) or f"sub_{root:x}",
         "addr": hex(root),
