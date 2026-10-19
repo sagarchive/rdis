@@ -72,7 +72,36 @@ class BaselineCorpusTests(unittest.TestCase):
         self.assertIn('--constraints-file "$CONSTRAINTS_OVERLAY"', workflow)
         self.assertIn('-c "$CONSTRAINTS_OVERLAY"', workflow)
 
-    def test_hash_mismatch_is_reported_not_silently_accepted(self):
+    def test_promoted_baseline_record_matches_live_corpus_and_constraint_hashes(self):
+        root = SCRIPT.parents[1]
+        record_path = root / "benchmarks" / "baselines" / "rdis-baseline-corpus-v2" / "2026-10-19" / "record.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        self.assertEqual(record["baseline_id"], "rdis-baseline-corpus-v2/2026-10-19")
+        self.assertEqual(record["corpus"]["id"], "rdis-baseline-corpus-v2")
+
+        manifest_path = root / record["corpus"]["manifest_path"]
+        self.assertEqual(hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                         record["corpus"]["manifest_sha256"])
+        self.assertEqual(record["ci"]["workflow_url"],
+                         "https://github.com/sagarchive/rdis/actions/runs/39271318107")
+        self.assertEqual(record["ci"]["conclusion"], "success")
+        self.assertEqual(len(record["ci"]["profiles"]), 3)
+        for profile in record["ci"]["profiles"]:
+            with self.subTest(profile=profile["id"]):
+                self.assertEqual(profile["status"], "passed")
+                self.assertEqual(profile["counts"]["failed"], 0)
+                self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", profile["environment_manifest_sha256"]))
+                self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", profile["pip_freeze_sha256"]))
+
+        for constraint in record["constraints"]["files"]:
+            with self.subTest(constraint=constraint["path"]):
+                data = (root / constraint["path"]).read_bytes()
+                self.assertEqual(len(data), constraint["size_bytes"])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), constraint["sha256"])
+
+        self.assertFalse(record["permanence"]["redistributable_binaries_committed"])
+        self.assertTrue(record["benchmark"]["caveat"])
+\n    def test_hash_mismatch_is_reported_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             source = root / "fixture.c"
