@@ -7,6 +7,24 @@
 
 ## 0. Resume contract — read this first on every RDIS task
 
+### Product-priority override — 2026-10-19
+
+The user's current instruction is to spend the bulk of effort on **major product capability and correctness improvements**, not a long tail of trivial CI/naming edits. Keep CI/constraints work proportional to the risk it removes; do not let housekeeping become the roadmap's main output.
+
+Execution order from this checkpoint:
+
+1. **Close M00's existing evidence gaps in one bounded pass:** promote the already green v2 corpus run into a permanent, license-safe baseline record. Do not add more pipeline machinery unless evidence shows it is needed.
+2. **M10 — call graph and xref workflow:** turn the existing `Function.calls` and xref data into an address-grounded, bounded, navigable caller/callee graph. This provides a concrete analyst capability and a foundation for call-chain investigation.
+3. **M08 — synchronized analyst navigation:** shared function/address selection, cross-view history, quick-open, and listing/CFG/pseudocode navigation.
+4. **M04/M03 — truth-labelled control flow and function discovery:** expand independent per-ISA/compiler fixtures, report precision/recall and edge accuracy; no self-authored expected output alone counts as an independent oracle.
+5. **M05/M06 — semantic decompilation and type provenance:** expand runtime equivalence and surface unsupported/uncertain operations.
+6. **M16/M09 — binary diff/version tracking and durable annotation/project workflow.**
+7. **M11–M14/M17–M20 — debugger/traces, bounded emulation, MCP agent quality, plugin SDK, triage, fuzzing, performance, security and accessibility**, sequenced behind core correctness and representative tests.
+8. **M21 — measured competitor scorecard** only after comparable workflows and quality metrics exist.
+
+Each product milestone is an incremental commit with (a) a working feature, (b) regression and negative-path tests, (c) user-visible documentation, (d) independent or end-to-end evidence, and (e) an updated resume cursor. Prioritize coherent vertical slices over disconnected micro-fixes. Do not mark the full long-term goal complete just because these milestones are listed.
+
+
 This document is the durable source of truth for ongoing RDIS work. The repository agent instructions in AGENTS.md require every RDIS-related session to read this document before acting.
 
 **Current program state**
@@ -405,10 +423,10 @@ This section is mutable; update it after every meaningful commit and before ever
 - **Last verified base:** main at 96b931d32c807c5430518be6c280c98fb995ebb2.
 - **Current branch:** docs/competitive-parity-and-resume-roadmap.
 - **Current active PR:** [#4 — docs: add resumable roadmap toward competitive parity](https://github.com/sagarchive/rdis/pull/4), open and draft; base is main; do not merge.
-- **Milestone focus:** M00 — baseline and evidence ledger. The corpus manifest, no-shell runner and initial support matrix exist; M00 remains PARTIAL for a versioned promoted baseline bundle, actual constraints files and expanded architecture/format coverage.
+- **Milestone focus:** M00 evidence promotion (bounded close-out), then M10 caller/callee graph as the next major product feature. Versioned corpus v2 now includes independent hand-encoded AArch64 conditional/unconditional branch facts, and CI profile overlays are present. M00 remains PARTIAL until the current successful result is promoted as durable repository evidence.
 - **Recent implementation commits:** 2089ecce947dfc29ece02ce9c29f9000e4c9f17e added environment capture; 14f258249a049032c8d4c33d15286e93e9900f1d added CI artifacts; a3efeadf395041f0a6779fa05523073e167a048f / 8ca556377969294f4497524dbe575daad826d34d added/corrected redaction; 99078dfa4a2eff58a387f068b2d18157c9a2f437 added capture tests; 8d2916d0d09b272f45f73aa326458cc3073dca07 wired them into CI; d56eb3ff0ccb860e0abfaa289e3c5f085bd31d73 and 25a6aeb885fe1c7765c5abe16722a85e822aedf4 corrected/tested PR head/base provenance; 039ea242e418d346702e96959479b81bcdd4fa2d recorded artifact review. Fetch live branch tip on resume; cursor updates are further commits.
 - **Last completed action:** PR #3 is merged; PR #4 remains the only open draft PR. Implemented tests/run_baseline.py, six runner regressions and CI profile integration. On [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036), Python 3.10 and 3.12 each reported 9 passed / 1 platform skip / 0 failed; macOS reported 12 passed / 1 platform skip / 0 failed; source and pinned /bin/ls fingerprints matched and raw logs/results were retained. FEATURE_SUPPORT_MATRIX.md was added at 4faac5aaf2648e11de79871ef29b7b2096107132; [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715) passed all five jobs on that matrix revision. Current roadmap/report follow-up commits are being revalidated.
-- **Next atomic action:** confirm CI on the current roadmap/report checkpoint head cc44fdee17eaafb166dde7a3ca0b5d872c10ab07; update PR #4 summary; add a second independently truth-checked architecture/format fixture and implement the recorded platform/Python-specific constraints strategy. Keep M00 PARTIAL until promotion bundle, constraints and expanded corpus gates are complete.
+- **Next atomic action:** promote the successful v2 corpus evidence from [CI run 39271318107](https://github.com/sagarchive/rdis/actions/runs/39271318107) into a durable, license-safe baseline record; then implement the first substantial analyst feature in M10: a bounded, interactive caller/callee graph backed by the existing call graph facts. The ARM64 branch fixture and profile-specific constraints overlays are now included in the corpus workflow. Keep M00 PARTIAL until the permanent promotion record is committed and verified.
 - **Current-main baseline evidence:** [hardening CI](https://github.com/sagarchive/rdis/actions/runs/39228787777) and [Pages deployment](https://github.com/sagarchive/rdis/actions/runs/39228786794) passed; [merged PR #3 full validation](https://github.com/sagarchive/rdis/actions/runs/39228116226) passed five jobs. BASELINE_REPORT.md records 42 hardening tests, 25 IR tests on Python 3.10/3.12, Chromium/Firefox, 124/124 maturity, 20-visitor determinism and the first /bin/ls benchmark.
 - **Latest verified baseline/matrix CI:** [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715) passed all five jobs on support-matrix head 4faac5aaf2648e11de79871ef29b7b2096107132. Baseline runner/profile evidence and artifacts were inspected in [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036). Subsequent roadmap/report commits are under CI at cc44fdee17eaafb166dde7a3ca0b5d872c10ab07.
 - **Known limits:** competitor benchmarks and per-ISA function-discovery/CFG accuracy are not yet measured; pip versions are recorded rather than locked; fuzzing campaigns, manual accessibility review and multi-corpus performance baselines remain open.
@@ -435,7 +453,7 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 
 **Status:** IN PROGRESS — PR #3 is merged and PR #4 is the only open draft PR. The corpus manifest, runner, six regression tests and CI integration are verified by [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036); FEATURE_SUPPORT_MATRIX.md passed all five jobs on [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715). Baseline promotion/pinning policy is now documented in BASELINE_REPORT.md; implementation gates remain open.
 
-**Next action:** verify current checkpoint CI, update PR #4 description, add a second independent architecture/format fixture, and implement the first versioned promoted baseline/constraints bundle. Keep M00 PARTIAL until those evidence gates are met.
+**Next action:** promote the current green corpus-v2 run into the durable baseline record, then build an interactive bounded caller/callee graph from the existing Function.calls and xref data in M10.
 
 
 
@@ -450,3 +468,16 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 **Status:** IN PROGRESS — current PR #4 has the no-shell runner, support matrix, platform constraints file and successful CI evidence, but the committed corpus still has only the x86-64 C source fixture plus a runner-local macOS /bin/ls fingerprint. The first persistent promotion bundle and second independently truth-checked architecture input are still required.
 
 **Next atomic action:** add a hashed ARM64 byte fixture with expected decode/branch-target facts and a regression that uses an independent encoding reference; include it in the portable baseline corpus. Then rerun focused tests and the complete PR workflow before promoting the resulting artifacts.
+
+
+### RQ-004 — 2026-10-19 — Prioritize major product improvements over minor housekeeping
+
+**Request:** Stop spending disproportionate effort on minor CI and naming issues. First reprioritize milestones for the real objective: a reverse-engineering product with credible correctness and workflow depth against IDA Pro/Hex-Rays, Ghidra, Binary Ninja, Hopper, radare2/Cutter, angr and RetDec. Then implement coherent major features milestone by milestone, with small reversible commits, regression tests, independent evidence, current PR updates, and honest limitations. Keep one open PR and do not merge.
+
+**Milestones:** M00 bounded evidence promotion; M10 call graph/xref navigation; M08 synchronized analyst workflow; M03/M04 architecture/function/CFG truth; M05/M06 decompiler semantics and type provenance; M09/M16 durable projects and binary version tracking; M11–M14/M17–M20 advanced workflow, automation, security, performance and quality; M21 comparative scorecard.
+
+**Acceptance criteria:** roadmap reprioritized before product implementation; all work stays in the single open PR; promoted baseline evidence references exact commit/corpus/constraints and carries no unlicensed binary; caller/callee graph is built from existing analysis facts, bounded against huge binaries, displays edge direction and address/name provenance, supports navigation into functions and provides tests for callers, callees, recursion, unresolved/external calls, empty graphs, depth/node caps and rendering; PR description and roadmap cursor match live CI and actual completion.
+
+**Status:** IN PROGRESS — roadmap execution order updated; baseline v2 was run successfully on the current PR head before any caller/callee graph work. The existing analysis model already records per-function call targets and reverse xrefs, while the GUI has a reusable Graphviz/SVG pan/zoom/minimap path. The substantial next slice is interprocedural call-graph navigation, not another round of small pipeline changes.
+
+**Next atomic action:** promote the verified v2 summary/environment/constraints/benchmark facts into a durable repository artifact, then implement M10 caller/callee graph API and graph UI with explicit resource bounds and browser/API regression tests.
