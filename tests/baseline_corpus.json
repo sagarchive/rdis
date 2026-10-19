@@ -37,19 +37,27 @@
       "commands": [
         {
           "id": "rdis-cli-help",
-          "argv": ["rdis", "--help"],
+          "argv": [
+            "rdis",
+            "--help"
+          ],
           "timeout_seconds": 30,
           "required": true
         },
         {
           "id": "rdis-gui-help",
-          "argv": ["rdis-gui", "--help"],
+          "argv": [
+            "rdis-gui",
+            "--help"
+          ],
           "timeout_seconds": 30,
           "required": true
         },
         {
           "id": "mcp-initialize",
-          "argv": ["rdis-mcp"],
+          "argv": [
+            "rdis-mcp"
+          ],
           "stdin": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
           "stdout_contains": "protocolVersion",
           "timeout_seconds": 30,
@@ -57,19 +65,65 @@
         },
         {
           "id": "hardening-regressions",
-          "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_hardening.py", "-v"],
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_hardening.py",
+            "-v"
+          ],
           "timeout_seconds": 180,
           "required": true
         },
         {
           "id": "baseline-capture-regressions",
-          "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_baseline_capture.py", "-v"],
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_capture.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "baseline-runner-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_runner.py",
+            "-v"
+          ],
           "timeout_seconds": 180,
           "required": true
         },
         {
           "id": "typed-ir-regressions",
-          "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_ir_*.py", "-v"],
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_ir_*.py",
+            "-v"
+          ],
           "timeout_seconds": 180,
           "required": true
         },
@@ -79,9 +133,23 @@
             "system": "Linux",
             "machine": "x86_64"
           },
-          "requires_entries": ["cfg-fixture-source"],
-          "argv": ["cc", "-O0", "-g", "-fno-inline", "-fno-pie", "-no-pie", "tests/fixtures/cfg_fixture.c", "-o", "{output_dir}/generated/cfg-fixture"],
-          "record_outputs": ["{output_dir}/generated/cfg-fixture"],
+          "requires_entries": [
+            "cfg-fixture-source"
+          ],
+          "argv": [
+            "cc",
+            "-O0",
+            "-g",
+            "-fno-inline",
+            "-fno-pie",
+            "-no-pie",
+            "tests/fixtures/cfg_fixture.c",
+            "-o",
+            "{output_dir}/generated/cfg-fixture"
+          ],
+          "record_outputs": [
+            "{output_dir}/generated/cfg-fixture"
+          ],
           "timeout_seconds": 60,
           "required": true
         }
@@ -89,7 +157,9 @@
     },
     {
       "id": "macos-arm64",
-      "extends": ["portable"],
+      "extends": [
+        "portable"
+      ],
       "when": {
         "system": "Darwin",
         "machine": "arm64"
@@ -97,13 +167,19 @@
       "commands": [
         {
           "id": "product-self-check",
-          "argv": ["{python}", "tests/test_rdis.py"],
+          "argv": [
+            "{python}",
+            "tests/test_rdis.py"
+          ],
           "timeout_seconds": 600,
           "required": true
         },
         {
           "id": "execution-checked-maturity",
-          "argv": ["{python}", "tests/maturity.py"],
+          "argv": [
+            "{python}",
+            "tests/maturity.py"
+          ],
           "timeout_seconds": 900,
           "required": true
         },
@@ -113,9 +189,23 @@
             "system": "Darwin",
             "machine": "arm64"
           },
-          "requires_entries": ["macos-arm64-system-ls"],
-          "argv": ["{python}", "tests/benchmark_analysis.py", "/bin/ls", "--arch", "arm64", "--repeat", "3", "--output", "{output_dir}/benchmark-arm64-ls.json"],
-          "record_outputs": ["{output_dir}/benchmark-arm64-ls.json"],
+          "requires_entries": [
+            "macos-arm64-system-ls"
+          ],
+          "argv": [
+            "{python}",
+            "tests/benchmark_analysis.py",
+            "/bin/ls",
+            "--arch",
+            "arm64",
+            "--repeat",
+            "3",
+            "--output",
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
+          "record_outputs": [
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
           "timeout_seconds": 300,
           "required": true
         }
