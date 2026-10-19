@@ -37,9 +37,18 @@ class EnvironmentCaptureTests(unittest.TestCase):
 
     def test_manifest_and_freeze_are_written_with_exact_digest_without_environment_dump(self):
         with tempfile.TemporaryDirectory() as td:
+            event_path = Path(td) / "event.json"
+            event_path.write_text(json.dumps({
+                "pull_request": {
+                    "number": 4,
+                    "head": {"sha": "test-branch-head"},
+                    "base": {"sha": "test-base-head"},
+                }
+            }))
             env = os.environ.copy()
             env.update({
-                "GITHUB_SHA": "test-commit-sha",
+                "GITHUB_SHA": "synthetic-merge-checkout-sha",
+                "GITHUB_EVENT_PATH": str(event_path),
                 "GITHUB_JOB": "capture-test",
                 "RDIS_PRIVATE_SENTINEL": "must-not-be-recorded",
             })
@@ -65,7 +74,11 @@ class EnvironmentCaptureTests(unittest.TestCase):
             freeze = freeze_path.read_bytes()
             self.assertEqual(manifest["schema_version"], 1)
             self.assertEqual(manifest["job"], "capture-test")
-            self.assertEqual(manifest["git"]["sha"], "test-commit-sha")
+            self.assertEqual(manifest["git"]["sha"], "synthetic-merge-checkout-sha")
+            self.assertEqual(manifest["git"]["tested_checkout_sha"], "synthetic-merge-checkout-sha")
+            self.assertEqual(manifest["git"]["pull_request_head_sha"], "test-branch-head")
+            self.assertEqual(manifest["git"]["pull_request_base_sha"], "test-base-head")
+            self.assertEqual(manifest["git"]["pull_request_number"], 4)
             self.assertEqual(manifest["commands"], ["python -m unittest example"])
             self.assertEqual(
                 manifest["dependencies"]["pip_freeze_sha256"],
