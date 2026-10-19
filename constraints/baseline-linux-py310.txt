@@ -1,0 +1,6 @@
+# Linux x86_64 / CPython 3.10 baseline overlay.
+# Install with -c constraints/baseline-ci.txt AND this file.
+# Versions below were present in the verified 2026-10-19 CPython 3.10 pip-freeze artifact.
+# The shared file owns runtime/build tool pins; these pins capture profile-specific packages.
+setuptools==79.0.1
+tomli==2.5.0
