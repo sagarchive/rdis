@@ -873,7 +873,7 @@ class CallGraphTests(unittest.TestCase):
         result = callgraph(prog, prog.functions[0x1000])
         self.assertIn('id="cg_function_1000"', result["dot"])
         self.assertNotIn('evil"\\n"; injected [shape=plaintext]', result["dot"])
-        self.assertIn('evil\\\\"', result["dot"])
+        self.assertIn(chr(92) + '"', result["dot"])
 
     def test_callgraph_api_validates_direction_and_depth(self):
         from rdis.server import _api_doc
@@ -881,16 +881,23 @@ class CallGraphTests(unittest.TestCase):
         prog = self.make_program()
         query = {"func": ["0x1000"], "direction": ["callees"], "depth": ["2"]}
         arg = lambda key, default=None: query.get(key, [default])[0]
-        result = _api_doc("callgraph", query, arg, prog)
-        self.assertEqual(result["direction"], "callees")
-        self.assertEqual(result["depth"], 2)
+        with mock.patch("rdis.server._func", return_value=prog.functions[0x1000]) as lookup:
+            result = _api_doc("callgraph", query, arg, prog)
+            self.assertEqual(result["direction"], "callees")
+            self.assertEqual(result["depth"], 2)
+            lookup.assert_called_once()
+
+        # Bad arguments must be rejected before function resolution. This prevents an invalid
+        # function id or other lookup error from masking the request-validation response.
         for bad in ({"func": ["0x1000"], "direction": ["up"]},
                     {"func": ["0x1000"], "depth": ["9"]},
-                    {"func": ["0x1000"], "depth": ["not-a-number"]}):
+                    {"func": ["0x1000"], "depth": ["not-a-number"]},
+                    {"direction": ["up"]}):
             bad_arg = lambda key, default=None, q=bad: q.get(key, [default])[0]
-            with self.subTest(query=bad), self.assertRaises(ValueError):
+            with self.subTest(query=bad), mock.patch(
+                "rdis.server._func", side_effect=AssertionError("lookup should not happen before validation")
+            ), self.assertRaises(ValueError):
                 _api_doc("callgraph", bad, bad_arg, prog)
-
 
 if __name__ == "__main__":
     unittest.main()
