@@ -143,7 +143,7 @@ A P2/P3 feature must not be used to mask an unresolved P0 defect. The ordering b
 Statuses in this first tracker are deliberately conservative: **PARTIAL** means there is a component or existing test, not that the full exit gate is satisfied. The baseline commit is the beginning of this roadmap.
 
 ### M00 — Baseline, ownership and resumability
-**Status: PARTIAL — CI-backed baseline recorded; strict reproducibility gaps remain**
+**Status: PARTIAL — CI baseline recorded; machine-readable manifest implementation awaits current-head verification and artifact review**
 
 **Why:** Work cannot reliably continue across retries if there is no exact cursor, source commit or proof state.
 
@@ -405,13 +405,13 @@ This section is mutable; update it after every meaningful commit and before ever
 - **Last verified base:** main at 96b931d32c807c5430518be6c280c98fb995ebb2.
 - **Current branch:** docs/competitive-parity-and-resume-roadmap.
 - **Current active PR:** [#4 — docs: add resumable roadmap toward competitive parity](https://github.com/sagarchive/rdis/pull/4), open and draft; base is main; do not merge.
-- **Milestone focus:** M00 — baseline and evidence ledger. M00 is partial; no product-code changes have started.
-- **Commits:** c0a3fbf456b4fd577aac098690eb38e86dfee175 added DEVELOPMENT_ROADMAP.md; ea37743af1e3f0d7ac2c590df57e1de43cee55b3 added AGENTS.md; d7a0613e39e4458912f47f07881773c5a9bbe7de added BASELINE_REPORT.md. This cursor change is another docs-only commit; always fetch the live branch tip on resume.
-- **Last completed action:** confirmed PR #3 merge and current-main CI/Pages deployment; inspected source/test/workflow surfaces; researched official competitor sources; added the M00–M21 roadmap and resume instructions; captured the current-main CI-backed test and /bin/ls benchmark baseline.
-- **Next atomic action:** inspect current-head CI after this cursor update; fix any failures. Then complete M00's strict environment/dependency manifest and stable evidence-artifact index. After M00 closes, begin M01's feature-claim/support matrix.
-- **Current-main baseline evidence:** [hardening CI](https://github.com/sagarchive/rdis/actions/runs/39228787777) and [Pages deployment](https://github.com/sagarchive/rdis/actions/runs/39228786794) passed; [merged PR #3 full validation](https://github.com/sagarchive/rdis/actions/runs/39228116226) passed five jobs. See BASELINE_REPORT.md for 42 hardening tests, 25 IR tests on each Python 3.10/3.12 job, Chromium/Firefox runs, 124/124 maturity score, 20-visitor determinism and the first analysis benchmark.
-- **Branch CI:** [run 39260523696](https://github.com/sagarchive/rdis/actions/runs/39260523696) passed all five jobs at the AGENTS.md commit; [run 39260730114](https://github.com/sagarchive/rdis/actions/runs/39260730114) passed all five jobs at the previous cursor commit. This cursor commit triggers a new run; check it live rather than inferring a result.
-- **Known limits:** no independent competitor corpus comparison yet; per-architecture function-discovery/CFG accuracy is not quantified; dependency versions are not fully frozen in CI; sustained fuzzing, manual screen-reader review and multi-corpus performance baselines remain open.
+- **Milestone focus:** M00 — baseline and evidence ledger. M00 is partial; no product implementation changes have started.
+- **Commits:** c0a3fbf456b4fd577aac098690eb38e86dfee175 added DEVELOPMENT_ROADMAP.md; ea37743af1e3f0d7ac2c590df57e1de43cee55b3 added AGENTS.md; d7a0613e39e4458912f47f07881773c5a9bbe7de added BASELINE_REPORT.md; 2089ecce947dfc29ece02ce9c29f9000e4c9f17e and 8ca556377969294f4497524dbe575daad826d34d added/corrected tests/capture_environment.py; 99078dfa4a2eff58a387f068b2d18157c9a2f437 added tests/test_baseline_capture.py; 8d2916d0d09b272f45f73aa326458cc3073dca07 wired the test into CI; a8d2ba26eb61c27a8dc62733321f3056893dd710 updated the baseline report. Always fetch live branch tip; more commits may follow.
+- **Last completed action:** began fixing M00's reproducibility gap by adding machine-readable environment capture, secret-redaction regression coverage, and artifact uploads for Python, Chromium/Firefox, and macOS test/benchmark jobs.
+- **Next atomic action:** inspect the newest CI run for the live branch head; fix any failure and rerun the exact failed suite. After passing, inspect each uploaded baseline artifact and validate its manifest SHA against the run SHA. Only then close M00 or write down remaining gaps and start M01.
+- **Current-main baseline evidence:** [hardening CI](https://github.com/sagarchive/rdis/actions/runs/39228787777) and [Pages deployment](https://github.com/sagarchive/rdis/actions/runs/39228786794) passed; [merged PR #3 full validation](https://github.com/sagarchive/rdis/actions/runs/39228116226) passed five jobs. See BASELINE_REPORT.md for 42 hardening tests, 25 IR tests on Python 3.10/3.12, Chromium/Firefox browser tests, 124/124 maturity, 20-visitor determinism and the first benchmark.
+- **Previous branch CI:** [run 39260523696](https://github.com/sagarchive/rdis/actions/runs/39260523696), [run 39260730114](https://github.com/sagarchive/rdis/actions/runs/39260730114), and [run 39261339179](https://github.com/sagarchive/rdis/actions/runs/39261339179) passed all five jobs on their recorded commits. The new baseline-manifest changes triggered fresh CI; verify the latest run before calling this increment green.
+- **Known limits:** no independent competitor corpus comparison yet; per-architecture function-discovery/CFG accuracy is not quantified; dependency versions are not pinned but will now be archived as exact `pip freeze` artifacts; sustained fuzzing, manual screen-reader review and multi-corpus performance baselines remain open.
 
 ## 11. Append-only request ledger — newest request at the end
 
