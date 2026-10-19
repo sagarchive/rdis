@@ -6,9 +6,6 @@
 
 - [Project overview and installation](https://sagarchive.github.io/rdis/)
 - [Repository and source code](https://github.com/sagarchive/rdis)
-- [Engineering milestones and current evidence](https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md)
-- [Competitor gaps and benchmark protocol](https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md)
-- [Feature-roadmap page](https://sagarchive.github.io/rdis/audit/COMPETITIVE_ROADMAP.html)
 
 ## Supported inputs
 

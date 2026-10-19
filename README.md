@@ -8,11 +8,6 @@ Hopper. Pure Python over [Capstone](https://www.capstone-engine.org/) (decoding)
 Hopper-style web workspace, a CLI, an importable library, or a zero-dependency MCP server an AI
 agent (e.g. [REA](https://github.com/morluto/rea)) can drive.
 
-## Engineering roadmap
-
-- [Milestones and current evidence](docs/audit/MILESTONES.md) is the single source of truth for what is done, open or blocked.
-- [Competitor gaps and feature roadmap](docs/audit/COMPETITIVE_ROADMAP.md) records official references, product gaps and the real benchmark protocol.
-
 RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend for supported architecture mappings. That reuses Ghidra's instruction-semantics descriptions; it is not evidence that RDIS has surpassed Ghidra's decompiler. RDIS's downstream IR, data-flow, struct recovery and output are still being validated against executable ground truth.
 
 ## Features

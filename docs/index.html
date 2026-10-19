@@ -814,7 +814,7 @@ rdis-gui ./MyApp</pre>
         </ul>
       </div>
     </div>
-    <p class="honest">Both tools offer decompilation and graph navigation. rdis differentiates itself with a browser-first, cross-platform Python workflow, package-aware native-library loading and a built-in standard-library MCP endpoint; Hopper offers a mature native desktop workflow, graph minimap/custom node controls and in-app Python scripting. MCP integration is now documented by Hopper and Binary Ninja, and community adapters exist for IDA and Ghidra, so it is not a unique differentiator. RDIS needs to win on low setup, package-aware analysis and evidence-backed results, not the mere presence of an MCP endpoint. This feature-scope comparison makes no universal accuracy claim. Graph rendering, navigation and export are regression-tested in Chromium and Firefox; see the <a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">current browser and regression evidence</a>, the <a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md">engineering milestone tracker</a>, and the <a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md">Hopper, IDA, Ghidra and Binary Ninja feature-gap roadmap</a>.</p>
+    <p class="honest">Both offer decompilation and graph navigation. rdis graph rendering, navigation and export are regression-tested in Chromium and Firefox on every change (<a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">CI</a>).</p>
     <p class="honest">Decompiled output types its API calls from a library of 206 system prototypes (libc, POSIX, CoreFoundation and the Objective-C runtime), and Objective-C methods come out as valid Objective-C.</p>
   </section>
 
@@ -888,7 +888,7 @@ rdis-gui ./MyApp</pre>
 <footer>
   <div class="mark" aria-hidden="true">rdis</div>
   <div class="in">
-    <div class="links"><a href="#lift">Decompiler</a><a href="#proof">Proof</a><a href="#formats">Formats</a><a href="#agents">Agents</a><a href="#install">Install</a><a href="#start">Usage</a><a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/COMPETITIVE_ROADMAP.md">Competitor gaps and benchmarks</a><a href="https://github.com/sagarchive/rdis/blob/main/docs/audit/MILESTONES.md">Engineering milestones</a><a href="https://github.com/sagarchive/rdis">GitHub</a><a href="brand/">Brand</a></div>
+    <div class="links"><a href="#lift">Decompiler</a><a href="#proof">Proof</a><a href="#formats">Formats</a><a href="#agents">Agents</a><a href="#install">Install</a><a href="#start">Usage</a><a href="https://github.com/sagarchive/rdis">GitHub</a><a href="brand/">Brand</a></div>
     <span>Built on Capstone and LIEF. MIT License, © 2026 the rdis authors.</span>
   </div>
 </footer>
