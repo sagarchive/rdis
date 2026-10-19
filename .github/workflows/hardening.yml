@@ -102,22 +102,20 @@ jobs:
           print("SEO/discovery files structurally validated")
           PY
 
-      - name: Run hardening regressions
-        run: python -m unittest discover -s tests -p 'test_hardening.py' -v
-      - name: Test environment manifest capture and redaction
-        run: python -m unittest discover -s tests -p 'test_baseline_capture.py' -v
-      - name: Run typed IR contract tests
-        run: python -m unittest discover -s tests -p 'test_ir_*.py' -v
-
       - name: Capture reproducible Python environment
         if: always()
         run: |
           python tests/capture_environment.py \
             --output-dir artifacts/baseline \
             --job "hardening-python-${{ matrix.python-version }}" \
-            --command "python -m pip install -e ." \
-            --command "python -m unittest discover -s tests -p test_hardening.py -v" \
-            --command "python -m unittest discover -s tests -p test_ir_*.py -v"
+            --command "python tests/run_baseline.py --profile portable --output-dir artifacts/baseline/run --environment-manifest artifacts/baseline/manifest.json"
+      - name: Run portable baseline corpus
+        run: |
+          python tests/run_baseline.py \
+            --manifest tests/baseline_corpus.json \
+            --profile portable \
+            --output-dir artifacts/baseline/run \
+            --environment-manifest artifacts/baseline/manifest.json
       - name: Upload Python baseline manifest
         if: always()
         uses: actions/upload-artifact@v4
@@ -196,14 +194,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-      - name: Run full product self-check
-        run: python tests/test_rdis.py
-      - name: Record reproducible analysis benchmark
-        run: python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3 --output /tmp/rdis-benchmark.json
-      - name: Show benchmark artifact in CI log
-        run: cat /tmp/rdis-benchmark.json
-      - name: Run execution-checked decompiler maturity suite
-        run: python tests/maturity.py
+      - name: Capture macOS baseline environment
+        if: always()
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --job macos-regression \
+            --command "python tests/run_baseline.py --profile macos-arm64 --output-dir artifacts/baseline/run --environment-manifest artifacts/baseline/manifest.json" \
+            --command "python tests/concurrency_test.py http://127.0.0.1:8781"
+      - name: Run reproducible macOS baseline corpus
+        run: |
+          python tests/run_baseline.py \
+            --manifest tests/baseline_corpus.json \
+            --profile macos-arm64 \
+            --output-dir artifacts/baseline/run \
+            --environment-manifest artifacts/baseline/manifest.json
       - name: Stress multi-visitor isolation and deterministic analysis
         run: |
           rdis-gui --multi-user --host 127.0.0.1 --port 8781 --no-open >/tmp/rdis-server.log 2>&1 &
@@ -228,20 +233,13 @@ jobs:
             exit 1
           fi
 
-      - name: Capture macOS test and benchmark environment
+      - name: Collect macOS baseline and concurrency artifacts
         if: always()
         run: |
           mkdir -p artifacts/baseline
-          cp /tmp/rdis-benchmark.json artifacts/baseline/benchmark.json 2>/dev/null || true
+          cp artifacts/baseline/run/benchmark-arm64-ls.json artifacts/baseline/benchmark.json 2>/dev/null || true
           cp /tmp/rdis-server-rss.log artifacts/baseline/server-rss-kib.log 2>/dev/null || true
           cp /tmp/rdis-server.log artifacts/baseline/server.log 2>/dev/null || true
-          python tests/capture_environment.py \
-            --output-dir artifacts/baseline \
-            --job macos-regression \
-            --command "python tests/test_rdis.py" \
-            --command "python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3" \
-            --command "python tests/maturity.py" \
-            --command "python tests/concurrency_test.py http://127.0.0.1:8781"
       - name: Upload macOS baseline and raw benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
