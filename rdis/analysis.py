@@ -544,7 +544,10 @@ class Program:
         earlier. State is reset at a join (a block with >1 predecessor) and after calls."""
         preds = Counter(s for b in func.blocks.values() for s in b.succs)
         starts = sorted(self.functions)
-        func_end = next((a for a in starts if a > func.addr), None)
+        # the next function start *outside* this function's own blocks: optimized code shares and
+        # overlaps tails, so a start nested inside our body is not where our cases end
+        inside = lambda a: any(b.addr <= a < b.end for b in func.blocks.values())
+        func_end = next((a for a in starts if a > func.addr and not inside(a)), None)
         bound, base, jt_targets = None, {}, []
         for addr in sorted(func.blocks):
             b = func.blocks[addr]

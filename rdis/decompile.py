@@ -582,7 +582,9 @@ class Decompiler:
         block = self.func.blocks[addr]
         self.lifter.block(block)                        # lift so the index register resolves
         jt = getattr(self.prog, "jump_tables", {}).get(block.insns[-1].address)
-        if not jt:
+        if not jt or any(t not in self.func.blocks for t in jt["cases"].values()):
+            # tables are keyed by branch address program-wide; a case this function never
+            # absorbed as a block would be a goto to a missing label, so keep the indirect jump
             return [pad + self.lifter.indirect(block)]
         idx = self.lifter._last_regs.get(jt["index"], jt["index"] or "?")
         out = [f"{pad}switch ({idx}) {{"]

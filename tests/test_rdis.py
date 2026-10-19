@@ -577,6 +577,23 @@ def test_typelib():
     print("ok  typelib: API prototypes type parameters, results and varargs")
 
 
+def test_goto_labels():
+    """Every `goto loc_X` in decompiled output has its label. Jump tables are keyed by branch address
+    program-wide, so a function that shares a switch with an overlapping function must not print
+    cases it never absorbed as blocks (that was a goto to a label that does not exist)."""
+    import re
+    for b, arch in (("/usr/bin/unzip", "x86_64"), ("/bin/ls", "arm64"), ("/bin/ls", "x86_64")):
+        try:
+            p = Program(open_image(b, arch=arch)).analyze()
+        except Exception:
+            continue
+        for a in sorted(p.functions)[:400]:
+            c = Decompiler(p, p.functions[a]).c()
+            missing = set(re.findall(r"goto (loc_[0-9a-f]+);", c)) - set(re.findall(r"^\s*(loc_[0-9a-f]+):", c, re.M))
+            assert not missing, (b, arch, hex(a), sorted(missing))
+    print("ok  goto labels: every goto target is a label of its own function")
+
+
 def test_resolve_and_xrefs():
     p = Program(open_image("/bin/ls", arch="arm64")).analyze()
     entry = p.resolve("0x%x" % p.image.entry)
@@ -748,6 +765,7 @@ if __name__ == "__main__":
     test_ir()
     test_overlay_isolation()
     test_typelib()
+    test_goto_labels()
     test_resolve_and_xrefs()
     test_hostile_inputs()
     test_server_guards()
