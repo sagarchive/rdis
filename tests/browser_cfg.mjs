@@ -79,7 +79,7 @@ function dotCallGraph(direction = "both", depth = 1) {
     lines.push('"0x' + source.toString(16) + '" -> "0x' + target.toString(16) + '" [color="' + (kind === "unresolved" ? "gray" : "blue") + '", label="' + kind + '"];');
   }
   lines.push("}");
-  return lines.join("\\n");
+  return lines.join("\n");
 }
 
 function dotWideGraph() {
@@ -179,7 +179,7 @@ try {
       callgraphQueries.push({addr, direction, depth});
       const dot = dotCallGraph(direction, depth);
       body = {name: "branch_loop_fixture", addr, dot, direction, depth,
-        nodes: (dot.match(/\\[label=/g) || []).length,
+        nodes: dot.split("\n").filter(line => line.includes("[label=")).length,
         edges: (dot.match(/ -> /g) || []).length,
         truncated: false, node_limit: 64, edge_limit: 128};
     }
