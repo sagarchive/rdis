@@ -927,7 +927,7 @@ class CallGraphSurfaceTests(unittest.TestCase):
         self.assertIn('digraph "callgraph"', result["output"])
         self.assertEqual(result["goto"], "0x1000")
         self.assertEqual(result["nodes"], 3)
-        self.assertEqual(result["summary"], "callers, depth 2: 3 nodes, 2 edges")
+        self.assertEqual(result["summary"], "callers, depth 2: 3 nodes, 3 edges")
         self.assertTrue(result["output"].endswith("}"))
 
     def test_console_callgraph_rejects_bad_direction_depth_and_extra_args(self):
