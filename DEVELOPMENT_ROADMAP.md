@@ -143,16 +143,16 @@ A P2/P3 feature must not be used to mask an unresolved P0 defect. The ordering b
 Statuses in this first tracker are deliberately conservative: **PARTIAL** means there is a component or existing test, not that the full exit gate is satisfied. The baseline commit is the beginning of this roadmap.
 
 ### M00 — Baseline, ownership and resumability
-**Status: PARTIAL — baseline manifests, redaction tests and artifact inspection verified; clean corpus/runner gates remain**
+**Status: PARTIAL — the corpus manifest, no-shell baseline runner, raw logs and environment-linked pass/skip/fail summaries now pass CI; retention/promotion, dependency reproducibility and broader corpus coverage remain open**
 
 **Why:** Work cannot reliably continue across retries if there is no exact cursor, source commit or proof state.
 
-**Implement:** freeze current main SHA and environment details; record exact test commands, outputs and skips; inventory public feature claims versus implementations and tests; keep this register append-only; make all further work branch/PR based.
+**Implement:** freeze current main SHA and environment details; record exact test commands, outputs and skips; maintain FEATURE_SUPPORT_MATRIX.md linking public claims to source/test evidence; keep this register append-only; make all further work branch/PR based.
 
 **Exit gate:** the baseline log includes main SHA, Python/dependency/tool versions, OS/CPU, reproducible commands and CI run URLs; the initial feature/claim matrix marks VERIFIED, PARTIAL, UNVERIFIED or UNSUPPORTED; a resumed session can identify the next atomic task without asking the user to repeat instructions.
 
 ### M01 — Architecture/feature truth matrix and analysis identity
-**Status: PARTIAL**
+**Status: PARTIAL — an initial source-linked feature matrix exists; measured per-ISA coverage and cache-identity gaps remain**
 
 **Why:** The README combines format loading, decoder availability, analysis and decompilation support. Those must not be confused.
 
@@ -405,12 +405,12 @@ This section is mutable; update it after every meaningful commit and before ever
 - **Last verified base:** main at 96b931d32c807c5430518be6c280c98fb995ebb2.
 - **Current branch:** docs/competitive-parity-and-resume-roadmap.
 - **Current active PR:** [#4 — docs: add resumable roadmap toward competitive parity](https://github.com/sagarchive/rdis/pull/4), open and draft; base is main; do not merge.
-- **Milestone focus:** M00 — baseline and evidence ledger. M00 is PARTIAL; the environment-manifest pipeline is tested, but the immutable corpus and one-command baseline runner remain open.
+- **Milestone focus:** M00 — baseline and evidence ledger. The corpus manifest and one-command runner now exist; M00 remains PARTIAL for durable artifact promotion/retention, dependency reproducibility and expanded coverage.
 - **Recent implementation commits:** 2089ecce947dfc29ece02ce9c29f9000e4c9f17e added environment capture; 14f258249a049032c8d4c33d15286e93e9900f1d added CI artifacts; a3efeadf395041f0a6779fa05523073e167a048f / 8ca556377969294f4497524dbe575daad826d34d added/corrected redaction; 99078dfa4a2eff58a387f068b2d18157c9a2f437 added capture tests; 8d2916d0d09b272f45f73aa326458cc3073dca07 wired them into CI; d56eb3ff0ccb860e0abfaa289e3c5f085bd31d73 and 25a6aeb885fe1c7765c5abe16722a85e822aedf4 corrected/tested PR head/base provenance; 039ea242e418d346702e96959479b81bcdd4fa2d recorded artifact review. Fetch live branch tip on resume; cursor updates are further commits.
-- **Last completed action:** checked open/closed PRs and live CI; confirmed PR #3 was merged on 2026-10-19 and PR #4 is the only open PR. Inspected `tests/baseline_corpus.json`: it defines the MIT-licensed checked-in C fixture, the pinned in-place macOS `/bin/ls` sample, portable commands, and the macOS-arm64 profile. The branch cursor was stale because it still said the corpus manifest did not exist. The environment manifests/artifact inspection remains recorded below and in `BASELINE_REPORT.md`.
-- **Next atomic action:** implement and unit-test `tests/run_baseline.py`; verify corpus/host-input hashes, execute selected commands without a shell, persist raw logs and a JSON pass/skip/fail summary keyed by the environment manifest; wire it into the Linux and macOS jobs; then inspect current-head artifacts. Do not start M01 or call M00 done until this works in CI and the remaining M00 support-matrix/pinning/retention gates are reviewed.
+- **Last completed action:** PR #3 is merged; PR #4 remains the only open draft PR. Implemented `tests/run_baseline.py`, six runner regressions, and CI profile integration. Inspected artifacts for [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036): Python 3.10 and 3.12 each reported 9 passed / 1 platform skip / 0 failed; macOS reported 12 passed / 1 platform skip / 0 failed; checked-in C and pinned `/bin/ls` fingerprints matched; raw stdout/stderr and machine-readable summaries were retained. Added FEATURE_SUPPORT_MATRIX.md at commit `4faac5aaf2648e11de79871ef29b7b2096107132`; its exact-head CI still needs confirmation.
+- **Next atomic action:** confirm CI on the FEATURE_SUPPORT_MATRIX.md head; update BASELINE_REPORT.md and PR #4 with the current runner/artifact evidence; then define explicit baseline promotion/retention policy and dependency-pinning strategy, and add a second independent architecture/format truth fixture. Keep M00 PARTIAL until those gates are resolved; keep PR #4 open and unmerged.
 - **Current-main baseline evidence:** [hardening CI](https://github.com/sagarchive/rdis/actions/runs/39228787777) and [Pages deployment](https://github.com/sagarchive/rdis/actions/runs/39228786794) passed; [merged PR #3 full validation](https://github.com/sagarchive/rdis/actions/runs/39228116226) passed five jobs. BASELINE_REPORT.md records 42 hardening tests, 25 IR tests on Python 3.10/3.12, Chromium/Firefox, 124/124 maturity, 20-visitor determinism and the first /bin/ls benchmark.
-- **Latest verified branch CI:** [run 39264434317](https://github.com/sagarchive/rdis/actions/runs/39264434317) passed all five jobs on PR #4 head `f9b433afe4bd1e5083d03014da65603b68307ca4`; this is a passing roadmap/corpus-manifest revision, not evidence that the runner exists or M00 is done.
+- **Latest verified runner CI:** [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036) passed all five jobs on PR #4 head `24cfdc9e0f1786bc89984aee1ff9f76fb3b7113a`, including baseline profile execution. The support matrix was subsequently added at `4faac5aaf2648e11de79871ef29b7b2096107132`; check CI on that exact latest documentation head before declaring it green.
 - **Known limits:** competitor benchmarks and per-ISA function-discovery/CFG accuracy are not yet measured; pip versions are recorded rather than locked; fuzzing campaigns, manual accessibility review and multi-corpus performance baselines remain open.
 
 ## 11. Append-only request ledger — newest request at the end
@@ -422,8 +422,10 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 **Request:** Inspect the latest merged main; learn from current source and official competitor documentation; establish milestones for core correctness, analysis breadth, graph/UI, debugging, decompilation, project workflows, automation, security, performance and release quality; create a new branch and one unmerged draft PR; keep reading/updating this register after each subsequent RDIS prompt; incrementally resume after errors or tool interruptions; add later requests at the end.
 
 **Milestones:** M00–M21.  
-**Status:** IN PROGRESS — roadmap/resume protocol and CI baseline reports are on draft PR #4; environment manifests are emitted and inspected, including secret redaction and PR head/base identity. M00 remains partial until the deterministic corpus manifest and baseline runner exist.  
-**Next action:** keep the existing `tests/baseline_corpus.json`; implement and test the runner that verifies its hashes, executes its command profiles with bounded timeouts and no shell, writes stdout/stderr plus machine-readable results tied to the environment manifest, then record CI artifacts before reassessing M00.
+**Status:** IN PROGRESS — PR #4 now contains the corpus manifest, runner, runner tests, and CI wiring; [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036) passed all five jobs and its baseline artifacts were inspected. An initial source-linked matrix was added afterwards at `4faac5aaf2648e11de79871ef29b7b2096107132`; its CI is still the immediate verification gate. M00 remains PARTIAL for retention/promotion, dependency reproducibility and expanded corpus coverage.  
+**Next action:** verify the support-matrix revision in CI, then resolve the remaining M00 baseline policy/coverage gates before beginning the M01 measured architecture truth matrix and identity audits.
+
+**Progress update — 2026-10-19:** The runner, its regression suite, and CI wiring are now implemented. [Run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036) passed all five jobs on head `24cfdc9e0f1786bc89984aee1ff9f76fb3b7113a`; artifacts were inspected and fingerprints matched. The initial feature support matrix has since been added at `4faac5aaf2648e11de79871ef29b7b2096107132`. The remaining action is not to implement the runner again; it is to verify the latest docs head, update the report/PR text, and close the M00 retention, pinning and corpus-expansion gates.
 
 ### RQ-002 — 2026-10-19 — Check milestone/PR state and resume from the true cursor
 
@@ -431,6 +433,6 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 
 **Milestones:** M00, with dependency checks against M01–M21.
 
-**Status:** IN PROGRESS — live GitHub state checked. PR #3 is merged; PR #4 is the sole open draft PR. Its latest known run, [39264434317](https://github.com/sagarchive/rdis/actions/runs/39264434317), passed all five jobs. The existing `tests/baseline_corpus.json` was present, contradicting the stale cursor that described the manifest as missing; it still lacks a tested one-command runner and artifact-level pass/skip/fail results.
+**Status:** IN PROGRESS — audit confirmed PR #3 is merged and PR #4 is the only open draft PR. The corpus manifest, runner, six runner regressions and CI profiles have been added. [Run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036) passed all five jobs on the runner revision; artifact summaries and input hashes were inspected. FEATURE_SUPPORT_MATRIX.md was added afterward at `4faac5aaf2648e11de79871ef29b7b2096107132`; exact-head CI must be checked.
 
-**Next action:** add runner, unit tests and CI wiring; inspect the latest run and artifacts, update this cursor/report/PR description, and keep M00 PARTIAL until its full exit gate—including support matrix, dependency policy and durable baseline retention—is met.
+**Next action:** verify the latest feature-matrix head in CI; update BASELINE_REPORT.md and PR #4; document baseline promotion/retention and dependency pinning; add a second independent architecture/format corpus fixture. Keep M00 PARTIAL until the remaining gates are evidence-backed.
