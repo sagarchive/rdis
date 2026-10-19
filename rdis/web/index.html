@@ -894,33 +894,44 @@ async function showPseudo(addr) {
 function showDecl(it) { pseudoView(it.decl, it.name, ""); $("#crMode").textContent = "TYPE"; empty(false); }
 
 /* ─────────────── CFG (graph view) ─────────────── */
-async function showCFG(addr, detail = false) {
-  const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
+async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {}) {
+  const d = graphKind === "callgraph"
+    ? await api("callgraph", {func: addr, direction: graphOptions.direction || "both", depth: String(graphOptions.depth || 1)})
+    : await api("cfg", {func: addr, detail: detail ? "1" : "0"});
   const v = $("#view");
-  v.innerHTML = `<div id="graph" role="region" aria-label="Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."><div id="ghud">
+  v.innerHTML = `<div id="graph" role="region" aria-label="${graphKind === "callgraph" ? "Call graph. Select a function, double-click to open it, and use direction/depth controls to explore callers and callees." : "Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."}"><div id="ghud">
       <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
       <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
       <button class="ib" id="zfit" aria-label="Fit graph to view" title="Zoom to fit">⤢</button>
       <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
-      <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
+      ${graphKind === "callgraph"
+        ? `<select id="cgDirection" aria-label="Call graph direction" title="Explore callers, callees, or both"><option value="both">Both</option><option value="callers">Callers</option><option value="callees">Callees</option></select><select id="cgDepth" aria-label="Call graph depth" title="Neighborhood depth"><option value="1">Depth 1</option><option value="2">Depth 2</option><option value="3">Depth 3</option><option value="4">Depth 4</option></select>`
+        : `<button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>`}
       <button class="ib" id="zsvg" aria-label="Download graph as SVG" title="Download SVG">⤓</button>
     </div>
-    <div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>
+    ${graphKind === "callgraph"
+      ? `<div id="glegend"><span><i style="background:var(--accent)"></i>selected function</span><span><i style="background:var(--g-flow)"></i>function call</span><span><i style="background:var(--warn)"></i>import / external</span></div>`
+      : `<div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>`}
     <div id="gminimap" role="region" aria-label="Graph minimap. Click to recenter the main graph." title="Minimap — click to recenter" style="display:none"></div>
   </div>`;
   const g = $("#graph");
-  if (!d.dot) {  // WebAssembly: no CFG yet
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">// WebAssembly is a stack machine — pseudo-code and CFG are not available.<br>// Use the Assembly view for the disassembled module.</div>`);
+  if (!d.dot) {
+    const note = d.note || "This graph is not available for the current binary or analysis mode.";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">// ${esc(note)}</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
   if (typeof Viz === "undefined") {
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">CFG renderer could not load (offline?) — use <b>cfg&nbsp;NAME</b> in the console or the MCP server for DOT output.</div>`);
+    const command = graphKind === "callgraph" ? "callgraph NAME" : "cfg NAME";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Graph renderer could not load (offline?) — use <b>${command}</b> in the console or the MCP server for DOT output.</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
-  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing</div>`);
+  const graphHint = graphKind === "callgraph"
+    ? `caller/callee graph · ${d.nodes} nodes · ${d.edges} edges · double-click a function to open listing${d.truncated ? " · resource cap reached; narrow direction/depth" : ""}`
+    : "drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing";
+  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">${esc(graphHint)}</div>`);
   let svg;
   try {
     S.viz = S.viz || await Viz.instance();
@@ -929,7 +940,8 @@ async function showCFG(addr, detail = false) {
   } catch (err) {
     // render failures must surface here, not fall through to show()'s hex fallback (which made the
     // CFG look "broken" by silently showing bytes). Keep the user in graph mode with a real message.
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Could not render this graph: ${esc(err.message || err)}.<br>The DOT is still available via <b>cfg&nbsp;NAME</b> in the console or the MCP server.</div>`);
+    const command = graphKind === "callgraph" ? "callgraph NAME" : "cfg NAME";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Could not render this graph: ${esc(err.message || err)}.<br>The DOT is still available via <b>${command}</b> in the console or the MCP server.</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
@@ -963,7 +975,9 @@ async function showCFG(addr, detail = false) {
       }
     });
   });
-  crumbs(d.name, d.addr, "drag to pan · wheel to zoom");
+  crumbs(d.name, d.addr, graphKind === "callgraph"
+    ? `${d.direction} · depth ${d.depth}${d.truncated ? " · truncated" : ""}`
+    : "drag to pan · wheel to zoom");
 
   let scale = 1, tx = 0, ty = 0;
   const miniHost = $("#gminimap");
@@ -1154,9 +1168,20 @@ async function showCFG(addr, detail = false) {
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
-  $("#gdetail").onclick = () => showCFG(addr, !detail);
-  $("#gdetail").classList.toggle("on", detail);
-  $("#gdetail").setAttribute("aria-pressed", String(detail));
+  if (graphKind === "callgraph") {
+    $("#cgDirection").value = graphOptions.direction || "both";
+    $("#cgDepth").value = String(graphOptions.depth || 1);
+    const updateCallGraph = () => showCallGraph(addr, {
+      direction: $("#cgDirection").value,
+      depth: Number($("#cgDepth").value)
+    });
+    $("#cgDirection").onchange = updateCallGraph;
+    $("#cgDepth").onchange = updateCallGraph;
+  } else {
+    $("#gdetail").onclick = () => showCFG(addr, !detail);
+    $("#gdetail").classList.toggle("on", detail);
+    $("#gdetail").setAttribute("aria-pressed", String(detail));
+  }
   $("#zsvg").onclick = () => {
     // Resolve theme variables in a cloned SVG; CSS custom properties are not defined in an
     // external viewer, so the download must be self-contained and retain readable contrast.
@@ -1201,7 +1226,7 @@ async function showCFG(addr, detail = false) {
     copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     const blob = new Blob([new XMLSerializer().serializeToString(copy)], {type: "image/svg+xml;charset=utf-8"});
     const url = URL.createObjectURL(blob), a = document.createElement("a");
-    a.href = url; a.download = (d.name || "cfg").replace(/[^a-zA-Z0-9._-]+/g, "_") + ".svg"; a.click();
+    a.href = url; a.download = (d.name || (graphKind === "callgraph" ? "callgraph" : "cfg")).replace(/[^a-zA-Z0-9._-]+/g, "_") + (graphKind === "callgraph" ? "-callgraph.svg" : ".svg"); a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   // node interactions
@@ -1210,22 +1235,39 @@ async function showCFG(addr, detail = false) {
     const title = n.querySelector("title");
     n.setAttribute("tabindex", "0");
     n.setAttribute("role", "button");
-    n.setAttribute("aria-label", "Basic block " + (title?.textContent || ""));
+    const nodeType = graphKind === "callgraph"
+      ? n.classList.contains("cg-import") ? "import" : n.classList.contains("cg-unresolved") ? "unresolved target" : "function"
+      : "basic block";
+    const nodeName = n.querySelector("text")?.textContent || title?.textContent || "";
+    n.setAttribute("aria-label", graphKind === "callgraph"
+      ? `${nodeType} ${nodeName} at ${title?.textContent || ""}`
+      : "Basic block " + (title?.textContent || ""));
     n.onclick = () => { const t = n.querySelector("title"); if (!t) return;
       svg.querySelectorAll(".node.cur").forEach(x => markNode(x, false));
       markNode(n, true);
       S.sel = t.textContent; inspectAddr(S.sel); statusCursor(S.sel); };
     n.onkeydown = e => {
-      if (e.key === "Enter" && e.shiftKey && title) { e.preventDefault(); go(title.textContent, {mode: "listing"}); }
+      const targetMode = graphKind === "callgraph" && !n.classList.contains("cg-function") ? "hex" : "listing";
+      if (e.key === "Enter" && e.shiftKey && title) { e.preventDefault(); go(title.textContent, {mode: targetMode}); }
       else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true})); }
     };
-    n.ondblclick = () => { const t = n.querySelector("title"); if (t) go(t.textContent, {mode: "listing"}); };
+    n.ondblclick = () => {
+      const t = n.querySelector("title");
+      if (t) go(t.textContent, {mode: graphKind === "callgraph" && !n.classList.contains("cg-function") ? "hex" : "listing"});
+    };
     n.oncontextmenu = e => { e.preventDefault(); const t = n.querySelector("title"); if (t) { S.sel = t.textContent; navMenu(e, S.sel, ""); } };
   });
   const here = [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === S.sel);
   if (here) markNode(here, true);
   fitInitial();
 }
+async function showCallGraph(addr, options = {}) {
+  return showCFG(addr, false, "callgraph", {
+    direction: options.direction || "both",
+    depth: Number(options.depth || 1)
+  });
+}
+
 function themeGraph(svg) {
   // strip the white page background polygon; restyle nodes/edges/text to the active theme
   const bg = svg.querySelector("g.graph > polygon");
@@ -1241,7 +1283,9 @@ function themeGraph(svg) {
     .edge polygon { stroke: none; }
     .node { cursor: pointer; }
     .node:hover polygon, .node:hover path, .node:focus polygon, .node:focus path { stroke: var(--accent); stroke-width: 2.4; }
-    .node.entry polygon, .node.entry path { stroke: var(--accent); stroke-width: 2; }
+    .node.entry polygon, .node.entry path, .node.cg-root polygon, .node.cg-root path { stroke: var(--accent); stroke-width: 2; }
+    .node.cg-import polygon, .node.cg-import path { fill: var(--elev) !important; stroke: var(--warn) !important; stroke-dasharray: 4 2; }
+    .node.cg-unresolved polygon, .node.cg-unresolved path { fill: var(--pane) !important; stroke: var(--faint) !important; stroke-dasharray: 3 2; }
     .node.cur polygon, .node.cur path { stroke: var(--accent); stroke-width: 2.6; }
     .edge path[stroke="green"], .edge [stroke="green"] { stroke: var(--ok) !important; }
     .edge polygon[fill="green"] { fill: var(--ok) !important; }
