@@ -128,6 +128,22 @@
           "required": true
         },
         {
+          "id": "architecture-encoding-fixtures",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_architecture_encodings.py",
+            "-v"
+          ],
+          "timeout_seconds": 120,
+          "required": true
+        },
+        {
           "id": "compile-cfg-fixture",
           "when": {
             "system": "Linux",
