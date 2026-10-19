@@ -465,8 +465,10 @@ def run_baseline(
     output_dir: Path,
     requested_profiles: Optional[List[str]] = None,
     environment_manifest_path: Optional[Path] = None,
+    corpus_manifest_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     validate_manifest(manifest)
+    started_at = datetime.now(timezone.utc).isoformat()
     host = host_context()
     output_dir.mkdir(parents=True, exist_ok=True)
     entries, entry_results = verify_entries(manifest, root, host)
@@ -514,12 +516,12 @@ def run_baseline(
     summary = {
         "schema_version": 1,
         "status": "failed" if errors or entry_failures or command_failures else "passed",
-        "started_at_utc": None,
+        "started_at_utc": started_at,
         "finished_at_utc": datetime.now(timezone.utc).isoformat(),
         "corpus": {
             "id": manifest["corpus_id"],
             "schema_version": manifest["schema_version"],
-            "manifest_path": str((root / "tests" / "baseline_corpus.json").resolve()),
+            "manifest_path": str((corpus_manifest_path or (root / "tests" / "baseline_corpus.json")).resolve()),
             "manifest_sha256": manifest_sha256,
         },
         "host": {
@@ -542,7 +544,6 @@ def run_baseline(
             "skipped": sum(x["status"] == "skipped" for x in entries + command_results),
         },
     }
-    summary["started_at_utc"] = datetime.now(timezone.utc).isoformat()
     rendered = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     (output_dir / "summary.json").write_text(rendered, encoding="utf-8")
     return summary
@@ -579,6 +580,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             output_dir,
             requested_profiles=args.profile,
             environment_manifest_path=environment_path,
+            corpus_manifest_path=manifest_path,
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         summary = {
