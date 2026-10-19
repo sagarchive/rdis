@@ -269,18 +269,24 @@ def _api_doc(route, q, arg, P):
         items += [{"name": t.name, "type": t.kind, "decl": t.declaration()} for t in P.swift.types]
         return {"items": items}
     if route == "callgraph":
-        f = _func(P, arg("func"))
-        if getattr(P, "wasm", False):
-            return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": None,
-                    "direction": arg("direction", "both"), "depth": 1, "nodes": 1,
-                    "edges": 0, "truncated": False,
-                    "note": "WebAssembly call-graph edges are not yet reconstructed from validated module call indices."}
+        # Validate request controls before resolving a function. Invalid controls should fail with
+        # a deterministic argument error even if the function identifier is absent or malformed.
         direction = arg("direction", "both")
+        if direction not in ("both", "callers", "callees"):
+            raise ValueError("call graph direction must be one of: both, callers, callees")
         raw_depth = arg("depth", "1")
         try:
             depth = int(raw_depth)
         except (TypeError, ValueError):
             raise ValueError("call graph depth must be an integer from 1 to 4") from None
+        if not 1 <= depth <= 4:
+            raise ValueError("call graph depth must be from 1 to 4")
+        f = _func(P, arg("func"))
+        if getattr(P, "wasm", False):
+            return {"name": P.display(f.addr), "addr": hex(f.addr), "dot": None,
+                    "direction": direction, "depth": depth, "nodes": 1,
+                    "edges": 0, "truncated": False,
+                    "note": "WebAssembly call-graph edges are not yet reconstructed from validated module call indices."}
         return render.callgraph(P, f, direction=direction, depth=depth)
     if route in ("listing", "pseudo", "cfg"):
         f = _func(P, arg("func"))
