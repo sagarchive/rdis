@@ -403,14 +403,15 @@ A milestone does not close until all applicable points are satisfied:
 This section is mutable; update it after every meaningful commit and before every interruption.
 
 - **Last verified base:** main at 96b931d32c807c5430518be6c280c98fb995ebb2.
-- **Current branch for this roadmap:** docs/competitive-parity-and-resume-roadmap.
-- **Current active PR:** to be opened after this register and AGENTS.md are committed.
-- **Active milestone:** M00.
-- **Last completed action:** fetched current main source inventory, confirmed PR #3 merge and current main CI/Pages deployment, inspected the test/workflow surfaces, and researched primary competitor documentation.
-- **Next atomic action:** commit this roadmap plus the repository resume instructions; open one draft PR; verify PR diff and current-head CI. Then M00 must create a reproducible baseline report before product-code changes start.
-- **Tests already evidenced at baseline:** current main hardening CI run 39228787777 passed; current main GitHub Pages deploy 39228786794 passed; merged PR #3 full validation run 39228116226 passed five jobs (browser tests in Chromium/Firefox, Python 3.10/3.12, macOS suite).
-- **Tests not yet run on the new branch:** none of the branch-specific checks until the roadmap commit exists. Re-run CI after adding the docs/instructions.
-- **Known limits:** no independent competitor corpus comparison exists yet; function-discovery/CFG accuracy metrics by architecture are not yet recorded; broader fuzzing, accessibility screen-reader review and performance baselines remain open.
+- **Current branch:** docs/competitive-parity-and-resume-roadmap.
+- **Current active PR:** [#4 — docs: add resumable roadmap toward competitive parity](https://github.com/sagarchive/rdis/pull/4), open and draft; base is main; do not merge.
+- **Milestone focus:** M00 — baseline and evidence ledger. Product implementation milestones are not yet underway.
+- **Commits so far:** c0a3fbf456b4fd577aac098690eb38e86dfee175 added DEVELOPMENT_ROADMAP.md; ea37743af1e3f0d7ac2c590df57e1de43cee55b3 added AGENTS.md. This cursor update will add another docs-only commit; fetch current branch head on resume rather than assuming this list is exhaustive.
+- **Last completed action:** fetched current main source inventory, confirmed PR #3 merge and main CI/Pages deployment, reviewed current source/test/workflow surfaces and researched official primary competitor documents; added the M00–M21 roadmap and roadmap-first instructions; opened PR #4.
+- **Next atomic action:** inspect current-head CI on PR #4, fix any workflow/documentation failures and rerun. Then execute M00: capture a reproducible clean-environment baseline at the then-current main SHA before product-code changes.
+- **Tests already evidenced at baseline:** [current main hardening CI](https://github.com/sagarchive/rdis/actions/runs/39228787777) and [Pages deployment](https://github.com/sagarchive/rdis/actions/runs/39228786794) passed; [merged PR #3 full validation](https://github.com/sagarchive/rdis/actions/runs/39228116226) passed five jobs.
+- **Branch CI:** [run 39260523696](https://github.com/sagarchive/rdis/actions/runs/39260523696) was queued/in progress at the time of the initial branch creation. Recheck the live state; never infer success from queue/run creation. The cursor-only commit will trigger a new run.
+- **Known limits:** no independent competitor corpus comparison exists yet; function-discovery/CFG accuracy metrics by architecture are not yet recorded; broader fuzzing, manual screen-reader review and performance baselines remain open.
 
 ## 11. Append-only request ledger — newest request at the end
 
