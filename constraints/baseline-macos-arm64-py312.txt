@@ -1,0 +1,5 @@
+# macOS arm64 / CPython 3.12 baseline overlay.
+# Install with -c constraints/baseline-ci.txt AND this file.
+# certifi appeared in the verified 2026-10-19 macOS baseline environment, but not the Linux Python
+# profiles; keep its selected version local to this runner profile instead of constraining all OSes.
+certifi==2026.7.22
