@@ -217,7 +217,7 @@ jobs:
           python tests/capture_environment.py \
             --output-dir artifacts/baseline \
             --constraints-file constraints/baseline-ci.txt \
-            --constraints-file "$CONSTRAINTS_OVERLAY \
+            --constraints-file "$CONSTRAINTS_OVERLAY" \
             --job macos-regression \
             --command "python tests/run_baseline.py --profile macos-arm64 --output-dir artifacts/baseline/run --environment-manifest artifacts/baseline/manifest.json" \
             --command "python tests/concurrency_test.py http://127.0.0.1:8781"
