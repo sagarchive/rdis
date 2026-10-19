@@ -286,6 +286,13 @@ section { padding-block:clamp(120px,15vw,200px) 0 }
 .cfg .e { fill:none; stroke-width:1.8 }
 .cfg .e-ok { stroke:var(--ok) } .cfg .e-no { stroke:var(--err) } .cfg .e-bk { stroke:var(--amber) }
 .cfg .h-ok { fill:var(--ok) } .cfg .h-no { fill:var(--err) } .cfg .h-bk { fill:var(--amber) }
+.cfg .e-call { stroke:var(--mnem) }
+.cfg .e-external { stroke:var(--amber); stroke-dasharray:4 4 }
+.cfg .e-unresolved { stroke:var(--faint); stroke-dasharray:3 4 }
+.cfg .call-arrowhead { fill:var(--mnem) }
+.cfg .n-root { fill:var(--amber-soft); stroke:var(--amber); stroke-width:2 }
+.cfg .n-import { fill:var(--tile-hi); stroke:var(--amber); stroke-dasharray:4 3 }
+.cfg .n-unknown { fill:var(--well); stroke:var(--faint); stroke-dasharray:3 3 }
 .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--mute); padding:0 22px 18px }
 .legend i { display:inline-block; width:14px; height:2px; vertical-align:middle; margin-right:6px }
 
