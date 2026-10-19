@@ -174,3 +174,211 @@ def to_dot(prog, func, detail=False):
             back = " constraint=false" if s <= a else ""   # loop edge: don't distort the ranks
             out.append(f'  "{a:#x}" -> "{s:#x}" [color={color}{label}{back}];')
     return "\n".join(out + ["}"])
+
+
+# Interprocedural call graph — intentionally bounded for interactive use.
+CALLGRAPH_MAX_NODES = 120
+CALLGRAPH_MAX_EDGES = 400
+CALLGRAPH_MAX_INCOMING = 256
+
+
+def callgraph(prog, func, direction="both", depth=1):
+    """Return bounded caller/callee graph data and Graphviz DOT around one function.
+
+    Function.calls provides recovered local call/tail-call targets. Reverse xrefs provide caller
+    edges without scanning every function in the binary. Direct callsites are also inspected to
+    retain external/import edges that are deliberately not inserted in Function.calls. Unknown
+    targets remain explicitly unresolved; the graph never fabricates a named local function.
+    """
+    if direction not in ("both", "callers", "callees"):
+        raise ValueError("direction must be one of: both, callers, callees")
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        raise ValueError("depth must be an integer from 1 to 4") from None
+    if not 1 <= depth <= 4:
+        raise ValueError("depth must be from 1 to 4")
+
+    root = int(func.addr)
+    nodes = {}
+    levels = {root: 0}
+    queue = [root]
+    edges = {}
+    truncated = False
+
+    def node_meta(address):
+        address = int(address)
+        if address in prog.functions:
+            name = prog.display(address) or f"sub_{address:x}"
+            return {"addr": address, "name": str(name), "kind": "function"}
+        imports = getattr(prog.image, "imports", {})
+        if address in imports:
+            name = prog.display(address) or imports[address] or f"import_{address:x}"
+            return {"addr": address, "name": str(name), "kind": "import"}
+        name = prog.display(address) or f"unresolved_{address:x}"
+        return {"addr": address, "name": str(name), "kind": "unresolved"}
+
+    def add_node(address, level):
+        nonlocal truncated
+        address = int(address)
+        if address in nodes:
+            return True, False
+        if len(nodes) >= CALLGRAPH_MAX_NODES:
+            truncated = True
+            return False, False
+        meta = node_meta(address)
+        meta["level"] = level
+        nodes[address] = meta
+        levels[address] = level
+        return True, True
+
+    def add_edge(source, target, kind, site=None):
+        nonlocal truncated
+        key = (int(source), int(target))
+        if key not in edges and len(edges) >= CALLGRAPH_MAX_EDGES:
+            truncated = True
+            return
+        edge = edges.setdefault(key, {"source": key[0], "target": key[1], "kinds": set(), "sites": set()})
+        edge["kinds"].add(kind)
+        if site is not None:
+            edge["sites"].add(int(site))
+
+    def incoming(address):
+        refs = []
+        for source, kind in prog.xrefs_to(address):
+            if kind not in ("call", "tail"):
+                continue
+            owner = prog.function_at(source)
+            if owner is None or owner.addr not in prog.functions:
+                continue
+            refs.append((owner.addr, address, kind, source))
+        if len(refs) > CALLGRAPH_MAX_INCOMING:
+            refs = refs[:CALLGRAPH_MAX_INCOMING]
+            nonlocal_mark_truncated[0] = True
+        return refs
+
+    # A mutable flag lets the nested incoming helper report a reference cap.
+    nonlocal_mark_truncated = [False]
+
+    def outgoing(address):
+        target_sites = {}
+        target_kinds = {}
+        owner = prog.functions.get(address)
+        if owner is None:
+            return []
+        for target in owner.calls:
+            target = int(target)
+            target_sites.setdefault(target, set())
+            target_kinds.setdefault(target, set()).add("tail" if target not in owner.blocks
+                                                       and target in getattr(prog.image, "imports", {}) else "call")
+        # Include known call targets which are imports or indirect targets that are not local
+        # Function.calls. Reset address-tracking state per block, matching Program._build.
+        for block in owner.blocks.values():
+            regs = {}
+            for insn in block.insns:
+                kind = prog.arch.kind(insn)
+                if kind in (CALL, JMP, CJMP, IJMP):
+                    target = prog.call_target(insn, regs)
+                    if target is not None:
+                        target = int(target)
+                        if kind == CALL:
+                            target_sites.setdefault(target, set()).add(int(insn.address))
+                            target_kinds.setdefault(target, set()).add("call")
+                        elif kind in (JMP, CJMP) and target not in owner.blocks and (
+                            target in prog.functions or
+                            target in getattr(prog.image, "imports", {}) or
+                            target in getattr(prog.image, "symbols", {}) or
+                            not prog.image.is_code(target)
+                        ):
+                            target_sites.setdefault(target, set()).add(int(insn.address))
+                            target_kinds.setdefault(target, set()).add("tail")
+                else:
+                    prog.arch.data_refs(insn, regs)
+        return [
+            (address, target, next(iter(sorted(target_kinds.get(target, {"call"})))),
+             sorted(target_sites.get(target, ())))
+            for target in sorted(target_sites)
+        ]
+
+    add_node(root, 0)
+    while queue:
+        address = queue.pop(0)
+        level = levels[address]
+        if level >= depth or nodes[address]["kind"] != "function":
+            continue
+
+        if direction in ("both", "callers"):
+            for source, target, kind, site in incoming(address):
+                ok, fresh = add_node(source, level + 1)
+                if not ok:
+                    continue
+                add_edge(source, target, kind, site)
+                if fresh and level + 1 < depth:
+                    queue.append(source)
+
+        if direction in ("both", "callees"):
+            for source, target, kind, sites in outgoing(address):
+                ok, fresh = add_node(target, level + 1)
+                if not ok:
+                    continue
+                if sites:
+                    for site in sites:
+                        add_edge(source, target, kind, site)
+                else:
+                    add_edge(source, target, kind)
+                if fresh and level + 1 < depth and nodes[target]["kind"] == "function":
+                    queue.append(target)
+
+    if nonlocal_mark_truncated[0]:
+        truncated = True
+
+    out = [
+        'digraph "callgraph" {',
+        '  bgcolor="transparent";',
+        '  graph [rankdir=LR nodesep=0.38 ranksep=0.72 splines=polyline fontname="Courier" pad=0.24];',
+        '  node [shape=box style="rounded,filled" fontname="Courier" fontsize=10 margin="0.16,0.10"];',
+        '  edge [color=blue arrowsize=0.72 penwidth=1.35 fontname="Courier" fontsize=9];',
+    ]
+    for address in sorted(nodes):
+        meta = nodes[address]
+        kind = meta["kind"]
+        name = "".join(ch if ch.isprintable() else " " for ch in meta["name"])
+        first = _dot_label(name, 72)
+        second = _dot_label(f"{address:#x} · {kind}", 72)
+        label = first + "\\l" + second + "\\l"
+        svg_id = f"cg_{kind}_{address:x}"
+        classes = "cg-" + kind + (" cg-root" if address == root else "")
+        attrs = [f'label="{label}"', f'id="{svg_id}"', f'class="{classes}"']
+        if address == root:
+            attrs.extend(['root=true', 'penwidth=2.2', 'color="#d9974f"'])
+        elif kind == "import":
+            attrs.extend(['shape=component', 'style="rounded,dashed,filled"'])
+        elif kind == "unresolved":
+            attrs.extend(['style="rounded,dashed,filled"'])
+        out.append(f'  "n_{address:x}" [{", ".join(attrs)}];')
+
+    for (source, target), edge in sorted(edges.items()):
+        if source not in nodes or target not in nodes:
+            continue
+        kinds = edge["kinds"]
+        label = ""
+        if "tail" in kinds and "call" not in kinds:
+            label = ' label="tail"'
+        elif len(edge["sites"]) > 1:
+            label = f' label="{len(edge["sites"])} sites"'
+        color = "gray" if nodes[target]["kind"] != "function" else "blue"
+        out.append(f'  "n_{source:x}" -> "n_{target:x}" [color={color}{label}];')
+
+    dot = "\\n".join(out + ["}"])
+    return {
+        "name": prog.display(root) or f"sub_{root:x}",
+        "addr": hex(root),
+        "dot": dot,
+        "direction": direction,
+        "depth": depth,
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "truncated": truncated,
+        "node_limit": CALLGRAPH_MAX_NODES,
+        "edge_limit": CALLGRAPH_MAX_EDGES,
+    }
