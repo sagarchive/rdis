@@ -12,6 +12,7 @@ import unittest
 import zipfile
 import warnings
 from types import SimpleNamespace
+from contextlib import redirect_stdout
 from unittest import mock
 
 from rdis import containers, server as rdis_server
@@ -20,7 +21,7 @@ from rdis.loader import Image, Section
 from rdis.wasm import WasmModule, _name, _uleb
 from rdis.render import _dot_label, callgraph
 from rdis.arch import CALL
-from rdis import mcp_server
+from rdis import mcp_server, console, __main__ as rdis_cli
 
 
 class ExportImportIdentityTests(unittest.TestCase):
@@ -799,6 +800,23 @@ class CallGraphTests(unittest.TestCase):
         def display(self, addr):
             return self.names.get(addr, "")
 
+        def resolve(self, value):
+            if isinstance(value, int):
+                if value in self.functions or value in self.image.imports:
+                    return value
+                raise KeyError(f"unknown address: {value:#x}")
+            text = str(value)
+            try:
+                addr = int(text, 0)
+                if addr in self.functions or addr in self.image.imports:
+                    return addr
+            except ValueError:
+                pass
+            for addr, name in self.names.items():
+                if name == text:
+                    return addr
+            raise KeyError(f"unknown symbol: {text}")
+
         def xrefs_to(self, addr):
             return sorted(self.xrefs.get(addr, ()))
 
@@ -898,6 +916,65 @@ class CallGraphTests(unittest.TestCase):
                 "rdis.server._func", side_effect=AssertionError("lookup should not happen before validation")
             ), self.assertRaises(ValueError):
                 _api_doc("callgraph", bad, bad_arg, prog)
+
+
+class CallGraphSurfaceTests(unittest.TestCase):
+    def setUp(self):
+        self.prog = CallGraphTests.make_program()
+
+    def test_console_callgraph_returns_dot_and_summary(self):
+        result = console.run(self.prog, "callgraph 0x1000 callers 2")
+        self.assertIn('digraph "callgraph"', result["output"])
+        self.assertEqual(result["goto"], "0x1000")
+        self.assertEqual(result["nodes"], 3)
+        self.assertEqual(result["summary"], "callers, depth 2: 3 nodes, 2 edges")
+        self.assertTrue(result["output"].endswith("}"))
+
+    def test_console_callgraph_rejects_bad_direction_depth_and_extra_args(self):
+        for line, expected in (
+            ("callgraph 0x1000 upward", "direction must be one of"),
+            ("callgraph 0x1000 both 0", "depth must be from 1 to 4"),
+            ("callgraph 0x1000 both nope", "depth must be an integer"),
+            ("callgraph 0x1000 both 1 extra", "usage: callgraph"),
+        ):
+            with self.subTest(line=line):
+                self.assertIn(expected, console.run(self.prog, line)["output"])
+
+    def test_cli_callgraph_outputs_dot_and_json_metadata(self):
+        with mock.patch.object(rdis_cli.containers, "slices", return_value=[]), \
+             mock.patch.object(rdis_cli, "build", return_value=self.prog):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rdis_cli.main(["fixture.bin", "-f", "0x1000", "--callgraph",
+                               "--callgraph-direction", "callees", "--callgraph-depth", "2"])
+            self.assertIn('digraph "callgraph"', output.getvalue())
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rdis_cli.main(["fixture.bin", "-f", "0x1000", "--callgraph", "--json"])
+            data = json.loads(output.getvalue())
+            self.assertEqual(data["direction"], "both")
+            self.assertEqual(data["depth"], 1)
+            self.assertIn('digraph "callgraph"', data["dot"])
+            self.assertIn("node_limit", data)
+
+    def test_mcp_callgraph_returns_bounded_structured_graph(self):
+        with mock.patch.object(mcp_server, "_prog", return_value=self.prog) as load:
+            result = mcp_server.t_callgraph("fixture.bin", "0x1000", direction="callers", depth=2)
+        load.assert_called_once_with("fixture.bin", None)
+        self.assertIn('digraph "callgraph"', result["dot"])
+        self.assertEqual(result["direction"], "callers")
+        self.assertEqual(result["depth"], 2)
+        self.assertEqual(result["node_limit"], 64)
+        self.assertIn("callgraph", mcp_server.TOOLS)
+
+    def test_mcp_callgraph_rejects_bad_arguments_before_loading_binary(self):
+        for args in ({"direction": "up"}, {"depth": 0}, {"depth": 5}, {"depth": "bad"}, {"depth": True}):
+            with self.subTest(args=args), mock.patch.object(
+                mcp_server, "_prog", side_effect=AssertionError("binary must not be loaded")
+            ), self.assertRaises(ValueError):
+                mcp_server.t_callgraph("missing.bin", "0x1000", **args)
+
 
 if __name__ == "__main__":
     unittest.main()
