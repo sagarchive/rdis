@@ -9,8 +9,9 @@ ARM NOP behavior is documented at:
 https://documentation-service.arm.com/static/6245c734b059dc5ff9a8bdab
 """
 import unittest
+from pathlib import Path
 
-from rdis.arch import make
+from rdis.arch import CALL, CJMP, JMP, OTHER, RET, make
 
 
 class ArchitectureEncodingFixtureTests(unittest.TestCase):
@@ -37,6 +38,41 @@ class ArchitectureEncodingFixtureTests(unittest.TestCase):
     def test_arm64_instruction_boundaries(self):
         code = bytes.fromhex("1f 20 03 d5 c0 03 5f d6")  # A64 NOP; RET
         self.assert_decode_sizes("arm64", code, [4, 4])
+
+    def test_independent_arm64_branch_fixture_has_exact_control_flow(self):
+        # Encoding constants and PC-relative target calculations are independently recorded in
+        # tests/fixtures/arm64_branch_fixture.hex and referenced to the Arm A-profile ARM.
+        fixture = Path(__file__).resolve().parent / "fixtures" / "arm64_branch_fixture.hex"
+        encoded = []
+        for line in fixture.read_text(encoding="utf-8").splitlines():
+            payload = line.split("#", 1)[0].strip()
+            if payload:
+                encoded.extend(payload.split())
+        code = bytes.fromhex(" ".join(encoded))
+        self.assertEqual(len(code), 24, "the six A64 instructions must occupy 24 bytes")
+
+        arch = make("arm64")
+        instructions = list(arch.decode_run(code, self.BASE))
+        self.assertEqual(
+            [(insn.address, insn.size) for insn in instructions],
+            [(self.BASE + offset, 4) for offset in (0, 4, 8, 12, 16, 20)],
+        )
+        self.assertEqual(
+            [insn.mnemonic for insn in instructions],
+            ["cmp", "b.eq", "add", "b", "sub", "ret"],
+        )
+        self.assertEqual(
+            [arch.kind(insn) for insn in instructions],
+            [OTHER, CJMP, OTHER, JMP, OTHER, RET],
+        )
+        self.assertEqual(arch.target(instructions[1]), 0x1010)
+        self.assertEqual(arch.target(instructions[3]), 0x1014)
+        # Both successors are in-range instruction boundaries, and the condition's fall-through
+        # remains an explicit distinct path. This is an edge fixture, not a decompiler claim.
+        starts = {insn.address for insn in instructions}
+        self.assertIn(arch.target(instructions[1]), starts)
+        self.assertIn(instructions[1].address + instructions[1].size, starts)
+        self.assertIn(arch.target(instructions[3]), starts)
 
     def test_arm_and_thumb_modes_use_their_own_instruction_widths(self):
         arm_code = bytes.fromhex("00 f0 20 e3 1e ff 2f e1")  # A32 NOP; BX LR
