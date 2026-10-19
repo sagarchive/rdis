@@ -134,11 +134,33 @@ def main() -> int:
     parser.add_argument("--job", required=True)
     parser.add_argument("--browser", choices=("chromium", "firefox", "webkit"))
     parser.add_argument("--command", action="append", default=[])
+    parser.add_argument(
+        "--constraints-file",
+        action="append",
+        default=[],
+        help="A dependency constraints file whose content hash should be recorded (may be repeated).",
+    )
     args = parser.parse_args()
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
+    constraint_records = []
+    for raw_path in args.constraints_file:
+        constraint_path = Path(raw_path)
+        try:
+            data = constraint_path.read_bytes()
+            constraint_records.append({
+                "path": raw_path.replace("\\\\", "/"),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size_bytes": len(data),
+            })
+        except OSError as exc:
+            errors.append("Could not fingerprint constraints file " + raw_path + ": " + type(exc).__name__ + ": " + str(exc))
+            constraint_records.append({
+                "path": raw_path.replace("\\\\", "/"),
+                "error": type(exc).__name__ + ": " + str(exc),
+            })
 
     freeze = probe([sys.executable, "-m", "pip", "freeze", "--all"], timeout=60)
     freeze_text = redact_pip_freeze(freeze.get("stdout", ""))
@@ -201,6 +223,7 @@ def main() -> int:
             "playwright_browser": capture_browser_version(args.browser) if args.browser else None,
         },
         "dependencies": {
+            "constraints_files": constraint_records,
             "pip_freeze_file": "pip-freeze.txt",
             "pip_freeze_sha256": hashlib.sha256(freeze_bytes).hexdigest(),
             "pip_freeze_returncode": freeze.get("returncode"),
