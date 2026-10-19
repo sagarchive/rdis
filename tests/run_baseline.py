@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 SCHEMA_VERSION = 1
@@ -272,7 +272,8 @@ def _resolve_recorded_output(value: str, root: Path, output_dir: Path) -> Path:
 
 def _text_file_contains(path: Path, expected: Any) -> bool:
     values = expected if isinstance(expected, list) else [expected]
-    data = path.read_text(encoding="utf-8", errors="replace")
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        data = stream.read()
     return all(str(value) in data for value in values)
 
 
@@ -386,7 +387,7 @@ def run_command(
     result["stdout_bytes"] = stdout_path.stat().st_size
     result["stderr_bytes"] = stderr_path.stat().st_size
     if timed_out:
-        result["status"] = "failed" if required else "skipped"
+        result["status"] = "failed"
         result["reason"] = "command exceeded timeout"
         return result
 
@@ -422,7 +423,7 @@ def run_command(
             result["status"] = "passed"
             result["reason"] = "exit code and output assertions passed"
     if result["status"] != "passed":
-        result["status"] = "failed" if required else "skipped"
+        result["status"] = "failed"
     return result
 
 
