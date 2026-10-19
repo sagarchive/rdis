@@ -504,7 +504,7 @@ try {
   await page.locator('#modes button[data-mode="callgraph"]').click();
   await page.locator("#graph > svg g.graph").waitFor();
   const initialCallgraphRequest = callgraphQueries.at(-1);
-  const initialCallgraphRoot = await page.locator("#graph > svg g.node.cg-root title").textContent();
+  const initialCallgraphRoot = await page.locator("#graph > svg g.node.cg-root > title").first().textContent();
   assert.equal(initialCallgraphRoot, initialCallgraphRequest.addr,
     "the selected function's address must be the root of the rendered call graph");
   assert.equal(await page.locator("#cgDirection").inputValue(), "both");
