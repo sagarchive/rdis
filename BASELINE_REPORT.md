@@ -77,13 +77,22 @@ These are open gates, not failures in the passing workflow:
 
 ## 6. M00 exit status
 
-**M00: PARTIAL — CI baseline recorded, strict reproducibility not complete.**
+**M00: PARTIAL — CI baseline recorded; machine-readable environment capture is implemented in the active PR but awaits current-head CI and artifact inspection.**
 
 Before M00 can be closed:
-- [ ] Capture a clean-environment manifest with OS/CPU, Python/Node/browser/compiler versions, dependency freeze and exact source SHA.
-- [ ] Save raw test results, benchmark JSON and browser artifacts with a stable manifest linking their hashes.
+- [ ] Verify the CI-captured clean-environment manifests include OS/CPU, Python/Node/browser/compiler versions, pip freeze and exact source SHA.
+- [ ] Inspect the new artifacts for every relevant job, and verify their recorded SHA matches the corresponding run.
+- [ ] Keep raw benchmark JSON, RSS/server logs and browser artifacts indexed by workflow run/commit; add hashes and clear retention instructions.
 - [ ] Run the complete baseline command set on a clean checkout and distinguish passes, skips and unavailable optional tools.
-- [ ] Add machine-readable CI output for environment/dependency inventories without exposing secrets.
+- [ ] Confirm the manifest-capture regression tests pass on Python 3.10 and 3.12 and that URLs with credentials/query tokens are redacted.
 - [ ] Keep the main baseline SHA and all comparison inputs immutable for future trend reports.
 
-**Next action:** finish PR #4's current-head CI, then add dependency/environment manifest collection and a checked-in baseline index before starting M01's feature-claim/support matrix. Do not mark M00 done until the above checklist is satisfied.
+### M00 follow-up implementation (current PR branch; pending CI)
+
+- `tests/capture_environment.py` writes `manifest.json` and a hashed `pip-freeze.txt`, records source/CI/runtime metadata and selected tool/browser versions, and avoids a full process-environment dump.
+- The pip-freeze sanitizer redacts URL user-info and common secret/token query parameters before writing the artifact.
+- `tests/test_baseline_capture.py` tests manifest/freeze hashing, secret-safe output and the redaction rules.
+- `.github/workflows/hardening.yml` now uploads baseline-manifest artifacts for the Python 3.10/3.12 jobs, Chromium/Firefox browser jobs and macOS test/benchmark job. The macOS artifact also captures the raw benchmark and server RSS/logs where present.
+- These changes are not yet marked verified until the current-head CI passes and the generated artifacts are inspected.
+
+**Next action:** wait only in the sense of checking current tool state—not background work: query the newest PR CI run now, fix any failing test/workflow, then inspect the resulting artifacts and update this report/cursor. Do not mark M00 done until the above checklist is satisfied.
