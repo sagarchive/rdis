@@ -72,6 +72,30 @@ def t_cfg(path, func, arch=None, **k):
     f = p.function_at(p.resolve(func)) or p.functions[p.resolve(func)]
     return {"dot": render.to_dot(p, f)}
 
+def t_callgraph(path, func, arch=None, direction="both", depth=1, **k):
+    # Reject invalid controls before touching the file/cache so malformed tool requests have
+    # deterministic, cheap errors instead of triggering expensive analysis first.
+    if direction not in ("both", "callers", "callees"):
+        raise ValueError("call graph direction must be one of: both, callers, callees")
+    if isinstance(depth, bool):
+        raise ValueError("call graph depth must be an integer from 1 to 4")
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        raise ValueError("call graph depth must be an integer from 1 to 4") from None
+    if not 1 <= depth <= 4:
+        raise ValueError("call graph depth must be from 1 to 4")
+    p = _prog(path, arch, **k)
+    if getattr(p, "wasm", False):
+        return {"name": str(func), "addr": str(func), "dot": None, "direction": direction,
+                "depth": depth, "nodes": 1, "edges": 0, "truncated": False,
+                "note": "WebAssembly call-graph edges are not yet reconstructed from validated module call indices."}
+    addr = p.resolve(func)
+    f = p.function_at(addr) or p.functions.get(addr)
+    if f is None:
+        raise ValueError(f"no procedure at {addr:#x}")
+    return render.callgraph(p, f, direction=direction, depth=depth)
+
 def t_strings(path, arch=None, minlen=4, **k):
     p = _prog(path, arch, **k)
     return {"strings": [{"addr": hex(a), "text": s} for a, s in sorted(p.strings(minlen).items())]}
@@ -132,6 +156,8 @@ TOOLS = {
                   {"path": "string", "func": "string", "arch": "string?"}),
     "cfg": (t_cfg, "Control-flow graph of one function as Graphviz DOT.",
             {"path": "string", "func": "string", "arch": "string?"}),
+    "callgraph": (t_callgraph, "Bounded interprocedural callers/callees graph as Graphviz DOT with nodes, edges, direction, depth and truncation metadata.",
+                  {"path": "string", "func": "string", "arch": "string?", "direction": "string?", "depth": "integer?"}),
     "strings": (t_strings, "All C/UTF-16 strings with addresses.",
                 {"path": "string", "arch": "string?", "minlen": "integer?"}),
     "imports": (t_imports, "Imported/external symbols.", {"path": "string", "arch": "string?"}),
