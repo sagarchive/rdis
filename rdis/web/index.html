@@ -189,6 +189,7 @@ button:focus-visible,.tab .x:focus-visible{outline:2px solid var(--accent);outli
 #ghud{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:1px;background:var(--panel);
   border:1px solid var(--line);border-radius:8px;padding:2px;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:5}
 #ghud .z{font:600 11px var(--mono);color:var(--dim);min-width:44px;text-align:center;user-select:none}
+#ghud select{height:26px;padding:3px 5px;max-width:108px;font-size:11px;border-radius:5px}
 #glegend{position:absolute;bottom:10px;right:12px;display:flex;gap:12px;background:var(--panel);
   border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:10.5px var(--mono);color:var(--dim);z-index:4}
 #glegend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
@@ -375,6 +376,7 @@ table.keys td:first-child{width:130px;color:var(--dim)}
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h9M2 6.5h9M2 10h6"/></svg>Asm</button>
       <button data-mode="cfg" title="Control-flow graph — 2 · Space">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="1" width="5" height="3" rx=".8"/><rect x="1" y="9" width="4.5" height="3" rx=".8"/><rect x="7.5" y="9" width="4.5" height="3" rx=".8"/><path d="M6.5 4v2.5M3.2 9V6.5h6.6V9"/></svg>Graph</button>
+      <button data-mode="callgraph" title="Interprocedural caller/callee graph — 5">Calls</button>
       <button data-mode="pseudo" title="Pseudo-code — 3">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4.5 3 2 6.5l2.5 3.5M8.5 3 11 6.5 8.5 10"/></svg>Pseudo</button>
       <button data-mode="hex" title="Hex — 4">
@@ -497,7 +499,7 @@ const human = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ?
 const S = { info: null, tab: "labels", mode: "listing", lists: {}, counts: {}, cur: null, sel: null, hist: [], hpos: -1,
             procByName: new Map(), procs: new Set(), hexOffsets: store.get("hexoff", false), bytes: store.get("bytes", false),
             cmdHist: [], cmdPos: 0, viz: null, fn: null };
-const MODE_LABEL = {listing: "ASM", cfg: "GRAPH", pseudo: "PSEUDO", hex: "HEX"};
+const MODE_LABEL = {listing: "ASM", cfg: "GRAPH", callgraph: "CALLS", pseudo: "PSEUDO", hex: "HEX"};
 
 /* ─────────────── console ─────────────── */
 function log(msg, cls) {
@@ -761,6 +763,7 @@ async function show() {
     if (S.mode === "hex") await showHex(S.sel);
     else if (S.mode === "pseudo") await showPseudo(S.sel);
     else if (S.mode === "cfg") await showCFG(S.sel);
+    else if (S.mode === "callgraph") await showCallGraph(S.sel);
     else await showListing(S.sel);
   } catch (e) {
     let err = e;
@@ -1539,7 +1542,7 @@ addEventListener("keydown", e => {
   // single-key shortcuts must not fire behind an open dialog/sheet or the busy veil
   if (typing || mod || !S.info || $("#overlay").classList.contains("show") || $("#busy").classList.contains("show")) return;
   const k = e.key;
-  if (k === "1") { S.mode = "listing"; } else if (k === "2") { S.mode = "cfg"; } else if (k === "3") { S.mode = "pseudo"; } else if (k === "4") { S.mode = "hex"; }
+  if (k === "1") { S.mode = "listing"; } else if (k === "2") { S.mode = "cfg"; } else if (k === "3") { S.mode = "pseudo"; } else if (k === "4") { S.mode = "hex"; } else if (k === "5") { S.mode = "callgraph"; }
   else if (k === " ") { e.preventDefault(); S.mode = S.mode === "cfg" ? "listing" : "cfg"; }
   else if (k.toLowerCase() === "g") { e.preventDefault(); $("#cmd").value = "goto "; $("#cmd").focus(); return; }
   else if (k.toLowerCase() === "n") return S.sel && renameDialog(S.sel, "");
