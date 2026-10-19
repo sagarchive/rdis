@@ -102,7 +102,8 @@ class BaselineCorpusTests(unittest.TestCase):
 
         self.assertFalse(record["permanence"]["redistributable_binaries_committed"])
         self.assertTrue(record["benchmark"]["caveat"])
-\n    def test_hash_mismatch_is_reported_not_silently_accepted(self):
+
+    def test_hash_mismatch_is_reported_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             source = root / "fixture.c"
