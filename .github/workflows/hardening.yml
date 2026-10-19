@@ -107,6 +107,24 @@ jobs:
       - name: Run typed IR contract tests
         run: python -m unittest discover -s tests -p 'test_ir_*.py' -v
 
+      - name: Capture reproducible Python environment
+        if: always()
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --job "hardening-python-${{ matrix.python-version }}" \
+            --command "python -m pip install -e ." \
+            --command "python -m unittest discover -s tests -p test_hardening.py -v" \
+            --command "python -m unittest discover -s tests -p test_ir_*.py -v"
+      - name: Upload Python baseline manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-python-${{ matrix.python-version }}
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30
+
 
   browser-cfg:
     runs-on: ubuntu-latest
@@ -145,6 +163,25 @@ jobs:
           path: artifacts/cfg-browser-${{ matrix.browser }}/
           if-no-files-found: warn
           retention-days: 14
+      - name: Capture browser test environment
+        if: always()
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --job "browser-cfg-${{ matrix.browser }}" \
+            --browser "${PLAYWRIGHT_BROWSER}" \
+            --command "cc -O0 -g -fno-inline -fno-pie -no-pie tests/fixtures/cfg_fixture.c -o /tmp/rdis-cfg-fixture" \
+            --command "node tests/browser_cfg.mjs"
+      - name: Upload browser baseline manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-browser-${{ matrix.browser }}
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30
 
   macos-regression:
     runs-on: macos-14
@@ -188,3 +225,26 @@ jobs:
             cat /tmp/rdis-server-rss.log || true
             exit 1
           fi
+
+      - name: Capture macOS test and benchmark environment
+        if: always()
+        run: |
+          mkdir -p artifacts/baseline
+          cp /tmp/rdis-benchmark.json artifacts/baseline/benchmark.json 2>/dev/null || true
+          cp /tmp/rdis-server-rss.log artifacts/baseline/server-rss-kib.log 2>/dev/null || true
+          cp /tmp/rdis-server.log artifacts/baseline/server.log 2>/dev/null || true
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --job macos-regression \
+            --command "python tests/test_rdis.py" \
+            --command "python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3" \
+            --command "python tests/maturity.py" \
+            --command "python tests/concurrency_test.py http://127.0.0.1:8781"
+      - name: Upload macOS baseline and raw benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-macos
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30
