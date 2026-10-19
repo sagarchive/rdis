@@ -436,3 +436,17 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 **Status:** IN PROGRESS — PR #3 is merged and PR #4 is the only open draft PR. The corpus manifest, runner, six regression tests and CI integration are verified by [run 39266670036](https://github.com/sagarchive/rdis/actions/runs/39266670036); FEATURE_SUPPORT_MATRIX.md passed all five jobs on [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715). Baseline promotion/pinning policy is now documented in BASELINE_REPORT.md; implementation gates remain open.
 
 **Next action:** verify current checkpoint CI, update PR #4 description, add a second independent architecture/format fixture, and implement the first versioned promoted baseline/constraints bundle. Keep M00 PARTIAL until those evidence gates are met.
+
+
+
+### RQ-003 — 2026-10-19 — Resume and complete the next evidence-gated milestone
+
+**Request:** Re-check the live branch, open PRs and CI; continue the roadmap from its recorded cursor instead of restarting planning; complete the current baseline milestone as far as reproducible repository changes and CI evidence allow; preserve one open, unmerged PR; record exact results, blockers and the next atomic task.
+
+**Milestones:** M00 first; then start M01 only after M00's exit gate is satisfied.
+
+**Acceptance gates:** a current-head successful CI run; a second independently truth-checked architecture/format fixture in the hash-verified corpus; committed platform/Python baseline constraints; a versioned promoted baseline bundle containing replay instructions, input/corpus/constraints hashes, machine-readable summaries and retained environment/benchmark evidence, while respecting binary redistribution rights; exact resume cursor and PR description.
+
+**Status:** IN PROGRESS — current PR #4 has the no-shell runner, support matrix, platform constraints file and successful CI evidence, but the committed corpus still has only the x86-64 C source fixture plus a runner-local macOS /bin/ls fingerprint. The first persistent promotion bundle and second independently truth-checked architecture input are still required.
+
+**Next atomic action:** add a hashed ARM64 byte fixture with expected decode/branch-target facts and a regression that uses an independent encoding reference; include it in the portable baseline corpus. Then rerun focused tests and the complete PR workflow before promoting the resulting artifacts.
