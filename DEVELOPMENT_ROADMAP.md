@@ -29,7 +29,7 @@ This document is the durable source of truth for ongoing RDIS work. The reposito
 
 **Current program state**
 
-- Program: active, evidence-gated engineering effort. The reproducible baseline runner/support matrix and cross-surface caller/callee graph are implemented; the current user-directed graph usability slice now adds an explicit readable Entry reset after Fit-all on very large graphs.
+- Program: active, evidence-gated engineering effort. The reproducible baseline runner/support matrix and cross-surface caller/callee graph are implemented. The current visual-review slice adds an explicit Entry reset after Fit-all and auto-switches high-fan-out CFGs to left-to-right layout, with a reversible TB/LR control.
 - Active milestones: M00 baseline/resume evidence, M07 CFG/graph UX, M10 interprocedural workflow. Next product slice should be M04/M03 independent per-ISA function/CFG truth or M08 synchronized analyst navigation—not more housekeeping.
 - Active branch/PR: `feat/callgraph-and-analysis-baselines`; [PR #5 — RDIS: improve graph navigation and reproducible analysis workflows](https://github.com/sagarchive/rdis/pull/5), open/draft/unmerged. PR #4 is closed as superseded; exactly one open PR remains.
 - Main/base last verified at `96b931d32c807c5430518be6c280c98fb995ebb2`; fetch again before any rebase/base change.
@@ -516,6 +516,18 @@ Rules: append each new RDIS request as a new entry with date, exact intent, mile
 **Product gaps still open:** cross-reference provenance and edge-site inspection; indirect-call resolution per ISA; caller/callee behavior on recursion/duplicate sites/empty graphs/limit hits; function discovery precision/recall; type confidence and synchronized listing/decompiler views; annotations with undo/redo/project export; sustained fuzzing and performance distributions.
 
 **Next atomic action:** validate run 39342648910 and review graph screenshots, then migrate all changes intact to a conventional feat/ branch and ensure only one open draft PR remains. Update the resume cursor before any interruption.
+
+### RQ-008 — 2026-10-20 — Fix clipped wide-fanout CFGs after screenshot inspection
+
+**Request:** Inspect actual browser screenshots rather than assuming a passing render test means the graph is legible; fix the wide switch-like CFG where a top-down layout spans beyond the visible viewport.
+
+**Evidence:** Chromium and Firefox artifacts for run [39383182525](https://github.com/sagarchive/rdis/actions/runs/39383182525) were downloaded. The 180-node chain confirmed Fit-all is only a topology overview at ~4% zoom, while Entry correctly restores readable local context. The wide fan-out screenshot still showed destinations clipped at the left/right edges in the initial top-down layout, despite the minimap and Fit-all path working.
+
+**Change:** CFG/callgraph rendering now counts outgoing edges in the DOT source and defaults to left-to-right for fan-out degree >=7, stacking destinations vertically rather than spreading a wide row across the viewport. The toolbar exposes a reversible TB/LR layout switch, and entry-focused navigation centers the root for horizontal layouts. Browser fixtures mark the entry block, assert LR was selected for a 12-way switch, check destination visibility, toggle TB and back to LR, and preserve Fit/minimap assertions. GitHub Pages/README user-facing docs describe the new behaviour.
+
+**Acceptance gates:** current-head Python 3.10/3.12 hardening + baseline, Chromium/Firefox browser, and macOS regression must pass; inspect updated `wide-graph-entry-view.png` and `wide-graph-top-down-layout.png` artifacts; assert all 15 fixture nodes remain available after each orientation toggle and SVG export follows the rendered orientation. This is an adaptive layout improvement, not a claim that the entire graph is readable without pan/minimap.
+
+**Status:** IN PROGRESS — code and tests are on `feat/callgraph-and-analysis-baselines`; new CI is running. Do not advance this gate until the updated screenshots have been reviewed and the latest run is green.
 
 ### RQ-007 — 2026-10-20 — Verify rendered CFG/call graphs, keep Pages accurate, and consolidate on a conventional feature branch
 
