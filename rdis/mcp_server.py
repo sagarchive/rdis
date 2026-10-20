@@ -7,7 +7,7 @@ Run:  python -m rdis.mcp_server
 Register in an MCP client as command `python` args `["-m","rdis.mcp_server"]` (cwd = this repo),
 or wrap with the venv's python. One binary is held open per session, keyed by path.
 """
-import hashlib, json, os, sys, threading, traceback
+import hashlib, json, os, re, sys, threading, traceback
 from collections import OrderedDict
 
 from .loader import open_image
@@ -147,6 +147,131 @@ def t_info(path, arch=None, **k):
                          for s in p.image.sections]}
 
 
+def _func(p, func):
+    a = p.resolve(func)
+    f = p.function_at(a) or p.functions.get(a)
+    if f is None:
+        raise KeyError(f"no function at {func}")
+    return f
+
+def _ref(p, a):
+    return {"addr": hex(a), "name": p.display(a) or ""}
+
+def t_search(path, query, arch=None, **k):
+    from .server import _search          # the UI's search box: names, strings, address/hex
+    return {"results": _search(_prog(path, arch, **k), query)}
+
+def t_lookup(path, addr, arch=None, **k):
+    from .server import _addrinfo
+    p = _prog(path, arch, **k)
+    return _addrinfo(p, p.resolve(addr))
+
+def t_callees(path, func, arch=None, **k):
+    p = _prog(path, arch, **k)
+    return {"callees": [_ref(p, a) for a in sorted(_func(p, func).calls)]}
+
+def t_callers(path, func, arch=None, **k):
+    p = _prog(path, arch, **k)
+    f, seen = _func(p, func), set()
+    for src, kind in p.xrefs_to(f.addr):
+        c = p.function_at(src)
+        if kind in ("call", "tail") and c is not None:
+            seen.add(c.addr)
+    return {"callers": [_ref(p, a) for a in sorted(seen)]}
+
+def t_basic_blocks(path, func, arch=None, **k):
+    p = _prog(path, arch, **k)
+    f = _func(p, func)
+    return {"blocks": [{"start": hex(b.addr), "end": hex(b.end), "succs": [hex(s) for s in b.succs]}
+                       for _, b in sorted(f.blocks.items())]}
+
+def t_stack_frame(path, func, arch=None, **k):
+    p = _prog(path, arch, **k)
+    return {"locals": [{"offset": o, "name": n, "type": t} for o, n, t in render._stack_vars(p, _func(p, func))]}
+
+def t_read_bytes(path, addr, size=256, arch=None, **k):
+    p = _prog(path, arch, **k)
+    a = p.resolve(addr)
+    return {"addr": hex(a), "hex": p.image.read(a, max(0, min(int(size), 65536))).hex()}
+
+def t_find_bytes(path, pattern, limit=100, arch=None, **k):
+    """`pattern`: hex bytes, `??` wildcards (e.g. "fd 7b ?? a9")."""
+    p = _prog(path, arch, **k)
+    toks = pattern.replace(" ", "")
+    if len(toks) % 2 or not re.fullmatch(r"(?:[0-9a-fA-F]{2}|\?\?)+", toks):
+        raise ValueError("pattern must be hex byte pairs, ?? for any byte")
+    rx = re.compile(b"".join(b"." if toks[i:i + 2] == "??" else re.escape(bytes.fromhex(toks[i:i + 2]))
+                             for i in range(0, len(toks), 2)), re.S)
+    hits = []
+    for sec in p.image.sections:
+        data = p.image.read(sec.va, sec.size)
+        for m in rx.finditer(data):
+            hits.append({"addr": hex(sec.va + m.start()), "section": sec.name})
+            if len(hits) >= limit:
+                return {"matches": hits, "truncated": True}
+    return {"matches": hits, "truncated": False}
+
+def t_find_insns(path, regex, func=None, limit=200, arch=None, **k):
+    """Instructions whose `mnemonic operands` text matches `regex`, in one or all functions."""
+    p = _prog(path, arch, **k)
+    rx, hits = re.compile(regex, re.I), []
+    funcs = [_func(p, func)] if func else [p.functions[a] for a in sorted(p.functions)]
+    for f in funcs:
+        for b in f.blocks.values():
+            for i in b.shown:
+                if rx.search(f"{i.mnemonic} {i.op_str}"):
+                    hits.append({"addr": hex(i.address), "insn": f"{i.mnemonic} {i.op_str}",
+                                 "function": p.display(f.addr) or hex(f.addr)})
+                    if len(hits) >= limit:
+                        return {"matches": hits, "truncated": True}
+    return {"matches": hits, "truncated": False}
+
+def t_rename_many(path, items, arch=None, **k):
+    """Batch rename: `items` is [{"addr": ..., "name": ...}, ...]."""
+    p = _prog(path, arch, **k)
+    for it in items:
+        p.rename(p.resolve(it["addr"]), it["name"])
+    p.save(p.rdb_path())
+    return {"ok": True, "renamed": len(items)}
+
+def t_define_function(path, addr, arch=None, **k):
+    p = _prog(path, arch, **k)
+    f = p.create_function(p.resolve(addr))
+    p.save(p.rdb_path())
+    return {"ok": f is not None, "blocks": len(f.blocks) if f else 0}
+
+def t_undefine_function(path, addr, arch=None, **k):
+    p = _prog(path, arch, **k)
+    ok = p.remove_function(p.resolve(addr))
+    p.save(p.rdb_path())
+    return {"ok": ok}
+
+def t_set_type(path, addr, kind, arch=None, **k):
+    if kind not in ("data", "ascii", "code", ""):
+        raise ValueError("kind must be data, ascii, code or empty to clear")
+    p = _prog(path, arch, **k)
+    p.set_type(p.resolve(addr), kind or None)
+    p.save(p.rdb_path())
+    return {"ok": True}
+
+def t_bookmarks(path, addr=None, on=True, arch=None, **k):
+    p = _prog(path, arch, **k)
+    if addr is not None:
+        p.bookmark(p.resolve(addr), on)
+        p.save(p.rdb_path())
+    return {"bookmarks": [_ref(p, a) for a in sorted(p.bookmarks)]}
+
+def t_jump_tables(path, arch=None, **k):
+    p = _prog(path, arch, **k)
+    return {"jump_tables": [{"at": hex(a), "cases": {str(c): hex(t) for c, t in jt["cases"].items()}}
+                            for a, jt in sorted(p.jump_tables.items())]}
+
+def t_jni_natives(path, arch=None, **k):
+    p = _prog(path, arch, **k)
+    return {"natives": [{"addr": hex(a), "name": n, "signature": sig}
+                        for a, (n, sig, _) in sorted(p.jni_natives.items())]}
+
+
 TOOLS = {
     "list_functions": (t_list_functions, "List discovered functions (addr, resolved name).",
                        {"path": "string", "arch": "string?", "limit": "integer?"}),
@@ -173,6 +298,38 @@ TOOLS = {
                {"path": "string", "addr": "string", "name": "string", "arch": "string?"}),
     "comment": (t_comment, "Attach a comment to an address; persisted to <binary>.rdb.",
                 {"path": "string", "addr": "string", "text": "string", "arch": "string?"}),
+    "search": (t_search, "Search names and strings, or resolve an address/symbol.",
+               {"path": "string", "query": "string", "arch": "string?"}),
+    "lookup": (t_lookup, "What an address is: section, file offset, owning function, instruction, xref count.",
+               {"path": "string", "addr": "string", "arch": "string?"}),
+    "callees": (t_callees, "Functions called by a function.",
+                {"path": "string", "func": "string", "arch": "string?"}),
+    "callers": (t_callers, "Functions that call (or tail-call) a function.",
+                {"path": "string", "func": "string", "arch": "string?"}),
+    "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",
+                     {"path": "string", "func": "string", "arch": "string?"}),
+    "stack_frame": (t_stack_frame, "Recovered stack locals of a function (offset, name, type).",
+                    {"path": "string", "func": "string", "arch": "string?"}),
+    "read_bytes": (t_read_bytes, "Raw bytes at an address as hex (max 64 KiB).",
+                   {"path": "string", "addr": "string", "size": "integer?", "arch": "string?"}),
+    "find_bytes": (t_find_bytes, "Find a byte pattern (hex, ?? wildcards) in every section.",
+                   {"path": "string", "pattern": "string", "limit": "integer?", "arch": "string?"}),
+    "find_insns": (t_find_insns, "Find instructions matching a regex, in one function or all.",
+                   {"path": "string", "regex": "string", "func": "string?", "limit": "integer?", "arch": "string?"}),
+    "rename_many": (t_rename_many, "Rename many addresses at once: items=[{addr, name}].",
+                    {"path": "string", "items": "array", "arch": "string?"}),
+    "define_function": (t_define_function, "Mark an address as a function start and analyze it.",
+                        {"path": "string", "addr": "string", "arch": "string?"}),
+    "undefine_function": (t_undefine_function, "Remove the function starting at an address.",
+                          {"path": "string", "addr": "string", "arch": "string?"}),
+    "set_type": (t_set_type, "Mark an address as data, ascii or code (empty clears).",
+                 {"path": "string", "addr": "string", "kind": "string", "arch": "string?"}),
+    "bookmarks": (t_bookmarks, "List bookmarks; with addr, add (on=true) or remove one.",
+                  {"path": "string", "addr": "string?", "on": "boolean?", "arch": "string?"}),
+    "jump_tables": (t_jump_tables, "Recovered switch jump tables (case -> target).",
+                    {"path": "string", "arch": "string?"}),
+    "jni_natives": (t_jni_natives, "Android JNI natives recovered from RegisterNatives tables.",
+                    {"path": "string", "arch": "string?"}),
 }
 
 

@@ -207,6 +207,11 @@ def _symbols(b):
         for e in b.exported_functions:
             out[base + e.address] = _str(e.name)
         return out
+    # LIEF's `functions` misses most LC_FUNCTION_STARTS entries (24 of /bin/ls's 50, 1 of a Bun
+    # binary's 72,876), and that table survives `strip`: read it directly, offsets from __TEXT.
+    if isinstance(b, lief.MachO.Binary) and b.has_function_starts:
+        for off in b.function_starts.functions:
+            out.setdefault(base + off, "")
     for s in b.symbols:
         if s.value and s.name:
             out[s.value] = out.get(s.value) or _str(s.name)

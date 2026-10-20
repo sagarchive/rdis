@@ -689,7 +689,19 @@ function loaderDialog(src) {
   };
 }
 function closeOverlay() { $("#overlay").classList.remove("show"); }
-function busy(on, text) { if (text) $("#busytext").textContent = text; $("#busy").classList.toggle("show", on); }
+let busyPoll = null;
+function busy(on, text) {
+  if (text) $("#busytext").textContent = text;
+  $("#busy").classList.toggle("show", on);
+  clearInterval(busyPoll); busyPoll = null;
+  if (!on || !/^Analyzing|^Loading/.test(text || "")) return;
+  // a big binary takes minutes: show what the analysis is doing rather than a bare spinner
+  busyPoll = setInterval(async () => {
+    try { const r = (await api("progress")).running[0]; if (!r || !busyPoll) return;
+          $("#busytext").textContent = `${text.replace(/…$/, "")} — ${r.phase}, ` +
+            `${r.functions.toLocaleString()} functions, ${r.percent}% of code`; } catch {}
+  }, 1000);
+}
 
 /* drag & drop anywhere */
 let dragDepth = 0;

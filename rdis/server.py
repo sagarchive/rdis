@@ -231,6 +231,9 @@ def api(route, q):
                                               for k, v in s["docs"].items()],
                 "allow_paths": CFG["allow_paths"], "allow_python": CFG["allow_python"],
                 "persist": CFG["persist"], "max_mb": CFG["max_mb"]}
+    if route == "progress":            # running analyses; only a single-user install may see them
+        from .analysis import ANALYZING
+        return {"running": [a.progress() for a in list(ANALYZING)] if CFG["single_user"] else []}
     if route == "slices":
         if not CFG["allow_paths"]:
             raise PermissionError("opening server paths is disabled on this server")
