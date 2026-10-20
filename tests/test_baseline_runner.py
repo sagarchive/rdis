@@ -163,6 +163,52 @@ class BaselineCorpusTests(unittest.TestCase):
                 self.assertEqual(len(data), constraint["size_bytes"])
                 self.assertEqual(hashlib.sha256(data).hexdigest(), constraint["sha256"])
 
+    def test_promoted_v4_baseline_record_matches_live_manifest_and_jump_table_metrics(self):
+        root = SCRIPT.parents[1]
+        record_path = root / "benchmarks" / "baselines" / "rdis-baseline-corpus-v4" / "2026-10-20" / "record.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        self.assertEqual(record["baseline_id"], "rdis-baseline-corpus-v4/2026-10-20")
+        self.assertEqual(record["source"]["pull_request"], 5)
+        self.assertEqual(record["ci"]["workflow_run_id"], 39411079671)
+        self.assertEqual(record["ci"]["conclusion"], "success")
+
+        manifest_path = root / record["corpus"]["manifest_path"]
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v4")
+        self.assertEqual(hashlib.sha256(manifest_bytes).hexdigest(), record["corpus"]["manifest_sha256"])
+        live_path = root / "tests" / "baseline_corpus.json"
+        live_bytes = live_path.read_bytes()
+        self.assertEqual(hashlib.sha256(live_bytes).hexdigest(), record["corpus"]["manifest_sha256"])
+        self.assertEqual(
+            next(x["sha256"] for x in manifest["entries"]
+                 if x["id"] == "optimized-relative-jump-table-fixture-source"),
+            "41f7b597314498d6de3586e6e0625d37f333a0f366e0143e140d7bb3a1deef84",
+        )
+
+        truth_path = root / record["corpus"]["truth_results_path"]
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
+        table = next(x for x in truth["metrics"] if x["fixture"] == "optimized-relative-jump-table-v1")
+        self.assertEqual(table["case_count"], 12)
+        self.assertEqual(table["expected_edges"], 14)
+        self.assertEqual(table["observed_edges"], 14)
+        self.assertEqual(table["precision"], 1.0)
+        self.assertEqual(table["recall"], 1.0)
+        self.assertEqual(table["f1"], 1.0)
+
+        for profile in record["ci"]["profiles"]:
+            with self.subTest(profile=profile["id"]):
+                self.assertEqual(profile["status"], "passed")
+                self.assertEqual(profile["counts"]["failed"], 0)
+                self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", profile["environment_manifest_sha256"]))
+                self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", profile["pip_freeze_sha256"]))
+
+        for constraint in record["constraints"]["files"]:
+            with self.subTest(constraint=constraint["path"]):
+                data = (root / constraint["path"]).read_bytes()
+                self.assertEqual(len(data), constraint["size_bytes"])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), constraint["sha256"])
+
     def test_hash_mismatch_is_reported_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
