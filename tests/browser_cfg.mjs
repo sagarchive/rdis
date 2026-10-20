@@ -495,7 +495,13 @@ try {
   await page.locator("#glayout").click();
   await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "TB");
   await page.locator("#graph > svg g.graph").waitFor();
+  await page.waitForTimeout(180);
   assert.equal(await page.locator("#graph > svg g.node").count(), 15);
+  const topDownFit = await fitCheck();
+  assert(topDownFit.graph.left >= topDownFit.viewport.left + 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.top >= topDownFit.viewport.top + 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.right <= topDownFit.viewport.right - 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.bottom <= topDownFit.viewport.bottom - 2, JSON.stringify(topDownFit));
   await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
   await page.locator("#glayout").click();
   await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "LR");
