@@ -233,8 +233,8 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
 @unittest.skipUnless(
     platform.system() == "Linux"
     and platform.machine().lower() in ("x86_64", "amd64")
-    and all(shutil.which(tool) for tool in ("cc", "nm", "strip")),
-    "compiler/symbol/strip truth benchmark currently runs on Linux x86-64",
+    and all(shutil.which(tool) for tool in ("cc", "nm", "strip", "objdump")),
+    "compiler/symbol/strip/objdump truth benchmark currently runs on Linux x86-64",
 )
 class FunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
     def _symbol_truth(self, binary):
@@ -323,6 +323,158 @@ class FunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                             metrics["precision"], 0.90,
                             "too many unsupported function starts: " + json.dumps(report, sort_keys=True),
                         )
+
+
+    @staticmethod
+    def _objdump_switch_edges(binary):
+        """Independent CFG edge oracle from GNU objdump's x86-64 instruction listing."""
+        disassembly = subprocess.run(
+            [shutil.which("objdump"), "-d", "--disassemble=truth_switch", str(binary)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        rows = []
+        instruction_line = re.compile(
+            r"^\s*([0-9a-fA-F]+):\s*((?:[0-9a-fA-F]{2}\s+)+)\s*"
+            r"([A-Za-z][A-Za-z0-9.]*)\s*(.*?)\s*$"
+        )
+        for line in disassembly.splitlines():
+            m = instruction_line.match(line)
+            if not m:
+                continue
+            rows.append({
+                "addr": int(m.group(1), 16),
+                "size": len(m.group(2).split()),
+                "mnemonic": m.group(3).lower(),
+                "operands": m.group(4),
+            })
+        rows.sort(key=lambda row: row["addr"])
+        if not rows:
+            raise AssertionError("objdump produced no instructions for truth_switch")
+
+        addresses = {row["addr"] for row in rows}
+        leaders = {rows[0]["addr"]}
+        terminators = set()
+        for index, row in enumerate(rows):
+            mnemonic = row["mnemonic"]
+            is_jump = mnemonic.startswith("j")
+            is_return = mnemonic.startswith("ret")
+            if not (is_jump or is_return):
+                continue
+            terminators.add(row["addr"])
+            target_match = re.match(r"^\s*([0-9a-fA-F]+)\b", row["operands"])
+            if is_jump and target_match and not row["operands"].lstrip().startswith("*"):
+                target = int(target_match.group(1), 16)
+                if target in addresses:
+                    leaders.add(target)
+            next_addr = row["addr"] + row["size"]
+            if next_addr in addresses:
+                leaders.add(next_addr)
+
+        groups = {}
+        current = None
+        for row in rows:
+            if current is None or row["addr"] in leaders:
+                current = row["addr"]
+                groups[current] = []
+            groups[current].append(row)
+
+        expected = set()
+        block_starts = set(groups)
+        for start, block in groups.items():
+            last = block[-1]
+            mnemonic = last["mnemonic"]
+            next_addr = last["addr"] + last["size"]
+            target_match = re.match(r"^\s*([0-9a-fA-F]+)\b", last["operands"])
+            target = (
+                int(target_match.group(1), 16)
+                if target_match and not last["operands"].lstrip().startswith("*")
+                else None
+            )
+            if mnemonic.startswith("ret"):
+                continue
+            if mnemonic.startswith("jmp"):
+                if target in block_starts:
+                    expected.add((start, target))
+                continue
+            if mnemonic.startswith("j"):
+                if target in block_starts:
+                    expected.add((start, target))
+                if next_addr in block_starts:
+                    expected.add((start, next_addr))
+                continue
+            if next_addr in block_starts:
+                expected.add((start, next_addr))
+        return expected, rows
+
+    def test_compiler_switch_cfg_edges_match_independent_objdump_oracle(self):
+        source = Path(__file__).resolve().parent / "fixtures" / "function_discovery_fixture.c"
+        with tempfile.TemporaryDirectory(prefix="rdis-switch-cfg-truth-") as temporary:
+            binary = Path(temporary) / "switch-o0"
+            command = [
+                shutil.which("cc"),
+                "-O0",
+                "-fno-jump-tables",
+                "-fno-inline",
+                "-fno-omit-frame-pointer",
+                "-fno-stack-protector",
+                "-fno-unwind-tables",
+                "-fno-asynchronous-unwind-tables",
+                "-fno-pie",
+                "-no-pie",
+                "-nostdlib",
+                "-Wl,-e,truth_entry",
+                str(source),
+                "-o",
+                str(binary),
+            ]
+            built = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(
+                built.returncode, 0,
+                "switch fixture compiler failed: " + " ".join(command) + "\n" + built.stderr,
+            )
+
+            symbols = self._symbol_truth(binary)
+            switch_addr = symbols["truth_switch"]
+            expected_edges, instructions = self._objdump_switch_edges(binary)
+            program = Program(open_image(str(binary), arch="x86_64")).analyze(
+                objc=False, swift=False, prologues=True
+            )
+            self.assertIn(switch_addr, program.functions)
+            func = program.functions[switch_addr]
+            observed_edges = {
+                (block.addr, successor)
+                for block in func.blocks.values()
+                for successor in block.succs
+            }
+            metrics = _precision_recall_f1(expected_edges, observed_edges)
+            report = {
+                "fixture": "compiler-switch-cfg-v1",
+                "architecture": "x86_64",
+                "compiler": subprocess.run(
+                    [shutil.which("cc"), "--version"], check=True,
+                    capture_output=True, text=True
+                ).stdout.splitlines()[0],
+                "oracle": "GNU objdump direct-branch CFG reconstruction",
+                "optimization": "-O0",
+                "jump_tables": "disabled to isolate direct branch edge semantics",
+                "function_addr": hex(switch_addr),
+                "oracle_instructions": len(instructions),
+                **metrics,
+            }
+            print("CFG_EDGE_METRIC " + json.dumps(report, sort_keys=True))
+            self.assertGreaterEqual(len(expected_edges), 20, json.dumps(report, sort_keys=True))
+            self.assertEqual(
+                observed_edges, expected_edges,
+                "RDIS switch CFG differs from the independent objdump oracle: "
+                + json.dumps(report, sort_keys=True)
+                + "\nexpected-only=" + repr(sorted(expected_edges - observed_edges))
+                + "\nobserved-only=" + repr(sorted(observed_edges - expected_edges)),
+            )
+            self.assertEqual(metrics["precision"], 1.0, json.dumps(report, sort_keys=True))
+            self.assertEqual(metrics["recall"], 1.0, json.dumps(report, sort_keys=True))
+            self.assertEqual(metrics["f1"], 1.0, json.dumps(report, sort_keys=True))
 
 
 
