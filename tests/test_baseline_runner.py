@@ -26,8 +26,8 @@ class BaselineCorpusTests(unittest.TestCase):
         manifest = json.loads(raw.decode("utf-8"))
         baseline.validate_manifest(manifest)
         entries, by_id = baseline.verify_entries(manifest, root, baseline.host_context())
-        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v3")
-        for identifier in ("cfg-fixture-source", "arm64-branch-fixture", "x86-64-loop-fixture", "function-discovery-fixture-source"):
+        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v4")
+        for identifier in ("cfg-fixture-source", "arm64-branch-fixture", "x86-64-loop-fixture", "function-discovery-fixture-source", "optimized-relative-jump-table-fixture-source"):
             with self.subTest(entry=identifier):
                 self.assertEqual(by_id[identifier]["status"], "passed", by_id[identifier])
                 self.assertEqual(
@@ -80,7 +80,7 @@ class BaselineCorpusTests(unittest.TestCase):
         self.assertEqual(record["baseline_id"], "rdis-baseline-corpus-v2/2026-10-19")
         self.assertEqual(record["corpus"]["id"], "rdis-baseline-corpus-v2")
 
-        # The v2 record is immutable historical evidence. The live manifest has advanced to v3;
+        # The v2 record is immutable historical evidence. The live manifest has advanced to v4;
         # verify v2 against its frozen manifest snapshot instead of silently changing old provenance.
         manifest_path = root / record["corpus"]["manifest_path"]
         self.assertEqual(
@@ -91,7 +91,7 @@ class BaselineCorpusTests(unittest.TestCase):
                          record["corpus"]["manifest_sha256"])
         live_manifest_path = root / "tests" / "baseline_corpus.json"
         live_manifest = json.loads(live_manifest_path.read_text(encoding="utf-8"))
-        self.assertEqual(live_manifest["corpus_id"], "rdis-baseline-corpus-v3")
+        self.assertEqual(live_manifest["corpus_id"], "rdis-baseline-corpus-v4")
         self.assertNotEqual(
             hashlib.sha256(live_manifest_path.read_bytes()).hexdigest(),
             record["corpus"]["manifest_sha256"],
