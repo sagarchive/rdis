@@ -442,8 +442,8 @@ try {
   assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "LR",
     "a switch-style high-fanout CFG should auto-select a vertical fan-out layout");
   const wideEntryZoom = parseInt(await page.locator("#zval").textContent(), 10);
-  assert(wideEntryZoom >= 80 && wideEntryZoom <= 100,
-    "wide CFG entry layout should keep labels readable, got " + wideEntryZoom + "%");
+  assert(wideEntryZoom >= 60 && wideEntryZoom <= 85,
+    "wide CFG entry layout should fit the branch neighborhood and shared join, got " + wideEntryZoom + "%");
   const visibleWideNodes = await page.evaluate(() => {
     const host = document.querySelector("#graph").getBoundingClientRect();
     return [...document.querySelectorAll("#graph > svg g.node")].filter(node => {
@@ -464,11 +464,14 @@ try {
     const nodeName = node => node.querySelector(":scope > title")?.textContent?.trim() || "";
     const entry = nodes.find(n => nodeName(n) === "entry");
     const cases = nodes.filter(n => /^case\d+$/.test(nodeName(n)));
+    const join = nodes.find(n => nodeName(n) === "join");
     return { entryVisible: !!entry && fullyVisible(entry),
+      joinVisible: !!join && fullyVisible(join),
       visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length,
       titles: nodes.map(nodeName) };
   });
   assert(wideNeighborhood.entryVisible, "horizontal layout must keep the entry inside the unobscured viewport");
+  assert(wideNeighborhood.joinVisible, "horizontal entry view must include the shared join instead of clipping it at the right edge: " + JSON.stringify(wideNeighborhood));
   assert(wideNeighborhood.visibleCases >= 10,
     "wide CFG should fit nearly all 12 direct branch targets in the readable initial view: " +
     JSON.stringify(wideNeighborhood));
