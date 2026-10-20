@@ -24,6 +24,14 @@ MAX_INSNS = 50_000  # Safety cap against runaway descent into data.
 INSN_CACHE = 400_000
 # an indexed memory operand (`[x8, x9, lsl #2]`, `[rcx + rax*4]`): a value-table load candidate
 _INDEXED = re.compile(r"\[[^\]]*(?:, |\+ )[a-z]")
+# Instructions after which nothing executes, and callees that never return. Decoding past either runs
+# into the next function: one missed `exit` merged most of a 40 KB binary into a single "function".
+TRAPS = frozenset({"udf", "brk", "ud2", "ud1", "hlt", "bkpt", "break"})
+NORETURN = frozenset({
+    "exit", "Exit", "abort", "assert_fail", "assert_rtn", "assert", "stack_chk_fail", "stack_chk_fail_local",
+    "chk_fail", "fortify_fail", "libc_fatal", "longjmp", "siglongjmp", "quick_exit", "pthread_exit", "cxa_throw",
+    "cxa_rethrow", "cxa_bad_cast", "cxa_bad_typeid", "cxa_pure_virtual", "cxa_throw_bad_array_new_length",
+    "terminate", "err", "errx", "verr", "verrx", "abort_message", "halt"})
 ANALYZING = set()   # Programs mid-analyze(), polled by the server's progress route
 
 
@@ -119,10 +127,11 @@ class Function:
     blocks: dict  # addr -> Block, in address order
     calls: set    # callee code addresses
     tables: bool = True  # may hold a jump/value table (an indirect jump or an indexed load)
+    stops: frozenset = frozenset()  # instructions after which control never continues (traps, noreturn calls)
 
     @property
     def end(self):
-        return max(b.end for b in self.blocks.values())
+        return max((b.end for b in self.blocks.values()), default=self.addr)
 
 
 class _CowXrefSet(MutableSet):
@@ -194,6 +203,7 @@ class Program:
         self.functions = {}
         self.xrefs = defaultdict(set)  # target -> {(from_addr, kind)}
         self._insns = {}
+        self.noreturn_addrs = set()    # functions inferred never to return, beside the NORETURN names
         self._insn_gen = [0]           # bumped on each cache eviction; shared with session overlays
         self._strings = None
         self.pretty, self.objc, self.swift = {}, None, None
@@ -306,6 +316,8 @@ class Program:
         if prologues:
             self.phase = "scanning for unreferenced functions"
             self._discover(list(self._prologue_scan()))
+        self.phase = "inferring non-returning functions"
+        self._infer_noreturn()
         self.phase = "recovering jump tables"
         self._recover_tables()
         self.pretty = demangle_all(self.names.values())
@@ -531,7 +543,10 @@ class Program:
             if a in self.functions or a in self.removed_procs or not self.image.is_code(a) \
                     or a in self.image.imports:
                 continue
-            f = self.functions[a] = self._build(a)
+            f = self._build(a)
+            if not f.blocks:                # nothing decodes here, so it is not a function
+                continue
+            self.functions[a] = f
             self._covered = getattr(self, "_covered", 0) + sum(b.end - b.addr for b in f.blocks.values())
             self.names.setdefault(a, f"sub_{a:x}")
             work.extend(f.calls)
@@ -542,15 +557,21 @@ class Program:
         self._tmode.setdefault(start, thumb)
         work = [(start, thumb), *((s, thumb) for s in seeds)]
         known = self.image.symbols
-        delays, tables = set(), False
+        delays, tables, stops = set(), False, set()
+        barriers = self._function_starts()
         while work and len(insns) < MAX_INSNS:
             (a, tm), regs = work.pop(), {}
             while a not in seen and self.image.is_code(a):
+                if a != start and a in barriers:
+                    break                      # falling into the next function: the linker says one ends here
                 seen.add(a)
                 i = self.insn(a, tm)
                 if i is None:
                     break
                 insns[a] = i
+                if i.mnemonic in TRAPS:
+                    stops.add(a)
+                    break
                 k = self.arch.kind(i)
                 step = i.size
                 if not tables and (k == IJMP or i.mnemonic.startswith(("ldr", "mov", "ldur"))
@@ -578,6 +599,9 @@ class Program:
                         if self.image.is_code(t):
                             self._tmode.setdefault(t, tt)
                             calls.add(t)
+                        if self._noreturn(t):
+                            stops.add(a)
+                            break
                 elif k in (JMP, CJMP) and t is not None:
                     tail = t != start and (t in known or t in self.image.imports or not self.image.is_code(t))
                     self.xrefs[t].add((a, "tail" if tail else "jmp"))
@@ -598,7 +622,41 @@ class Program:
                 elif k == RET:
                     break
                 a += step
-        return Function(start, self._lazy(self._split(start, insns, delays)), calls, tables)
+        return Function(start, self._lazy(self._split(start, insns, delays, stops)), calls, tables, frozenset(stops))
+
+    def _function_starts(self):
+        """Addresses the file itself declares as function starts (symbols, LC_FUNCTION_STARTS, unwind data),
+        without ARM mapping symbols or local labels."""
+        if getattr(self, "_starts", None) is None:
+            self._starts = frozenset(a for a, n in self.image.symbols.items()
+                                     if self.image.is_code(a) and not n.startswith(("$", ".L", "ltmp")))
+        return self._starts
+
+    def _noreturn(self, target):
+        if target in self.noreturn_addrs:
+            return True
+        name = self.names.get(target) or self.image.imports.get(target) or self.image.symbols.get(target)
+        return bool(name) and name.split("@")[0].split("$")[0].lstrip("_") in NORETURN
+
+    def _infer_noreturn(self):
+        """A function whose every exit is a trap or a call to a non-returning function never returns either.
+        Callers built before that was known are rebuilt; a few rounds reach the practical fixed point."""
+        for _ in range(4):
+            found = {a for a, f in self.functions.items() if a not in self.noreturn_addrs and self._never_returns(f)}
+            if not found:
+                return
+            self.noreturn_addrs |= found
+            for a, f in list(self.functions.items()):
+                if f.calls & found:
+                    rebuilt = self._build(a)
+                    if rebuilt.blocks:
+                        self.functions[a] = rebuilt
+
+    def _never_returns(self, f):
+        if not f.stops:
+            return False
+        exits = [b for b in f.blocks.values() if not any(s in f.blocks for s in b.succs)]
+        return bool(exits) and all(b.shown[-1].address in f.stops for b in exits)
 
     def _lazy(self, blocks):
         """Drop the decoded instructions a finished function would otherwise pin for good."""
@@ -764,7 +822,7 @@ class Program:
             jt_targets.extend(cases.values())
             return
 
-    def _split(self, start, insns, delays=()):
+    def _split(self, start, insns, delays=(), stops=frozenset()):
         leaders = {start}
         for a, i in insns.items():
             if a in delays:
@@ -773,7 +831,7 @@ class Program:
             t = self.arch.target(i)
             if k in (JMP, CJMP) and t in insns:
                 leaders.add(t)
-            if k in (JMP, CJMP, RET, IJMP):
+            if k in (JMP, CJMP, RET, IJMP) or a in stops:
                 nxt = a + i.size
                 if nxt in delays:
                     nxt += insns[nxt].size
@@ -788,14 +846,14 @@ class Program:
                 cur = blocks[a] = Block(a, [])
             cur.insns.append(insns[a])
             last = cur
-            if self.arch.kind(insns[a]) in (JMP, CJMP, RET, IJMP):
+            if self.arch.kind(insns[a]) in (JMP, CJMP, RET, IJMP) or a in stops:
                 cur = None
         for b in blocks.values():
             last = b.insns[-1]
             k, t = self.arch.kind(last), self.arch.target(last)
             if k in (JMP, CJMP) and t in blocks:
                 b.succs.append(t)
-            if k not in (JMP, RET, IJMP) and b.end in blocks and b.end not in b.succs:
+            if k not in (JMP, RET, IJMP) and last.address not in stops and b.end in blocks and b.end not in b.succs:
                 b.succs.append(b.end)
         return blocks
 

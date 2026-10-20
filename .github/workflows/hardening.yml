@@ -137,7 +137,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Run extended unit suites
-        run: python -m unittest -v tests.test_cfg_unresolved tests.test_diff tests.test_signatures tests.test_mcp_contract tests.test_malformed_inputs tests.test_fuzz_smoke tests.test_plugins tests.test_scorecard tests.test_triage
+        run: python -m unittest -v tests.test_cfg_unresolved tests.test_diff tests.test_signatures tests.test_mcp_contract tests.test_malformed_inputs tests.test_fuzz_smoke tests.test_plugins tests.test_scorecard tests.test_triage tests.test_function_boundaries
       # After the baseline capture on purpose: pypcode is an optional extra, so it must not change the
       # recorded environment. This is the only job that exercises the SLEIGH multi-CPU backend.
       - name: Run SLEIGH multi-CPU tests (optional pypcode extra)
