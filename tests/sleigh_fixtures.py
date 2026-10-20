@@ -72,13 +72,15 @@ ELF_MACHINE = {"ppc": (20, 32, ">"), "m68k": (4, 32, ">"), "avr8": (83, 32, "<")
                "loongarch64": (258, 64, "<")}
 
 
-def elf(name):
-    """Smallest ELF that LIEF parses: one executable PT_LOAD and one .text section holding the fixture."""
-    code, base, entry, _, _ = FIXTURES[name]()
+def elf(name, code=None, section=".text", sh_flags=6, ph_flags=5, entry=None):
+    """Smallest ELF that LIEF parses: one PT_LOAD and one section holding the fixture (or `code`)."""
+    fixture_code, base, fixture_entry, _, _ = FIXTURES[name]()
+    code = fixture_code if code is None else code
+    entry = fixture_entry if entry is None else entry
     machine, bits, e = ELF_MACHINE[name]
     wide = bits == 64
     ehsize, phsize, shsize = (64, 56, 64) if wide else (52, 32, 40)
-    shstr = b"\0.text\0.shstrtab\0"
+    shstr = b"\0" + section.encode() + b"\0.shstrtab\0"
     code_off = ehsize + phsize
     str_off = code_off + len(code)
     sh_off = (str_off + len(shstr) + 7) & ~7
@@ -87,11 +89,11 @@ def elf(name):
     hdr = ident + struct.pack(e + "HHI" + addr * 3 + "IHHHHHH", 2, machine, 1, entry, ehsize, sh_off, 0,
                               ehsize, phsize, 1, shsize, 3, 2)
     if wide:
-        ph = struct.pack(e + "IIQQQQQQ", 1, 5, code_off, base, base, len(code), len(code), 4)
+        ph = struct.pack(e + "IIQQQQQQ", 1, ph_flags, code_off, base, base, len(code), len(code), 4)
     else:
-        ph = struct.pack(e + "IIIIIIII", 1, code_off, base, base, len(code), len(code), 5, 4)
+        ph = struct.pack(e + "IIIIIIII", 1, code_off, base, base, len(code), len(code), ph_flags, 4)
     sec = lambda nm, ty, fl, ad, off, sz: struct.pack(
         e + "II" + addr * 4 + "IIII" if not wide else e + "IIQQQQIIQQ",
         *((nm, ty, fl, ad, off, sz, 0, 0, 1, 0) if wide else (nm, ty, fl, ad, off, sz, 0, 0, 1, 0)))
-    shdrs = sec(0, 0, 0, 0, 0, 0) + sec(1, 1, 6, base, code_off, len(code)) + sec(7, 3, 0, 0, str_off, len(shstr))
+    shdrs = sec(0, 0, 0, 0, 0, 0) + sec(1, 1, sh_flags, base, code_off, len(code)) + sec(len(section) + 2, 3, 0, 0, str_off, len(shstr))
     return (hdr + ph + code + shstr).ljust(sh_off, b"\0") + shdrs, base, entry

@@ -222,6 +222,10 @@ def t_emulate(path, func, args, max_steps=100_000, arch=None, **k):
         return {"ok": False, "error": str(e), "budget": steps}
     return {"ok": True, "value": res.value, "hex": hex(res.value), "steps": res.steps, "budget": steps}
 
+def t_triage(path, arch=None, **k):
+    from .triage import triage
+    return triage(path, arch=arch)
+
 def t_unresolved(path, func=None, arch=None, **k):
     p = _prog(path, arch, **k)
     rows = p.unresolved([_func(p, func)] if func else None)
@@ -362,6 +366,8 @@ TOOLS = {
                    {"path": "string", "db": "string", "arch": "string?"}),
     "emulate": (t_emulate, "Run a function in the P-code emulator on integer arguments (no host execution; stops with an error on anything unmodelled).",
                 {"path": "string", "func": "string", "args": "array", "max_steps": "integer?", "arch": "string?"}),
+    "triage": (t_triage, "Entropy per section, packing indicators and runtime identification, each with its evidence; indicators are not verdicts.",
+               {"path": "string", "arch": "string?"}),
     "unresolved": (t_unresolved, "Indirect jumps and calls whose target could not be established (never guessed).",
                    {"path": "string", "func": "string?", "arch": "string?"}),
     "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",

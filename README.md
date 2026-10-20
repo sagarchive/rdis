@@ -30,6 +30,7 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
 | Struct/field reconstruction | heuristic access-based layouts with observed widths and some type evidence; overlapping views and call-linked layouts are supported; incomplete inference is explicitly experimental | yes |
 | SIMD | **lane-exact, compilable C** for NEON and SSE via vector extensions (`(u32x4)a + (u32x4)b`, `__builtin_reduce_add`), not pseudo-intrinsics | intrinsics |
+| Binary triage | per-section entropy, packing indicators, runtime identification; every finding carries its evidence and none is a verdict (`--triage`, MCP `triage`) | not listed on its product page |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
 | Cross-references | to any address/symbol | yes |
@@ -115,6 +116,7 @@ python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar'
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
 python -m rdis --list-archs                                      # every CPU rdis can load
 python -m rdis OLD --diff NEW                                   # match functions across two builds
+python -m rdis BIN --triage                                     # entropy, packing indicators, runtime hints
 python -m rdis BIN -f hash --emulate 0x1234                     # run a function in the P-code emulator
 python -m rdis LIB --sig-make lib.sig                           # signatures from a binary with symbols
 python -m rdis STRIPPED --sig lib.sig                           # name its unnamed functions from them
@@ -193,11 +195,11 @@ PYTHONPATH=. python -m rdis.mcp_server
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
 (use the venv's python).
 
-33 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+34 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
 
 | Group | Tools |
 |---|---|
-| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved` |
+| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage` |
 | Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
 | Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
 | Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |

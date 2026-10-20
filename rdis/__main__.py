@@ -80,6 +80,22 @@ def run_signatures(a, prog):
     print(f"{len(out['matches'])} named, {len(out['ambiguous'])} ambiguous")
 
 
+def run_triage(a, path):
+    from .triage import triage
+    out = triage(path, arch=a.arch)
+    if a.json:
+        print(json.dumps(out, sort_keys=True))
+        return
+    print(f"{out['file']}: {out['format']} {out['arch']}, {out['bytes']:,} bytes, overall entropy {out['overall_entropy']}")
+    for s in out["sections"]:
+        print(f"  {s['name']:<18} {s['size']:>10,}  entropy {s['entropy']:<6}{'  exec' if s['executable'] else ''}")
+    for r in out["runtimes"]:
+        print(f"runtime hint: {r['runtime']} ({', '.join(r['evidence'])})")
+    for i in out["indicators"]:
+        print(f"[{i['severity']}] {i['indicator']}: {i['evidence']}; consistent with {', '.join(i['consistent_with'])}")
+    print(out["note"])
+
+
 def run_tool(a, prog):
     from . import plugins
     plugins.load_all()
@@ -170,6 +186,7 @@ def main(argv=None):
     p.add_argument("--emulate", metavar="ARGS", help="run -f/--func in the P-code emulator with comma-separated "
                    "integer arguments (e.g. 7,0x10); stops with an error on anything it cannot model")
     p.add_argument("--max-steps", type=int, default=1_000_000, help="instruction budget for --emulate")
+    p.add_argument("--triage", action="store_true", help="entropy, packing indicators and runtime identification (evidence, not verdicts)")
     p.add_argument("--diff", metavar="OTHER", help="match this binary's functions against another build of it")
     p.add_argument("--transfer", action="store_true",
                    help="with --diff: copy renames and comments onto OTHER for matches at or above --min-confidence")
@@ -197,6 +214,8 @@ def main(argv=None):
                 print(f"rdis: 1 native library; analyzing {libs[0]['entry']}", file=sys.stderr)
                 path = containers.extract(path, libs[0]["entry"])
         prog = build(a, path)
+        if a.triage:
+            return run_triage(a, path)
         if a.tool:
             return run_tool(a, prog)
         if a.diff:
