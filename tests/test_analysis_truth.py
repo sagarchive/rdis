@@ -167,6 +167,37 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
         self.assertEqual(metrics["recall"], 1.0)
         self.assertEqual(metrics["f1"], 1.0)
 
+    def test_arm64_gap_scan_finds_stack_allocation_before_frame_save(self):
+        # RET; padding NOP; SUB SP,SP,#0x50; STP X29,X30,[SP,#0x40];
+        # ADD X29,SP,#0x40; RET. The allocation-first shape is common in large frames.
+        code = bytes.fromhex(
+            "c0 03 5f d6 1f 20 03 d5 "
+            "ff 43 01 d1 fd 7b 04 a9 fd 03 01 91 c0 03 5f d6"
+        )
+
+        def read(va, size):
+            offset = va - BASE
+            if offset < 0 or offset >= len(code):
+                return b""
+            return code[offset:offset + size]
+
+        image = Image(
+            "<arm64-allocation-first-prologue>",
+            "raw",
+            make("arm64"),
+            BASE,
+            BASE,
+            [Section(".text", BASE, len(code), 0, True)],
+            {BASE: "truth_entry"},
+            {},
+            read,
+            lambda va: va - BASE if BASE <= va < BASE + len(code) else None,
+        )
+        program = Program(image).analyze(objc=False, swift=False, prologues=True)
+        self.assertEqual(set(program.functions), {BASE, BASE + 8})
+        self.assertNotIn(BASE + 12, program.functions,
+                         "the frame-save instruction must not become a false function start")
+
 
 @unittest.skipUnless(
     platform.system() == "Linux"
