@@ -27,7 +27,7 @@ class BaselineCorpusTests(unittest.TestCase):
         baseline.validate_manifest(manifest)
         entries, by_id = baseline.verify_entries(manifest, root, baseline.host_context())
         self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v3")
-        for identifier in ("cfg-fixture-source", "arm64-branch-fixture", "function-discovery-fixture-source"):
+        for identifier in ("cfg-fixture-source", "arm64-branch-fixture", "x86-64-loop-fixture", "function-discovery-fixture-source"):
             with self.subTest(entry=identifier):
                 self.assertEqual(by_id[identifier]["status"], "passed", by_id[identifier])
                 self.assertEqual(
