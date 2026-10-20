@@ -474,13 +474,13 @@ try {
   // The user can switch layout direction explicitly; the graph must re-render in the chosen
   // orientation, preserve all nodes, and return to the fan-out-friendly automatic layout.
   await page.locator("#glayout").click();
+  await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "TB");
   await page.locator("#graph > svg g.graph").waitFor();
-  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "TB");
   assert.equal(await page.locator("#graph > svg g.node").count(), 15);
   await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
   await page.locator("#glayout").click();
+  await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "LR");
   await page.locator("#graph > svg g.graph").waitFor();
-  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "LR");
 
   await page.locator("#zfit").click();
   await page.waitForTimeout(150);
