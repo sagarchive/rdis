@@ -902,8 +902,8 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   // column instead of an extremely wide row whose ends must be clipped at readable zoom. Keep a
   // visible orientation toggle so this is a reversible layout choice, not a hidden transformation.
   const fanout = new Map();
-  for (const line of (d.dot || "").split(/\\r?\\n/)) {
-    const edge = line.match(/^\\s*"([^"]+)"\\s*->\\s*"([^"]+)"/);
+  for (const line of (d.dot || "").split(/\r?\n/)) {
+    const edge = line.match(/^\s*"([^"]+)"\s*->\s*"([^"]+)"/);
     if (edge) fanout.set(edge[1], (fanout.get(edge[1]) || 0) + 1);
   }
   const inferredLayout = graphKind === "callgraph" ? "LR" :
@@ -911,7 +911,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   const layout = graphOptions.layout === "TB" || graphOptions.layout === "LR"
     ? graphOptions.layout : inferredLayout;
   const renderedDot = d.dot
-    ? d.dot.replace(/(graph\\s*\\[[^\\]]*?\\brankdir\\s*=\\s*)(TB|LR)/i, (_match, prefix) => prefix + layout)
+    ? d.dot.replace(/(graph\s*\[[^\]]*?\brankdir\s*=\s*)(TB|LR)/i, (_match, prefix) => prefix + layout)
     : d.dot;
   const v = $("#view");
   v.innerHTML = `<div id="graph" role="region" aria-label="${graphKind === "callgraph" ? "Call graph. Select a function, double-click to open it, and use direction/depth controls to explore callers and callees." : "Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."}"><div id="ghud">
