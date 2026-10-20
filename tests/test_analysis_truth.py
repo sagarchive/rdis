@@ -519,11 +519,20 @@ class OptimizedJumpTableTruthTests(unittest.TestCase):
             match = pattern.match(line)
             if not match:
                 continue
+            mnemonic = match.group(3).lower()
+            operands = match.group(4)
+            # GNU objdump may print the legacy branch-not-taken prefix as a separate
+            # mnemonic token, e.g. "notrack jmp *%rax". Normalize it so the independently
+            # reconstructed CFG sees the same actual indirect JMP instruction bytes.
+            if mnemonic in ("notrack", "bnd", "data16"):
+                prefixed = re.match(r"^\\s*(jmpq?|callq?)\\s+(.*)$", operands, re.I)
+                if prefixed:
+                    mnemonic, operands = prefixed.group(1).lower(), prefixed.group(2)
             rows.append({
                 "addr": int(match.group(1), 16),
                 "size": len(match.group(2).split()),
-                "mnemonic": match.group(3).lower(),
-                "operands": match.group(4),
+                "mnemonic": mnemonic,
+                "operands": operands,
             })
         rows.sort(key=lambda row: row["addr"])
         if not rows:
