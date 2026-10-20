@@ -4,7 +4,8 @@ from .loader import Image, Section
 
 
 def load(path, arch=None, base=0, **_):
-    data = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        data = fh.read()
     base = int(base, 0) if isinstance(base, str) else base
     a = archmod.make(arch or "x86_64")
     read = lambda va, n: data[va - base: va - base + n] if base <= va < base + len(data) else b""

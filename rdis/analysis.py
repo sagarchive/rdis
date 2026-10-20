@@ -1060,3 +1060,22 @@ class Program:
 
     def xrefs_to(self, a):
         return sorted(self.xrefs.get(a, ()))
+
+    def unresolved(self, funcs=None):
+        """Indirect jumps and calls whose target rdis could not establish, as dicts sorted by address.
+
+        An unresolved transfer is reported, never given a guessed edge: a jump table needs a proven
+        bound, a call needs a constant target."""
+        funcs = list(self.functions.values()) if funcs is None else list(funcs)
+        resolved = {src for _, refs in self.xrefs.items() for src, k in refs if k in ("call", "tail", "jmp")}
+        out = []
+        for f in funcs:
+            for b in f.blocks.values():
+                for i in b.shown:
+                    k = self.arch.kind(i)
+                    if i.address in resolved or (k == IJMP and i.address in self.jump_tables):
+                        continue
+                    if k in (IJMP, CALL):
+                        out.append({"addr": i.address, "kind": "jump" if k == IJMP else "call",
+                                    "function": f.addr, "insn": f"{i.mnemonic} {i.op_str}".strip()})
+        return sorted(out, key=lambda r: r["addr"])

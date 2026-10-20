@@ -179,6 +179,12 @@ def t_callers(path, func, arch=None, **k):
             seen.add(c.addr)
     return {"callers": [_ref(p, a) for a in sorted(seen)]}
 
+def t_unresolved(path, func=None, arch=None, **k):
+    p = _prog(path, arch, **k)
+    rows = p.unresolved([_func(p, func)] if func else None)
+    return {"count": len(rows), "unresolved": [
+        {**r, "addr": hex(r["addr"]), "function": hex(r["function"])} for r in rows]}
+
 def t_basic_blocks(path, func, arch=None, **k):
     p = _prog(path, arch, **k)
     f = _func(p, func)
@@ -306,6 +312,8 @@ TOOLS = {
                 {"path": "string", "func": "string", "arch": "string?"}),
     "callers": (t_callers, "Functions that call (or tail-call) a function.",
                 {"path": "string", "func": "string", "arch": "string?"}),
+    "unresolved": (t_unresolved, "Indirect jumps and calls whose target could not be established (never guessed).",
+                   {"path": "string", "func": "string?", "arch": "string?"}),
     "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",
                      {"path": "string", "func": "string", "arch": "string?"}),
     "stack_frame": (t_stack_frame, "Recovered stack locals of a function (offset, name, type).",
