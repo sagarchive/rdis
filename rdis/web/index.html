@@ -1162,27 +1162,53 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
       } else {
         // Fit the entry and its first-level destinations, not the entire graph. That is exactly the
         // visible neighborhood that was getting clipped by the old wide top-down switch layout.
-        const rootTitle = root.querySelector("title")?.textContent || "";
-        const targetNames = [];
+        const rootTitle = root.querySelector(":scope > title")?.textContent?.trim() ||
+          root.querySelector("title")?.textContent?.trim() || "";
+        const edges = [];
         for (const line of (renderedDot || "").split(/\r?\n/)) {
           const edge = line.match(/^\s*"?([^"\s]+)"?\s*->\s*"?([^"\s]+)"?/);
-          if (edge && edge[1].toLowerCase() === rootTitle.toLowerCase()) targetNames.push(edge[2]);
+          if (edge) edges.push([edge[1], edge[2]]);
         }
+        const targetNames = edges.filter(([source]) => source.toLowerCase() === rootTitle.toLowerCase())
+          .map(([, target]) => target);
         const allNodes = [...svg.querySelectorAll("g.node")];
-        const targets = [...new Set(targetNames)].slice(0, 14).map(name =>
-          allNodes.find(n => n.querySelector("title")?.textContent?.toLowerCase() === name.toLowerCase())
-        ).filter(Boolean);
-        const context = [root, ...targets];
-        const boxes = context.map(n => n.getBoundingClientRect()).filter(r => r.width && r.height);
+        const nodeTitle = node => node.querySelector(":scope > title")?.textContent?.trim() ||
+          node.querySelector("title")?.textContent?.trim() || "";
+        const findNode = name => allNodes.find(node => nodeTitle(node).toLowerCase() === name.toLowerCase());
+        const targets = [...new Set(targetNames)].slice(0, 14).map(findNode).filter(Boolean);
+
+        // Include common next-hop destinations (usually a switch/jump-table join and sometimes the
+        // function exit). Otherwise the entry and all cases fit, but the join is clipped at the
+        // right edge and the graph looks broken. Frequency favors shared joins over unrelated leaves.
+        const targetSet = new Set([...new Set(targetNames)].map(name => name.toLowerCase()));
+        const successorFrequency = new Map();
+        for (const [source, target] of edges) {
+          if (!targetSet.has(source.toLowerCase()) || target.toLowerCase() === rootTitle.toLowerCase() ||
+              targetSet.has(target.toLowerCase())) continue;
+          successorFrequency.set(target, (successorFrequency.get(target) || 0) + 1);
+        }
+        const sharedSuccessors = [...successorFrequency.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .filter(([, count]) => count >= 2)
+          .slice(0, 2)
+          .map(([name]) => findNode(name))
+          .filter(Boolean);
+        const context = [root, ...targets, ...sharedSuccessors];
+        const boxes = context.map(node => node.getBoundingClientRect()).filter(r => r.width && r.height);
+        const left = boxes.length ? Math.min(...boxes.map(r => r.left)) : rootRect.left;
+        const right = boxes.length ? Math.max(...boxes.map(r => r.right)) : rootRect.right;
         const top = boxes.length ? Math.min(...boxes.map(r => r.top)) : rootRect.top;
         const bottom = boxes.length ? Math.max(...boxes.map(r => r.bottom)) : rootRect.bottom;
+        const contextWidth = Math.max(1, right - left);
         const contextHeight = Math.max(1, bottom - top);
-        const safeHeight = Math.max(80, availH - 30);
-        scale = Math.min(1, safeHeight / contextHeight);
-        // Keep the entry left-aligned and the immediate destinations below/above it inside the
-        // useful viewport, reserving room for the floating toolbar and the edge legend.
-        tx = 46 - (rootRect.left - viewport.left) * scale;
-        ty = 44 - (top - viewport.top) * scale;
+
+        // Leave room for floating graph controls above, the edge legend below, and an unobscured
+        // margin on both sides. The horizontal constraint is as important as height for fan-out CFGs.
+        const safeWidth = Math.max(80, g.clientWidth - 112);
+        const safeHeight = Math.max(80, g.clientHeight - 150);
+        scale = Math.min(1, safeWidth / contextWidth, safeHeight / contextHeight);
+        tx = 36 - (left - viewport.left) * scale;
+        ty = 64 - (top - viewport.top) * scale;
       }
       apply();
       return;
