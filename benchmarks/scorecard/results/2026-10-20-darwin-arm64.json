@@ -1,0 +1,93 @@
+{
+ "corpus": [
+  {
+   "bytes": 50400,
+   "name": "c-program-v1",
+   "sha256": "d7b19a36fecc24ee694ed443681974ab88a616b7dcd48f95ed751c43a819c3e0",
+   "truth_functions": 49
+  },
+  {
+   "bytes": 50400,
+   "name": "c-program-v2",
+   "sha256": "7ce19eed71243cf34517469d5116038cd2e684519abfda83c097182f087581be",
+   "truth_functions": 47
+  }
+ ],
+ "generated": "2026-10-20T21:20:36+0530",
+ "host": {
+  "machine": "arm64",
+  "python": "3.14.7",
+  "release": "25.6.0",
+  "system": "Darwin"
+ },
+ "schema": 1,
+ "tasks": {
+  "analysis_resources": {},
+  "function_discovery": {
+   "ghidra": {
+    "c-program-v1": {
+     "reason": "Ghidra analyzeHeadless not found (set GHIDRA_INSTALL_DIR or add it to PATH)",
+     "status": "not_available"
+    },
+    "c-program-v2": {
+     "reason": "Ghidra analyzeHeadless not found (set GHIDRA_INSTALL_DIR or add it to PATH)",
+     "status": "not_available"
+    }
+   },
+   "radare2": {
+    "c-program-v1": {
+     "reason": "radare2 (r2) not found on PATH",
+     "status": "not_available"
+    },
+    "c-program-v2": {
+     "reason": "radare2 (r2) not found on PATH",
+     "status": "not_available"
+    }
+   },
+   "rdis": {
+    "c-program-v1": {
+     "adapter_verified": true,
+     "extra": 0,
+     "found": 49,
+     "missed": 0,
+     "peak_rss_bytes": 91226112,
+     "precision_vs_truth_and_extras": 1.0,
+     "recall": 1.0,
+     "seconds": 0.201,
+     "status": "measured",
+     "true_positives": 49,
+     "truth": 49,
+     "version": "git 18ba2c0"
+    },
+    "c-program-v2": {
+     "adapter_verified": true,
+     "extra": 0,
+     "found": 47,
+     "missed": 0,
+     "peak_rss_bytes": 91176960,
+     "precision_vs_truth_and_extras": 1.0,
+     "recall": 1.0,
+     "seconds": 0.201,
+     "status": "measured",
+     "true_positives": 47,
+     "truth": 47,
+     "version": "git 18ba2c0"
+    }
+   }
+  }
+ },
+ "tools": {
+  "ghidra": {
+   "available": false,
+   "version": null
+  },
+  "radare2": {
+   "available": false,
+   "version": null
+  },
+  "rdis": {
+   "available": true,
+   "version": "git 18ba2c0"
+  }
+ }
+}
