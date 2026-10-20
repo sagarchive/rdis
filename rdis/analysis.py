@@ -831,7 +831,7 @@ class Program:
         first = int.from_bytes(data[offset:offset + 4], "little")
         # SUB (immediate), 64-bit, flags not set, Rd=SP and Rn=SP. Mask out imm12
         # and its optional shift bit; reject SUB SP,SP,#0.
-        if (first & 0xFF8003FF) != 0xD10003FF or ((first >> 10) & 0xFFF) == 0:
+        if (first & 0xFF0003FF) != 0xD10003FF or (((first >> 10) & 0xFFF) == 0 and ((first >> 22) & 1) == 0):
             return False
 
         stop = min(len(data) - 3, offset + 20)
