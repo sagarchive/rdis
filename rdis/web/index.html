@@ -1126,10 +1126,15 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
       if (retry) requestAnimationFrame(() => fit(false));
       return;
     }
-    const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
+    // The graph toolbar overlays the top of the canvas and the edge legend overlays the bottom.
+    // Reserve both areas during fitting; otherwise a valid bounding box can still hide the entry
+    // block behind controls even though the graph fits the outer viewport dimensions.
+    const topPad = 58, bottomPad = 48;
+    const availW = Math.max(80, g.clientWidth - 64);
+    const availH = Math.max(80, g.clientHeight - topPad - bottomPad);
     scale = Math.max(0.005, Math.min(availW / rect.width, availH / rect.height, 1.25));
     tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
-    ty = (g.clientHeight - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
+    ty = topPad + (availH - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
     apply();
   };
   const fitInitial = (retry = true) => {
@@ -1223,7 +1228,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
     // the entire graph cannot fit; the minimap navigates the remaining blocks.
     scale = Math.min(1, availW / rect.width);
     tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
-    ty = 44 - (rect.top - viewport.top) * scale;
+    ty = 58 - (rect.top - viewport.top) * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
