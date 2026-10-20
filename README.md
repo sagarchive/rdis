@@ -20,7 +20,7 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
-| Control-flow graph | Interactive browser CFG, fit/zoom/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
+| Control-flow graph | Interactive browser CFG with automatic left-to-right layout for broad switch/fan-out graphs, reversible TB/LR layout, fit/Entry/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
 | Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
 | C pseudo-code | CFG structuring and symbolic lifting (x86/ARM); optional SLEIGH/P-code frontend through `pypcode` for architectures mapped by RDIS; native MIPS/RISC-V frontend; experimental typed IR contract and field-layout recovery. Execution suite: 124 optimized, vectorized and struct cases are compiled and compared against reference results; real-binary compile rate is measured separately from semantic correctness | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
@@ -116,7 +116,7 @@ rdis-gui /path/to/binary --desktop           # native window (needs the [desktop
 
 Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter), disassembly with
 clickable call targets, and an inspector for binary info, sections and cross-references. The top
-toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a readable entry-focused view for tall/wide functions; use **Fit** for the full graph, **Entry** to return to readable entry-scale after fitting an enormous graph, **Detail** for more instructions, and the minimap to recenter large
+toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a readable entry-focused view for tall/wide functions and automatically uses a left-to-right layout for very broad switch/fan-out graphs (toggle **LR/TB** to choose manually); use **Fit** for the full graph, **Entry** to return to readable entry-scale after fitting an enormous graph, **Detail** for more instructions, and the minimap to recenter large
 functions. Click or keyboard-focus a block to inspect it; double-click (or press Shift+Enter on a
 focused block) to jump to its listing. The mouse wheel zooms around the pointer, drag pans, and
 Shift+wheel pans. Conditional edges show **T/F** only when the branch target is known; unresolved
