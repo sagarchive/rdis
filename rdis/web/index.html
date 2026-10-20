@@ -903,7 +903,8 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
       <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
       <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
-      <button class="ib" id="zfit" aria-label="Fit graph to view" title="Zoom to fit">⤢</button>
+      <button class="ib" id="zfit" aria-label="Fit all graph nodes to view" title="Fit all nodes; labels on very large graphs may become small">⤢</button>
+      ${graphKind === "callgraph" ? "" : '<button class="lbtn" id="zentry" aria-label="Readable entry view" title="Return to a readable entry-focused view on very large graphs">Entry</button>'}
       <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
       ${graphKind === "callgraph"
         ? `<select id="cgDirection" aria-label="Call graph direction" title="Explore callers, callees, or both"><option value="both">Both</option><option value="callers">Callers</option><option value="callees">Callees</option></select><select id="cgDepth" aria-label="Call graph depth" title="Neighborhood depth"><option value="1">Depth 1</option><option value="2">Depth 2</option><option value="3">Depth 3</option><option value="4">Depth 4</option></select>`
@@ -1167,6 +1168,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   $("#zin").onclick = () => zoomAt(1.25, g.clientWidth / 2, g.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
+  if (graphKind !== "callgraph") $("#zentry").onclick = fitInitial;
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
   if (graphKind === "callgraph") {
     $("#cgDirection").value = graphOptions.direction || "both";
