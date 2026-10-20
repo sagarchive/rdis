@@ -453,6 +453,23 @@ try {
   });
   assert(visibleWideNodes >= 6,
     "wide CFG entry view should expose multiple branch destinations, not just the entry node: " + visibleWideNodes);
+  const wideNeighborhood = await page.evaluate(() => {
+    const host = document.querySelector("#graph").getBoundingClientRect();
+    const nodes = [...document.querySelectorAll("#graph > svg g.node")];
+    const fullyVisible = node => {
+      const r = node.getBoundingClientRect();
+      return r.left >= host.left + 1 && r.right <= host.right - 1 &&
+        r.top >= host.top + 38 && r.bottom <= host.bottom - 42;
+    };
+    const entry = nodes.find(n => n.querySelector("title")?.textContent === "entry");
+    const cases = nodes.filter(n => /^case\\d+$/.test(n.querySelector("title")?.textContent || ""));
+    return { entryVisible: !!entry && fullyVisible(entry),
+      visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length };
+  });
+  assert(wideNeighborhood.entryVisible, "horizontal layout must keep the entry inside the unobscured viewport");
+  assert(wideNeighborhood.visibleCases >= 10,
+    "wide CFG should fit nearly all 12 direct branch targets in the readable initial view: " +
+    JSON.stringify(wideNeighborhood));
   const labelOverflow = await page.evaluate(() => {
     const problems = [];
     document.querySelectorAll("#graph > svg g.node").forEach(node => {
