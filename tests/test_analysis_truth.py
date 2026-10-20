@@ -525,7 +525,7 @@ class OptimizedJumpTableTruthTests(unittest.TestCase):
             # mnemonic token, e.g. "notrack jmp *%rax". Normalize it so the independently
             # reconstructed CFG sees the same actual indirect JMP instruction bytes.
             if mnemonic in ("notrack", "bnd", "data16"):
-                prefixed = re.match(r"^\\s*(jmpq?|callq?)\\s+(.*)$", operands, re.I)
+                prefixed = re.match(r"^\s*(jmpq?|callq?)\s+(.*)$", operands, re.I)
                 if prefixed:
                     mnemonic, operands = prefixed.group(1).lower(), prefixed.group(2)
             rows.append({
