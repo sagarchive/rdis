@@ -26,12 +26,17 @@ def write(directory, name, body):
     return path
 
 
+try:
+    import pypcode
+except ImportError:
+    pypcode = None
+
+
 class ExamplePlugins(unittest.TestCase):
-    def test_every_extension_point_has_a_working_example(self):
+    def test_loader_and_tool_examples_work(self):
         status = rdis("rdis", "--list-plugins", plugins=EXAMPLES).stdout
         for name in ("count_calls.py", "ppc_alias.py", "tiny_loader.py"):
             self.assertRegex(status, rf"ok .*{name}")
-        self.assertIn("ppc32be", rdis("rdis", "--list-archs", plugins=EXAMPLES).stdout)
         with tempfile.TemporaryDirectory() as d:
             tiny = os.path.join(d, "s.tiny")
             with open(tiny, "wb") as fh:
@@ -39,6 +44,20 @@ class ExamplePlugins(unittest.TestCase):
             listing = rdis("rdis", tiny, plugins=EXAMPLES)
             self.assertEqual(listing.returncode, 0, listing.stderr)
             self.assertIn("entry", listing.stdout)
+            blob = os.path.join(d, "f.bin")
+            with open(blob, "wb") as fh:
+                fh.write(bytes.fromhex("e801000000" "c3" "c3"))
+            out = rdis("rdis", blob, "--loader", "raw", "--arch", "x86_64", "--base", "0x1000", "--tool", "count_calls",
+                       plugins=EXAMPLES)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(json.loads(out.stdout)["call_edges"], 1)
+
+    def test_architecture_example_is_registered_and_listed(self):
+        self.assertIn("ppc32be", rdis("rdis", "--list-archs", plugins=EXAMPLES).stdout)
+
+    @unittest.skipIf(pypcode is None, "the example aliases a SLEIGH CPU, which needs pypcode")
+    def test_architecture_example_loads_a_binary(self):
+        with tempfile.TemporaryDirectory() as d:
             blob = os.path.join(d, "f.bin")
             with open(blob, "wb") as fh:
                 fh.write(bytes.fromhex("9421fff0" "4e800020"))
