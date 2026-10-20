@@ -898,6 +898,21 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   const d = graphKind === "callgraph"
     ? await api("callgraph", {func: addr, direction: graphOptions.direction || "both", depth: String(graphOptions.depth || 1)})
     : await api("cfg", {func: addr, detail: detail ? "1" : "0"});
+  // Very broad switch/fan-out CFGs read better left-to-right: the destinations form a vertical
+  // column instead of an extremely wide row whose ends must be clipped at readable zoom. Keep a
+  // visible orientation toggle so this is a reversible layout choice, not a hidden transformation.
+  const fanout = new Map();
+  for (const line of (d.dot || "").split(/\\r?\\n/)) {
+    const edge = line.match(/^\\s*"([^"]+)"\\s*->\\s*"([^"]+)"/);
+    if (edge) fanout.set(edge[1], (fanout.get(edge[1]) || 0) + 1);
+  }
+  const inferredLayout = graphKind === "callgraph" ? "LR" :
+    Math.max(0, ...fanout.values()) >= 7 ? "LR" : "TB";
+  const layout = graphOptions.layout === "TB" || graphOptions.layout === "LR"
+    ? graphOptions.layout : inferredLayout;
+  const renderedDot = d.dot
+    ? d.dot.replace(/(graph\\s*\\[[^\\]]*?\\brankdir\\s*=\\s*)(TB|LR)/i, (_match, prefix) => prefix + layout)
+    : d.dot;
   const v = $("#view");
   v.innerHTML = `<div id="graph" role="region" aria-label="${graphKind === "callgraph" ? "Call graph. Select a function, double-click to open it, and use direction/depth controls to explore callers and callees." : "Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."}"><div id="ghud">
       <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
@@ -905,6 +920,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
       <span class="z" id="zval">100%</span>
       <button class="ib" id="zfit" aria-label="Fit all graph nodes to view" title="Fit all nodes; labels on very large graphs may become small">⤢</button>
       ${graphKind === "callgraph" ? "" : '<button class="lbtn" id="zentry" aria-label="Readable entry view" title="Return to a readable entry-focused view on very large graphs">Entry</button>'}
+      <button class="lbtn" id="glayout" data-layout="${layout}" aria-pressed="${layout === "LR"}" aria-label="Switch graph layout direction" title="Switch to ${layout === "LR" ? "top-down" : "left-to-right"} layout">${layout === "LR" ? "LR ↔" : "TB ↕"}</button>
       <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
       ${graphKind === "callgraph"
         ? `<select id="cgDirection" aria-label="Call graph direction" title="Explore callers, callees, or both"><option value="both">Both</option><option value="callers">Callers</option><option value="callees">Callees</option></select><select id="cgDepth" aria-label="Call graph depth" title="Neighborhood depth"><option value="1">Depth 1</option><option value="2">Depth 2</option><option value="3">Depth 3</option><option value="4">Depth 4</option></select>`
@@ -936,7 +952,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   let svg;
   try {
     S.viz = S.viz || await Viz.instance();
-    svg = S.viz.renderSVGElement(d.dot);
+    svg = S.viz.renderSVGElement(renderedDot);
     themeGraph(svg);
   } catch (err) {
     // render failures must surface here, not fall through to show()'s hex fallback (which made the
@@ -977,8 +993,8 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
     });
   });
   crumbs(d.name, d.addr, graphKind === "callgraph"
-    ? `${d.direction} · depth ${d.depth}${d.truncated ? " · truncated" : ""}`
-    : "drag to pan · wheel to zoom");
+    ? `${d.direction} · depth ${d.depth}${d.truncated ? " · truncated" : ""} · ${layout}`
+    : `drag to pan · wheel to zoom · ${layout}`);
 
   let scale = 1, tx = 0, ty = 0;
   const miniHost = $("#gminimap");
@@ -1117,9 +1133,9 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
     apply();
   };
   const fitInitial = (retry = true) => {
-    // A fit-all overview is useful for short functions, but makes long linear/chain-like CFGs
-    // unreadable (e.g. a 50-block function becomes a thin strip). Start those at a readable scale
-    // near the entry block; the minimap navigates the rest and the explicit Fit control still fits all.
+    // Fit-all is useful for short functions but makes long chains unreadable. For horizontal
+    // layouts, keep the entry/selected root in the viewport and expose a useful neighborhood;
+    // the minimap navigates the rest and explicit Fit shows the entire graph.
     svg.style.transform = "none";
     let rect, viewport;
     try { rect = graphTarget.getBoundingClientRect(); viewport = g.getBoundingClientRect(); } catch { rect = viewport = null; }
@@ -1130,10 +1146,23 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
     const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
     const tallAndNarrow = rect.height > availH * 1.15 && rect.width < availW * 0.8;
     const tooWide = rect.width > availW * 1.15;
+    const root = svg.querySelector(graphKind === "callgraph" ? "g.node.cg-root" : "g.node.entry") ||
+      [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === String(addr)) ||
+      svg.querySelector("g.node");
+    const rootRect = root?.getBoundingClientRect();
+    if (layout === "LR" && rootRect && rootRect.width && rootRect.height) {
+      // Put the root at the left and vertically center it, so horizontally oriented fan-outs
+      // show a run of destinations in a readable column instead of an arbitrary clipped slice.
+      scale = Math.min(1, availW / Math.max(rootRect.width + 80, 1));
+      tx = 46 - (rootRect.left - viewport.left) * scale;
+      ty = (g.clientHeight - rootRect.height * scale) / 2 -
+        (rootRect.top - viewport.top) * scale;
+      apply();
+      return;
+    }
     if (!tallAndNarrow && !tooWide) return fit();
-    // A full fit of a wide fan-out can be as unreadable as a tall chain. For wide graphs,
-    // reduce the initial scale enough to expose more of the entry's immediate fan-out while
-    // preserving readable labels; the minimap exposes distant branches and Fit shows all nodes.
+    // For top-down chains keep the entry at the top. The user can toggle layouts without
+    // reopening the binary; Fit-all and the minimap stay available in either direction.
     scale = tallAndNarrow
       ? Math.min(1, availW / rect.width)
       : Math.max(0.6, Math.min(0.75, availW / (rect.width * 0.9)));
@@ -1169,18 +1198,22 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
   if (graphKind !== "callgraph") $("#zentry").onclick = fitInitial;
+  $("#glayout").onclick = () => showCFG(addr, detail, graphKind, {
+    ...graphOptions, layout: layout === "LR" ? "TB" : "LR"
+  });
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
   if (graphKind === "callgraph") {
     $("#cgDirection").value = graphOptions.direction || "both";
     $("#cgDepth").value = String(graphOptions.depth || 1);
     const updateCallGraph = () => showCallGraph(addr, {
       direction: $("#cgDirection").value,
-      depth: Number($("#cgDepth").value)
+      depth: Number($("#cgDepth").value),
+      layout
     });
     $("#cgDirection").onchange = updateCallGraph;
     $("#cgDepth").onchange = updateCallGraph;
   } else {
-    $("#gdetail").onclick = () => showCFG(addr, !detail);
+    $("#gdetail").onclick = () => showCFG(addr, !detail, graphKind, {...graphOptions, layout});
     $("#gdetail").classList.toggle("on", detail);
     $("#gdetail").setAttribute("aria-pressed", String(detail));
   }
@@ -1266,7 +1299,8 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
 async function showCallGraph(addr, options = {}) {
   return showCFG(addr, false, "callgraph", {
     direction: options.direction || "both",
-    depth: Number(options.depth || 1)
+    depth: Number(options.depth || 1),
+    layout: options.layout
   });
 }
 
