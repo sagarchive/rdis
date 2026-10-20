@@ -17,8 +17,8 @@ of ending the run, and each distinct failure is minimized by delta debugging.
 Anything else (another exception type, a timeout, memory above 3 GiB, a native crash) is a failure.
 
 `campaign-2026-10-20-darwin-arm64.json`: 18 seeds x 200 cases per target (21,600 cases), 0 failures, on the code at the
-commit that adds this file. The same harness found nine distinct defects in its first runs: an ELF with an unknown CPU
-number, three archive error types, a Mach-O without a dynamic symbol table, a missing-symbol-table crash, and three
+commit that adds this file. The same harness found eight distinct defects in its first runs: an ELF with an unknown CPU
+number, three archive error types, a Mach-O without a dynamic symbol table, and three
 segmentation faults inside pypcode's SLEIGH on malformed delay slots. Each has a regression test.
 
 Scope: no Mach-O/PE-specific seeds beyond a compiled sample, no grammar-based generation, no coverage guidance, and a
