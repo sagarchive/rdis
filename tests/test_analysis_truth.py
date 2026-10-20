@@ -96,6 +96,7 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
             (0x1000, 0x1008),
             (0x1000, 0x1010),
             (0x1008, 0x1014),
+            (0x1010, 0x1014),  # SUB falls through to the shared RET block.
         }
         metrics = _precision_recall_f1(expected_edges, observed_edges)
         self.assertEqual(observed_edges, expected_edges, json.dumps(metrics, sort_keys=True))
