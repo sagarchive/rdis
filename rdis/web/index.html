@@ -1188,11 +1188,14 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
       return;
     }
     if (!tallAndNarrow && !tooWide) return fit();
-    // For top-down chains, start at readable entry scale. Manual TB mode remains available for a
-    // broad switch; Fit-all and the minimap are available in either orientation.
-    scale = tallAndNarrow
-      ? Math.min(1, availW / rect.width)
-      : Math.max(0.6, Math.min(0.75, availW / (rect.width * 0.9)));
+    // A broad fan-out in TB layout becomes horizontally enormous. Do not apply the readable-entry
+    // minimum zoom and then clip half its destinations: use a whole-graph fit for that orientation.
+    // In LR layout the entry + direct-successor neighborhood is handled above, with the minimap for
+    // distant destinations; top-down manual layout prioritizes complete topology.
+    if (tooWide && layout === "TB") return fit();
+    // For top-down chains, start at readable entry scale. Tall chains remain readable even when
+    // the entire graph cannot fit; the minimap navigates the remaining blocks.
+    scale = Math.min(1, availW / rect.width);
     tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
     ty = 44 - (rect.top - viewport.top) * scale;
     apply();
