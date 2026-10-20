@@ -31,14 +31,22 @@ EXPECTED_FUNCTION_NAMES = {
 }
 
 
-def _arm64_fixture():
-    fixture = Path(__file__).resolve().parent / "fixtures" / "arm64_branch_fixture.hex"
+def _hex_fixture(filename):
+    fixture = Path(__file__).resolve().parent / "fixtures" / filename
     encoded = []
     for line in fixture.read_text(encoding="utf-8").splitlines():
         payload = line.split("#", 1)[0].strip()
         if payload:
             encoded.extend(payload.split())
     return bytes.fromhex(" ".join(encoded))
+
+
+def _arm64_fixture():
+    return _hex_fixture("arm64_branch_fixture.hex")
+
+
+def _x86_64_loop_fixture():
+    return _hex_fixture("x86_64_loop_fixture.hex")
 
 
 def _precision_recall_f1(expected, observed):
@@ -101,6 +109,50 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
         metrics = _precision_recall_f1(expected_edges, observed_edges)
         self.assertEqual(observed_edges, expected_edges, json.dumps(metrics, sort_keys=True))
         self.assertEqual(len(func.blocks), 4)
+        self.assertEqual(metrics["precision"], 1.0)
+        self.assertEqual(metrics["recall"], 1.0)
+        self.assertEqual(metrics["f1"], 1.0)
+
+    def test_hand_encoded_x86_64_cfg_has_exact_loop_edges(self):
+        code = _x86_64_loop_fixture()
+        self.assertEqual(len(code), 9)
+
+        def read(va, size):
+            offset = va - BASE
+            if offset < 0 or offset >= len(code):
+                return b""
+            return code[offset:offset + size]
+
+        image = Image(
+            "<hand-encoded-x86-64-loop-fixture>",
+            "raw",
+            make("x86_64"),
+            BASE,
+            BASE,
+            [Section(".text", BASE, len(code), 0, True)],
+            {},
+            {},
+            read,
+            lambda va: va - BASE if BASE <= va < BASE + len(code) else None,
+        )
+        program = Program(image).analyze(objc=False, swift=False, prologues=False)
+        self.assertEqual(set(program.functions), {BASE})
+        func = program.functions[BASE]
+        observed_edges = {
+            (block.addr, successor)
+            for block in func.blocks.values()
+            for successor in block.succs
+        }
+        # XOR at 0x1000 falls through to the loop body. JL at 0x1006 has both
+        # a backward taken edge to 0x1002 and a fall-through edge to RET at 0x1008.
+        expected_edges = {
+            (0x1000, 0x1002),
+            (0x1002, 0x1002),
+            (0x1002, 0x1008),
+        }
+        metrics = _precision_recall_f1(expected_edges, observed_edges)
+        self.assertEqual(observed_edges, expected_edges, json.dumps(metrics, sort_keys=True))
+        self.assertEqual(len(func.blocks), 3)
         self.assertEqual(metrics["precision"], 1.0)
         self.assertEqual(metrics["recall"], 1.0)
         self.assertEqual(metrics["f1"], 1.0)
