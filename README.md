@@ -116,8 +116,7 @@ rdis-gui /path/to/binary --desktop           # native window (needs the [desktop
 
 Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter), disassembly with
 clickable call targets, and an inspector for binary info, sections and cross-references. The top
-toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview; use
-**Detail** for more instructions, **Fit** for the full graph, and the minimap to recenter large
+toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a readable entry-focused view for tall/wide functions; use **Fit** for the full graph, **Entry** to return to readable entry-scale after fitting an enormous graph, **Detail** for more instructions, and the minimap to recenter large
 functions. Click or keyboard-focus a block to inspect it; double-click (or press Shift+Enter on a
 focused block) to jump to its listing. The mouse wheel zooms around the pointer, drag pans, and
 Shift+wheel pans. Conditional edges show **T/F** only when the branch target is known; unresolved
