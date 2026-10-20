@@ -7,6 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rdis import signatures
+from rdis.fingerprint import is_generated
 from rdis.analysis import Program
 from rdis.arch import make
 from rdis.loader import Image, Section, open_image
@@ -134,7 +135,7 @@ class CompiledCorpusScore(unittest.TestCase):
     @staticmethod
     def truth(path):
         p = Program(open_image(str(path))).analyze()
-        return {a: p.display(a).lstrip("_") for a in p.functions if (p.display(a) or "").lstrip("_").startswith("fn_")}
+        return {a: p.display(a).lstrip("_") for a in p.functions if not is_generated(p.display(a))}
 
     def score(self, stripped, unstripped):
         out = signatures.match(Program(open_image(str(stripped))).analyze(), self.db)
