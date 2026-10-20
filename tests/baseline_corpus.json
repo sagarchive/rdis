@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "corpus_id": "rdis-baseline-corpus-v3",
-  "description": "Version 3 adds compiler-symbol function-discovery precision/recall at -O0/-O2 on symbol-rich and stripped x86-64 builds, plus hand-encoded AArch64 branch and x86-64 loop CFG edge oracles. Host binaries remain fingerprinted in place and are never redistributed.",
+  "corpus_id": "rdis-baseline-corpus-v4",
+  "description": "Version 4 adds optimized x86-64 PIE relative jump-table CFG edge precision/recall against GNU objdump instruction boundaries and independently decoded signed int32 offsets, extending the v3 discovery and direct-edge truth corpus. Host binaries remain fingerprinted in place and are never redistributed.",
   "source_repository_license": "MIT",
   "entries": [
     {
@@ -46,6 +46,17 @@
       "size_bytes": 1469,
       "license": "RDIS repository MIT license",
       "purpose": "Compiler-produced x86-64 truth corpus with direct calls, tail-call shape, a ten-way switch, an indirect-call target, loop/branch control flow and an explicit entry. Tests query `nm` before stripping, then measure function-start precision/recall at -O0/-O2 after `--strip-all`.",
+      "required": true
+    },
+    {
+      "id": "optimized-relative-jump-table-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/switch_jump_table_fixture.c",
+      "sha256": "41f7b597314498d6de3586e6e0625d37f333a0f366e0143e140d7bb3a1deef84",
+      "git_blob_sha1": "6f0f5ed1e417f7920ec78d92d5f7c07e08b1941a",
+      "size_bytes": 1255,
+      "license": "RDIS repository MIT license",
+      "purpose": "Optimized x86-64 PIE switch dispatch with 12 dense cases that lower to a table of signed int32 offsets relative to a RIP-relative code base. tests/test_analysis_truth.py decodes table targets independently from GNU objdump and .rodata bytes, then checks CFG edge precision/recall/F1 against RDIS.",
       "required": true
     },
     {
