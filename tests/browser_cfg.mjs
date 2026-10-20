@@ -581,6 +581,11 @@ try {
   assert.equal(await page.locator("#cgDepth").inputValue(), "1");
   assert(await page.locator("#graph > svg g.node.cg-function").count() >= 2);
   assert.equal(await page.locator("#graph > svg g.node.cg-import").count(), 0);
+  let callFit = await fitCheck();
+  assert(callFit.graph.left >= callFit.viewport.left + 3, "small call graph clipped on left: " + JSON.stringify(callFit));
+  assert(callFit.graph.top >= callFit.viewport.top + 50, "small call graph overlaps toolbar: " + JSON.stringify(callFit));
+  assert(callFit.graph.right <= callFit.viewport.right - 3, "small call graph clipped on right: " + JSON.stringify(callFit));
+  assert(callFit.graph.bottom <= callFit.viewport.bottom - 36, "small call graph overlaps legend: " + JSON.stringify(callFit));
   await page.screenshot({path: out + "/callgraph-both-depth1.png", fullPage: false});
 
   await page.locator("#cgDirection").selectOption("callers");
@@ -597,6 +602,12 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("#graph > svg g.node.cg-import").length === 1);
   assert.equal(await page.locator("#graph > svg g.node.cg-unresolved").count(), 1);
   assert(callgraphQueries.some(q => q.direction === "callees" && q.depth === 2));
+  callFit = await fitCheck();
+  assert.equal(callFit.nodes, 4, "callee depth-2 fixture should include function, callee, import and unresolved nodes");
+  assert(callFit.graph.left >= callFit.viewport.left + 3, "callee depth-2 graph clipped on left: " + JSON.stringify(callFit));
+  assert(callFit.graph.top >= callFit.viewport.top + 50, "callee depth-2 graph overlaps toolbar: " + JSON.stringify(callFit));
+  assert(callFit.graph.right <= callFit.viewport.right - 3, "callee depth-2 graph clipped on right: " + JSON.stringify(callFit));
+  assert(callFit.graph.bottom <= callFit.viewport.bottom - 36, "callee depth-2 graph overlaps legend: " + JSON.stringify(callFit));
   await page.screenshot({path: out + "/callgraph-callees-depth2.png", fullPage: false});
   const callsSvgPromise = page.waitForEvent("download");
   await page.locator("#zsvg").click();
