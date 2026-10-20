@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "corpus_id": "rdis-baseline-corpus-v3",
-  "description": "Version 3 adds a hand-authored x86-64 function-discovery corpus, symbol-oracle precision/recall at -O0/-O2 on symbol-rich and stripped builds, and an exact raw AArch64 CFG edge oracle. Host binaries remain fingerprinted in place and are never redistributed.",
+  "description": "Version 3 adds compiler-symbol function-discovery precision/recall at -O0/-O2 on symbol-rich and stripped x86-64 builds, plus hand-encoded AArch64 branch and x86-64 loop CFG edge oracles. Host binaries remain fingerprinted in place and are never redistributed.",
   "source_repository_license": "MIT",
   "entries": [
     {
@@ -24,6 +24,17 @@
       "size_bytes": 594,
       "license": "Hand-authored fixture under the RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual.",
       "purpose": "Independent AArch64 little-endian byte fixture: CMP, conditional branch to 0x1010, fall-through ADD, unconditional branch to 0x1014, SUB and RET. Regression asserts exact instruction boundaries, flow kinds and PC-relative targets; no compiled cross-toolchain required.",
+      "required": true
+    },
+    {
+      "id": "x86-64-loop-fixture",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/x86_64_loop_fixture.hex",
+      "sha256": "43d671bb02661e2106e8f8b5cd5edec942880276a4407033e401263cb49c0504",
+      "git_blob_sha1": "8ba1411278fd919302645883a82095568e76e170",
+      "size_bytes": 402,
+      "license": "Hand-authored fixture under the RDIS repository MIT license; instruction semantics are referenced to Intel 64 and IA-32 Architectures Software Developer's Manual, Vol. 2.",
+      "purpose": "Independent x86-64 loop CFG: XOR, INC, CMP, backward JL to 0x1002, and RET at 0x1008. Regression asserts exact basic-block edges, including the back edge and conditional fall-through.",
       "required": true
     },
     {
@@ -185,6 +196,7 @@
           "required": true,
           "requires_entries": [
             "arm64-branch-fixture",
+            "x86-64-loop-fixture",
             "function-discovery-fixture-source"
           ]
         },
