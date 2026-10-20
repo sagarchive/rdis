@@ -80,6 +80,20 @@ def run_signatures(a, prog):
     print(f"{len(out['matches'])} named, {len(out['ambiguous'])} ambiguous")
 
 
+def run_tool(a, prog):
+    from . import plugins
+    plugins.load_all()
+    if a.tool not in plugins.tools:
+        raise ValueError(f"no plugin tool {a.tool!r} (loaded: {', '.join(sorted(plugins.tools)) or 'none'})")
+    try:
+        kwargs = json.loads(a.tool_args)
+    except ValueError as e:
+        raise ValueError(f"--tool-args is not valid JSON: {e}") from None
+    if not isinstance(kwargs, dict):
+        raise ValueError("--tool-args must be a JSON object")
+    print(json.dumps(plugins.tools[a.tool][0](prog, **kwargs), indent=1, sort_keys=True))
+
+
 def list_containers(path, libs, as_json=False):
     if as_json:
         print(json.dumps([{"entry": s["entry"], "arch": s.get("arch"), "size": s.get("size")}
@@ -99,14 +113,32 @@ def list_archs():
     print("\nSLEIGH short names (disassembly, CFG, P-code IR; --arch NAME):")
     for name, spec in sleigh._SPECS.items():
         print(f"  {name:<12} {spec[0]}")
+    from . import plugins
+    plugins.load_all()
+    if plugins.arches:
+        print("\nplugin architectures (RDIS_PLUGINS):")
+        for name in sorted(plugins.arches):
+            print(f"  {name}")
     ids = sleigh.languages()
     print(f"\nany of {len(ids)} SLEIGH languages as --arch sleigh:<id> (no calling convention):")
     print("  " + "\n  ".join(ids))
 
 
+def list_plugins():
+    from . import plugins
+    rows = plugins.status()
+    if not rows:
+        print("no plugins loaded (set RDIS_PLUGINS to a directory of plugin .py files)")
+    for r in rows:
+        regs = ", ".join(f"{x['kind']} {x['name']}" for x in r["registered"]) or "nothing"
+        print(f"{'ok      ' if r['ok'] else 'REJECTED'} {r['file']}: " + (f"registers {regs}" if r["ok"] else r["error"]))
+
+
 def main(argv=None):
     if "--list-archs" in (sys.argv[1:] if argv is None else argv):
         return list_archs()
+    if "--list-plugins" in (sys.argv[1:] if argv is None else argv):
+        return list_plugins()
     p = argparse.ArgumentParser(prog="rdis", description="multi-format disassembler and decompiler")
     p.add_argument("binary")
     p.add_argument("-f", "--func", help="function name, sub_xxx, or 0xADDR")
@@ -126,6 +158,9 @@ def main(argv=None):
     p.add_argument("--arch", help="slice for a fat Mach-O (x86_64, arm64, ...), or the CPU for --loader raw "
                                   "(ppc, sparc, m68k, avr8, ebpf, ...; see --list-archs)")
     p.add_argument("--list-archs", action="store_true", help="print every CPU rdis can load, then exit")
+    p.add_argument("--list-plugins", action="store_true", help="print each plugin from RDIS_PLUGINS and why any was rejected")
+    p.add_argument("--tool", metavar="NAME", help="run a tool registered by a plugin on this binary")
+    p.add_argument("--tool-args", metavar="JSON", default="{}", help="keyword arguments for --tool, as a JSON object")
     p.add_argument("--loader", help="force a plugin loader (e.g. raw)")
     p.add_argument("--base", help="load address for --loader raw")
     p.add_argument("--allow-legacy-rdb", action="store_true",
@@ -162,6 +197,8 @@ def main(argv=None):
                 print(f"rdis: 1 native library; analyzing {libs[0]['entry']}", file=sys.stderr)
                 path = containers.extract(path, libs[0]["entry"])
         prog = build(a, path)
+        if a.tool:
+            return run_tool(a, prog)
         if a.diff:
             return run_diff(a, prog)
         if a.sig or a.sig_make:

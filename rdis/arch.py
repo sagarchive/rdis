@@ -238,4 +238,10 @@ def make(name):
     a = sleigh.make(name)
     if a is not None:
         return a
+    from . import plugins                     # a CPU backend supplied by a plugin; never shadows a built-in
+    a = plugins.find_arch(name)
+    if a is not None:
+        if not isinstance(a, Arch):
+            raise ValueError(f"plugin architecture {name!r} did not return an Arch")
+        return a
     raise ValueError(f"unsupported architecture: {name}")

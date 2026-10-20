@@ -393,13 +393,30 @@ TOOLS = {
 
 WRITES = {"rename", "comment", "rename_many", "define_function", "undefine_function", "set_type", "bookmarks"}
 COMMON = {"loader": "string?", "base": "any?"}
-_TYPES = {"string": str, "integer": int, "array": list, "boolean": bool}
+_TYPES = {"string": str, "integer": int, "array": list, "boolean": bool, "object": dict}
 
 
 class RpcError(Exception):
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+def _plugin_runner(fn):
+    def run(path, args=None, arch=None, **k):
+        return fn(_prog(path, arch, **k), **(args or {}))
+    return run
+
+
+def _registry():
+    """Built-in tools plus those registered by plugins (`plugin_<name>`); plugins load once, from RDIS_PLUGINS only."""
+    from . import plugins
+    plugins.load_all()
+    merged = dict(TOOLS)
+    for name, (fn, help_) in plugins.tools.items():
+        merged[f"plugin_{name}"] = (_plugin_runner(fn), help_ or f"Plugin tool {name}",
+                                    {"path": "string", "args": "object?", "arch": "string?"})
+    return merged
 
 
 def _schema(params):
@@ -410,15 +427,16 @@ def _schema(params):
 
 
 def _validate(name, args):
-    if name not in TOOLS:
+    registry = _registry()
+    if name not in registry:
         raise RpcError(-32602, f"unknown tool {name!r}")
     if not isinstance(args, dict):
         raise RpcError(-32602, "arguments must be an object")
-    schema = _schema(TOOLS[name][2])["properties"]
+    schema = _schema(registry[name][2])["properties"]
     unknown = sorted(set(args) - set(schema))
     if unknown:
         raise RpcError(-32602, f"{name}: unknown argument(s) {unknown}")
-    missing = [k for k in _schema(TOOLS[name][2])["required"] if k not in args]
+    missing = [k for k in _schema(registry[name][2])["required"] if k not in args]
     if missing:
         raise RpcError(-32602, f"{name}: missing required argument(s) {missing}")
     for key, value in args.items():
@@ -435,7 +453,7 @@ def _failure(code, message):
 def _call(name, args):
     _validate(name, args)
     try:
-        text = json.dumps(TOOLS[name][0](**args), indent=1)
+        text = json.dumps(_registry()[name][0](**args), indent=1)
     except FileNotFoundError as e:
         return _failure("not_found", f"{e.filename or 'file'} does not exist")
     except KeyError as e:
@@ -462,9 +480,9 @@ def _handle(req):
         return {}
     if m == "tools/list":
         return {"tools": [{"name": n, "description": d, "inputSchema": _schema(p),
-                           "annotations": {"readOnlyHint": n not in WRITES, "destructiveHint": False,
-                                           "openWorldHint": False}}
-                          for n, (_, d, p) in TOOLS.items()]}
+                           "annotations": {"readOnlyHint": n not in WRITES and not n.startswith("plugin_"),
+                                           "destructiveHint": False, "openWorldHint": False}}
+                          for n, (_, d, p) in _registry().items()]}
     if m == "tools/call":
         params = req.get("params")
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):

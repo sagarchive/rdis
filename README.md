@@ -215,16 +215,32 @@ of Hopper/Ghidra/IDA.
 
 ## Plugins
 
-Drop a `.py` file in `./plugins` (or `$RDIS_PLUGINS`) that registers at import:
+A plugin is a `.py` file that declares `RDIS_API = 1` and registers what it adds:
 
 ```python
 from rdis import plugins
-plugins.register_loader("myfmt", probe_fn, load_fn)   # custom file format
-plugins.register_arch("mycpu", arch_factory)          # custom CPU backend
-plugins.register_tool("name", fn, "help")             # extra MCP/CLI tool
+RDIS_API = 1
+plugins.register_loader("myfmt", probe_fn, load_fn)   # a file format: probe(path, opts) -> bool, load(path, arch=None, **opts) -> Image
+plugins.register_arch("mycpu", arch_factory)          # a CPU backend: factory() -> Arch (never shadows a built-in)
+plugins.register_tool("name", fn, "help")             # an analysis tool: fn(program, **kwargs) -> JSON; CLI `--tool`, MCP `plugin_name`
 ```
 
-See `rdis/raw.py` for a complete loader plugin (headerless blobs).
+Working examples for each extension point are in [`examples/plugins/`](examples/plugins/). Try them:
+
+```sh
+export RDIS_PLUGINS=examples/plugins
+python -m rdis --list-plugins                 # each plugin, and the reason any was rejected
+python -m rdis BIN --tool count_calls         # a plugin tool on a binary
+```
+
+**Trust.** A plugin is arbitrary code running with your privileges; there is no sandbox. Plugins load only from
+the directories listed in `RDIS_PLUGINS` (nothing is loaded from the current directory, so opening a file inside
+someone else's repository cannot run their code). Install by adding a file to that directory, remove by deleting it.
+A plugin that fails to import, declares another API version, or claims a name another plugin or the core already owns
+is rejected with its reason (`--list-plugins`), whatever it had registered is rolled back, and everything else keeps
+working. Plugins load in filename order and the first claim to a name wins.
+
+See `rdis/raw.py` for the built-in loader plugin (headerless blobs).
 
 ## Tests
 
