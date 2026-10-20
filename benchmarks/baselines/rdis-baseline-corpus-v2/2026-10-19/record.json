@@ -14,7 +14,7 @@
   "corpus": {
     "id": "rdis-baseline-corpus-v2",
     "schema_version": 1,
-    "manifest_path": "tests/baseline_corpus.json",
+    "manifest_path": "benchmarks/baselines/rdis-baseline-corpus-v2/2026-10-19/manifest.json",
     "manifest_sha256": "47c5a2724f96158b5be429e7776ed2e3b5e42245abdd30e3433421a20493ab90",
     "fixture_set": [
       {
