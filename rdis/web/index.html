@@ -903,7 +903,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   // visible orientation toggle so this is a reversible layout choice, not a hidden transformation.
   const fanout = new Map();
   for (const line of (d.dot || "").split(/\r?\n/)) {
-    const edge = line.match(/^\s*"([^"]+)"\s*->\s*"([^"]+)"/);
+    const edge = line.match(/^\s*"?([^"\s]+)"?\s*->\s*"?([^"\s]+)"?/);
     if (edge) fanout.set(edge[1], (fanout.get(edge[1]) || 0) + 1);
   }
   const inferredLayout = graphKind === "callgraph" ? "LR" :
