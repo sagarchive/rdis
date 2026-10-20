@@ -336,8 +336,19 @@ class MachOFunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                 ):
                     if mode == "stripped":
                         shutil.copy2(binary, candidate)
+                        # Mach-O's strip -N may retain externally visible names in some executable
+                        # layouts. Remove every truth-function symbol explicitly; the linker was
+                        # passed -no_function_starts and unwind tables were disabled, so the
+                        # analyzer cannot get these starts from alternate function metadata.
+                        symbol_list = tmp / ("remove-symbols-" + optimization[2:] + ".txt")
+                        symbol_list.write_text(
+                            "\n".join("_" + name for name in sorted(EXPECTED_FUNCTION_NAMES)) + "\n",
+                            encoding="utf-8",
+                        )
                         stripped = subprocess.run(
-                            [strip, "-N", str(candidate)], capture_output=True, text=True
+                            [strip, "-R", str(symbol_list), str(candidate)],
+                            capture_output=True,
+                            text=True,
                         )
                         self.assertEqual(stripped.returncode, 0, stripped.stderr)
                         stripped_symbols = subprocess.run(
@@ -346,9 +357,14 @@ class MachOFunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                             capture_output=True,
                             text=True,
                         ).stdout
+                        retained = set()
+                        for line in stripped_symbols.splitlines():
+                            match = re.match(r"^\s*([0-9a-fA-F]+)\s+([Tt])\s+(\S+)\s*$", line)
+                            if match and match.group(3).lstrip("_") in EXPECTED_FUNCTION_NAMES:
+                                retained.add(match.group(3).lstrip("_"))
                         self.assertFalse(
-                            any(name in stripped_symbols for name in ("_truth_leaf", "_truth_entry")),
-                            "strip -N must remove the symbol oracle from the stripped variant",
+                            retained,
+                            "truth-function symbol oracle still present after strip -R: " + repr(sorted(retained)),
                         )
                     observed = self._analyze_starts(candidate)
                     metrics = _precision_recall_f1(expected, observed)
