@@ -107,6 +107,11 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
             (0x1010, 0x1014),  # SUB falls through to the shared RET block.
         }
         metrics = _precision_recall_f1(expected_edges, observed_edges)
+        print("CFG_EDGE_METRIC " + json.dumps({
+            "fixture": "aarch64-branch-cfg-v1",
+            "architecture": "arm64",
+            **metrics,
+        }, sort_keys=True))
         self.assertEqual(observed_edges, expected_edges, json.dumps(metrics, sort_keys=True))
         self.assertEqual(len(func.blocks), 4)
         self.assertEqual(metrics["precision"], 1.0)
@@ -151,6 +156,11 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
             (0x1002, 0x1008),
         }
         metrics = _precision_recall_f1(expected_edges, observed_edges)
+        print("CFG_EDGE_METRIC " + json.dumps({
+            "fixture": "x86-64-loop-cfg-v1",
+            "architecture": "x86_64",
+            **metrics,
+        }, sort_keys=True))
         self.assertEqual(observed_edges, expected_edges, json.dumps(metrics, sort_keys=True))
         self.assertEqual(len(func.blocks), 3)
         self.assertEqual(metrics["precision"], 1.0)
