@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rdis import signatures
-from rdis.fingerprint import is_generated
+from rdis.fingerprint import features, is_generated
 from rdis.analysis import Program
 from rdis.arch import make
 from rdis.loader import Image, Section, open_image
@@ -151,11 +151,25 @@ class CompiledCorpusScore(unittest.TestCase):
         self.assertEqual(wrong, 0)
         self.assertGreaterEqual(right, 20)
 
-    def test_same_build_stripped_recovers_nearly_every_signed_function(self):
-        out, right, wrong = self.score(self.v1[1], self.v1[0])
-        unique = sum(len(entry["names"]) == 1 for entry in self.db["entries"].values())
-        self.assertEqual(wrong, 0)
-        self.assertGreaterEqual(right, unique - 2)
+    def test_same_build_stripped_names_exactly_the_signed_functions_it_can_see(self):
+        """Every signed, unambiguous function that the stripped build still exposes as an unnamed function
+        is named, and nothing else is. Functions a stripped binary no longer reveals (crt stubs reached
+        only by symbol) are a discovery limit, not a signature one."""
+        unstripped = Program(open_image(str(self.v1[0]))).analyze()
+        stripped = Program(open_image(str(self.v1[1]))).analyze()
+        signed = set()
+        for addr, func in unstripped.functions.items():
+            entry = self.db["entries"].get(features(unstripped, func).exact)
+            if entry and len(entry["names"]) == 1 and addr in stripped.functions and is_generated(stripped.display(addr)):
+                signed.add(addr)
+        out = signatures.match(stripped, self.db)
+        truth = self.truth(self.v1[0])
+        wrong = [m for m in out["matches"] if truth.get(m["addr"]) != m["name"].lstrip("_")]
+        print("SIGNATURE_METRIC " + json.dumps({"database": "v1 symbols", "target": "v1 stripped",
+                                                "signed_and_visible": len(signed), "named": len(out["matches"]),
+                                                "wrong": len(wrong), "ambiguous": len(out["ambiguous"])}, sort_keys=True))
+        self.assertEqual(wrong, [])
+        self.assertEqual({m["addr"] for m in out["matches"]}, signed)
 
     @unittest.skipUnless(os.path.exists("/bin/ls"), "needs /bin/ls")
     def test_unrelated_system_binary_gets_no_names(self):
