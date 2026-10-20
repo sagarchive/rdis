@@ -235,6 +235,7 @@ class FunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                     metrics = _precision_recall_f1(expected, observed)
                     report = {
                         "fixture": "function-discovery-v1",
+                        "architecture": "x86_64",
                         "optimization": optimization,
                         "mode": mode,
                         "function_names": truth,
@@ -249,6 +250,116 @@ class FunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                         self.assertGreaterEqual(
                             metrics["precision"], 0.90,
                             "too many unsupported function starts: " + json.dumps(report, sort_keys=True),
+                        )
+
+
+
+@unittest.skipUnless(
+    platform.system() == "Darwin"
+    and platform.machine().lower() in ("arm64", "aarch64")
+    and all(shutil.which(tool) for tool in ("cc", "nm", "strip")),
+    "Mach-O ARM64 function truth runs on macOS ARM64",
+)
+class MachOFunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
+    def _symbol_truth(self, binary):
+        result = subprocess.run(
+            [shutil.which("nm"), "-n", str(binary)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        symbols = {}
+        for line in result.stdout.splitlines():
+            match = re.match(r"^\s*([0-9a-fA-F]+)\s+([Tt])\s+(\S+)\s*$", line)
+            if match:
+                # Mach-O's external C symbols conventionally have one leading underscore.
+                name = match.group(3).lstrip("_")
+                if name in EXPECTED_FUNCTION_NAMES:
+                    symbols[name] = int(match.group(1), 16)
+        self.assertEqual(
+            set(symbols),
+            EXPECTED_FUNCTION_NAMES,
+            "the nm symbol oracle must retain every deliberately used ARM64 fixture function",
+        )
+        return symbols
+
+    def _analyze_starts(self, binary):
+        program = Program(open_image(str(binary), arch="arm64")).analyze(
+            objc=False, swift=False, prologues=True
+        )
+        return set(program.functions)
+
+    def test_macho_arm64_function_start_precision_recall_at_o0_o2_with_and_without_symbols(self):
+        source = Path(__file__).resolve().parent / "fixtures" / "function_discovery_fixture.c"
+        cc, strip = shutil.which("cc"), shutil.which("strip")
+        with tempfile.TemporaryDirectory(prefix="rdis-macho-arm64-truth-") as temporary:
+            tmp = Path(temporary)
+            for optimization in ("-O0", "-O2"):
+                binary = tmp / ("fixture-" + optimization[2:])
+                command = [
+                    cc,
+                    "-arch", "arm64",
+                    optimization,
+                    "-fno-inline",
+                    "-fno-omit-frame-pointer",
+                    "-fno-stack-protector",
+                    "-fno-unwind-tables",
+                    "-fno-asynchronous-unwind-tables",
+                    "-nostdlib",
+                    "-Wl,-e,_truth_entry",
+                    "-Wl,-no_function_starts",
+                    str(source),
+                    "-o",
+                    str(binary),
+                ]
+                built = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(
+                    built.returncode,
+                    0,
+                    "Mach-O compiler/linker failed: " + " ".join(command) + "\n" + built.stderr,
+                )
+                truth = self._symbol_truth(binary)
+                expected = set(truth.values())
+                for mode, candidate in (
+                    ("symbols", binary),
+                    ("stripped", tmp / ("stripped-" + optimization[2:])),
+                ):
+                    if mode == "stripped":
+                        shutil.copy2(binary, candidate)
+                        stripped = subprocess.run(
+                            [strip, "-N", str(candidate)], capture_output=True, text=True
+                        )
+                        self.assertEqual(stripped.returncode, 0, stripped.stderr)
+                        stripped_symbols = subprocess.run(
+                            [shutil.which("nm"), "-n", str(candidate)],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        ).stdout
+                        self.assertFalse(
+                            any(name in stripped_symbols for name in ("_truth_leaf", "_truth_entry")),
+                            "strip -N must remove the symbol oracle from the stripped variant",
+                        )
+                    observed = self._analyze_starts(candidate)
+                    metrics = _precision_recall_f1(expected, observed)
+                    report = {
+                        "fixture": "function-discovery-v1",
+                        "architecture": "arm64",
+                        "format": "Mach-O",
+                        "optimization": optimization,
+                        "mode": mode,
+                        "function_names": truth,
+                        **metrics,
+                    }
+                    print("FUNCTION_DISCOVERY_METRIC " + json.dumps(report, sort_keys=True))
+                    with self.subTest(optimization=optimization, mode=mode):
+                        self.assertEqual(
+                            metrics["recall"], 1.0,
+                            "a known ARM64 function start was missed: " + json.dumps(report, sort_keys=True),
+                        )
+                        self.assertGreaterEqual(
+                            metrics["precision"], 0.90,
+                            "too many unsupported ARM64 function starts: " + json.dumps(report, sort_keys=True),
                         )
 
 
