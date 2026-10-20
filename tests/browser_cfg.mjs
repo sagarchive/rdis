@@ -613,7 +613,7 @@ try {
   await pagesPage.locator("#deep-h").waitFor();
   await pagesPage.locator("#deep-h").scrollIntoViewIfNeeded();
   assert(await pagesPage.getByText("See the shape of a function.", {exact: true}).isVisible());
-  const cfgHelp = await pagesPage.locator("#deep-h").locator("xpath=following-sibling::div[contains(@class,'duo')][1]").innerText();
+  const cfgHelp = await pagesPage.locator("section[aria-labelledby='deep-h'] .duo").first().innerText();
   assert(cfgHelp.includes("Entry") && cfgHelp.includes("LR/TB"), "Pages CFG help must explain Entry and layout switching");
   assert(!cfgHelp.includes("**Entry**") && !cfgHelp.includes("**LR/TB**"), "HTML help must not show literal Markdown asterisks");
   await pagesPage.waitForTimeout(150);
