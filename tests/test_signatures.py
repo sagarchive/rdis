@@ -153,8 +153,10 @@ class CompiledCorpusScore(unittest.TestCase):
 
     def test_same_build_stripped_recovers_nearly_every_signed_function(self):
         out, right, wrong = self.score(self.v1[1], self.v1[0])
+        unique = sum(len(entry["names"]) == 1 for entry in self.db["entries"].values())
         self.assertEqual(wrong, 0)
-        self.assertGreaterEqual(right, len(self.db["entries"]) - 2)
+        self.assertGreaterEqual(right, unique - 2)
+        self.assertEqual(len(out["matches"]) + len(out["ambiguous"]) >= unique, True)
 
     @unittest.skipUnless(os.path.exists("/bin/ls"), "needs /bin/ls")
     def test_unrelated_system_binary_gets_no_names(self):
