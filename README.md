@@ -191,8 +191,23 @@ PYTHONPATH=. python -m rdis.mcp_server
 ```
 
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
-(use the venv's python). Tools (12): `info`, `list_functions`, `disassemble`, `decompile`, `cfg`,
-`strings`, `imports`, `classes`, `xrefs`, `hexdump`, `rename`, `comment`.
+(use the venv's python).
+
+33 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+
+| Group | Tools |
+|---|---|
+| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved` |
+| Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
+| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
+| Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |
+| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks` |
+
+Contract: bad requests get JSON-RPC errors (`-32601` unknown method, `-32602` unknown tool, missing, unknown or
+mistyped argument). A tool that runs and fails returns `isError` with `{"error": {"code", "message"}}` where `code` is
+`not_found`, `invalid_argument`, `denied`, `response_too_large` or `internal`; Python tracebacks go to stderr, never to the
+client. Listings take `limit` (capped at 5,000) and `offset` and report `total` and `truncated`. Read-only tools never write
+a sidecar; the only side effect is the analysis cache (`RDIS_CACHE_DIR`, default `./.rdis_cache`).
 
 These cover the native-provider surface [REA](https://github.com/morluto/rea) expects (pseudocode,
 assembly, strings, symbols, calls, references), so rdis can act as a REA analysis provider in place

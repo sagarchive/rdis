@@ -51,11 +51,22 @@ def _prog(path, arch=None, loader=None, base=None):
 
 
 # ---- tool implementations ------------------------------------------------
-def t_list_functions(path, arch=None, limit=1000, **k):
+MAX_PAGE = 5000
+MAX_RESPONSE = 1_000_000
+
+
+def _page(items, limit, offset, key):
+    limit, offset = max(0, min(int(limit), MAX_PAGE)), max(0, int(offset))
+    chunk = items[offset:offset + limit]
+    return {"total": len(items), "offset": offset, "limit": limit, "returned": len(chunk),
+            "truncated": offset + limit < len(items), key: chunk}
+
+
+def t_list_functions(path, arch=None, limit=1000, offset=0, **k):
     p = _prog(path, arch, **k)
     items = [{"addr": hex(a), "name": p.display(a) or n}
              for a, n in sorted(p.names.items()) if a in p.functions]
-    return {"count": len(items), "functions": items[:limit]}
+    return {"count": len(items), **_page(items, limit, offset, "functions")}
 
 def t_disassemble(path, func, arch=None, **k):
     p = _prog(path, arch, **k)
@@ -96,25 +107,31 @@ def t_callgraph(path, func, arch=None, direction="both", depth=1, **k):
         raise ValueError(f"no procedure at {addr:#x}")
     return render.callgraph(p, f, direction=direction, depth=depth)
 
-def t_strings(path, arch=None, minlen=4, **k):
+def t_strings(path, arch=None, minlen=4, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
-    return {"strings": [{"addr": hex(a), "text": s} for a, s in sorted(p.strings(minlen).items())]}
+    items = [{"addr": hex(a), "text": s} for a, s in sorted(p.strings(minlen).items())]
+    return _page(items, limit, offset, "strings")
 
-def t_imports(path, arch=None, **k):
+def t_imports(path, arch=None, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
-    return {"imports": [{"addr": hex(a), "name": n} for a, n in sorted(p.image.imports.items())]}
+    items = [{"addr": hex(a), "name": n} for a, n in sorted(p.image.imports.items())]
+    return _page(items, limit, offset, "imports")
 
-def t_classes(path, arch=None, **k):
+def t_classes(path, arch=None, limit=200, offset=0, **k):
     p = _prog(path, arch, **k)
-    objc = [c.declaration() for c in (p.objc.classes if p.objc else [])]
-    swift = [t.declaration() for t in (p.swift.types if p.swift else [])]
-    return {"objc": objc, "swift": swift}
+    items = [("objc", c.declaration()) for c in (p.objc.classes if p.objc else [])]
+    items += [("swift", t.declaration()) for t in (p.swift.types if p.swift else [])]
+    out = _page(items, limit, offset, "types")
+    types = out.pop("types")
+    out["objc"] = [d for kind, d in types if kind == "objc"]
+    out["swift"] = [d for kind, d in types if kind == "swift"]
+    return out
 
-def t_xrefs(path, addr, arch=None, **k):
+def t_xrefs(path, addr, arch=None, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
     target = p.resolve(addr)
-    return {"xrefs_to": [{"from": hex(a), "kind": kind, "in": p.display(a) or ""}
-                         for a, kind in p.xrefs_to(target)]}
+    items = [{"from": hex(a), "kind": kind, "in": p.display(a) or ""} for a, kind in p.xrefs_to(target)]
+    return _page(items, limit, offset, "xrefs_to")
 
 def t_rename(path, addr, name, arch=None, **k):
     p = _prog(path, arch, **k)
@@ -157,27 +174,27 @@ def _func(p, func):
 def _ref(p, a):
     return {"addr": hex(a), "name": p.display(a) or ""}
 
-def t_search(path, query, arch=None, **k):
+def t_search(path, query, arch=None, limit=200, offset=0, **k):
     from .server import _search          # the UI's search box: names, strings, address/hex
-    return {"results": _search(_prog(path, arch, **k), query)}
+    return _page(_search(_prog(path, arch, **k), query), limit, offset, "results")
 
 def t_lookup(path, addr, arch=None, **k):
     from .server import _addrinfo
     p = _prog(path, arch, **k)
     return _addrinfo(p, p.resolve(addr))
 
-def t_callees(path, func, arch=None, **k):
+def t_callees(path, func, arch=None, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
-    return {"callees": [_ref(p, a) for a in sorted(_func(p, func).calls)]}
+    return _page([_ref(p, a) for a in sorted(_func(p, func).calls)], limit, offset, "callees")
 
-def t_callers(path, func, arch=None, **k):
+def t_callers(path, func, arch=None, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
     f, seen = _func(p, func), set()
     for src, kind in p.xrefs_to(f.addr):
         c = p.function_at(src)
         if kind in ("call", "tail") and c is not None:
             seen.add(c.addr)
-    return {"callers": [_ref(p, a) for a in sorted(seen)]}
+    return _page([_ref(p, a) for a in sorted(seen)], limit, offset, "callers")
 
 def t_diff(path, other, limit=200, offset=0, arch=None, **k):
     from . import diff as diffmod
@@ -211,11 +228,12 @@ def t_unresolved(path, func=None, arch=None, **k):
     return {"count": len(rows), "unresolved": [
         {**r, "addr": hex(r["addr"]), "function": hex(r["function"])} for r in rows]}
 
-def t_basic_blocks(path, func, arch=None, **k):
+def t_basic_blocks(path, func, arch=None, limit=1000, offset=0, **k):
     p = _prog(path, arch, **k)
     f = _func(p, func)
-    return {"blocks": [{"start": hex(b.addr), "end": hex(b.end), "succs": [hex(s) for s in b.succs]}
-                       for _, b in sorted(f.blocks.items())]}
+    items = [{"start": hex(b.addr), "end": hex(b.end), "succs": [hex(s) for s in b.succs]}
+             for _, b in sorted(f.blocks.items())]
+    return _page(items, limit, offset, "blocks")
 
 def t_stack_frame(path, func, arch=None, **k):
     p = _prog(path, arch, **k)
@@ -306,7 +324,7 @@ def t_jni_natives(path, arch=None, **k):
 
 TOOLS = {
     "list_functions": (t_list_functions, "List discovered functions (addr, resolved name).",
-                       {"path": "string", "arch": "string?", "limit": "integer?"}),
+                       {"path": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "disassemble": (t_disassemble, "Annotated assembly for one function (name or 0xaddr).",
                     {"path": "string", "func": "string", "arch": "string?"}),
     "decompile": (t_decompile, "C-like pseudo-code for one function.",
@@ -316,12 +334,12 @@ TOOLS = {
     "callgraph": (t_callgraph, "Bounded interprocedural callers/callees graph as Graphviz DOT with nodes, edges, direction, depth and truncation metadata.",
                   {"path": "string", "func": "string", "arch": "string?", "direction": "string?", "depth": "integer?"}),
     "strings": (t_strings, "All C/UTF-16 strings with addresses.",
-                {"path": "string", "arch": "string?", "minlen": "integer?"}),
-    "imports": (t_imports, "Imported/external symbols.", {"path": "string", "arch": "string?"}),
+                {"path": "string", "arch": "string?", "minlen": "integer?", "limit": "integer?", "offset": "integer?"}),
+    "imports": (t_imports, "Imported/external symbols.", {"path": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "classes": (t_classes, "Objective-C and Swift type declarations.",
-                {"path": "string", "arch": "string?"}),
+                {"path": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "xrefs": (t_xrefs, "Cross-references to an address or symbol.",
-              {"path": "string", "addr": "string", "arch": "string?"}),
+              {"path": "string", "addr": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "hexdump": (t_hex, "Hex + ASCII dump of a function's bytes.",
                 {"path": "string", "func": "string", "arch": "string?"}),
     "info": (t_info, "Format, architecture, entry point and sections.",
@@ -331,13 +349,13 @@ TOOLS = {
     "comment": (t_comment, "Attach a comment to an address; persisted to <binary>.rdb.",
                 {"path": "string", "addr": "string", "text": "string", "arch": "string?"}),
     "search": (t_search, "Search names and strings, or resolve an address/symbol.",
-               {"path": "string", "query": "string", "arch": "string?"}),
+               {"path": "string", "query": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "lookup": (t_lookup, "What an address is: section, file offset, owning function, instruction, xref count.",
                {"path": "string", "addr": "string", "arch": "string?"}),
     "callees": (t_callees, "Functions called by a function.",
-                {"path": "string", "func": "string", "arch": "string?"}),
+                {"path": "string", "func": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "callers": (t_callers, "Functions that call (or tail-call) a function.",
-                {"path": "string", "func": "string", "arch": "string?"}),
+                {"path": "string", "func": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "diff": (t_diff, "Match functions of two builds (name, exact, shape, strings, call graph, similarity) with confidence and ambiguity.",
              {"path": "string", "other": "string", "limit": "integer?", "offset": "integer?", "arch": "string?"}),
     "signatures": (t_signatures, "Name unnamed functions from a local signature database (confidence + source; ambiguous hashes are listed, not guessed).",
@@ -347,7 +365,7 @@ TOOLS = {
     "unresolved": (t_unresolved, "Indirect jumps and calls whose target could not be established (never guessed).",
                    {"path": "string", "func": "string?", "arch": "string?"}),
     "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",
-                     {"path": "string", "func": "string", "arch": "string?"}),
+                     {"path": "string", "func": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "stack_frame": (t_stack_frame, "Recovered stack locals of a function (offset, name, type).",
                     {"path": "string", "func": "string", "arch": "string?"}),
     "read_bytes": (t_read_bytes, "Raw bytes at an address as hex (max 64 KiB).",
@@ -373,10 +391,65 @@ TOOLS = {
 }
 
 
+WRITES = {"rename", "comment", "rename_many", "define_function", "undefine_function", "set_type", "bookmarks"}
+COMMON = {"loader": "string?", "base": "any?"}
+_TYPES = {"string": str, "integer": int, "array": list, "boolean": bool}
+
+
+class RpcError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 def _schema(params):
+    params = {**params, **{k: v for k, v in COMMON.items() if k not in params}}
     req = [k for k, v in params.items() if not v.endswith("?")]
-    props = {k: {"type": v.rstrip("?")} for k, v in params.items()}
-    return {"type": "object", "properties": props, "required": req}
+    props = {k: ({} if v.rstrip("?") == "any" else {"type": v.rstrip("?")}) for k, v in params.items()}
+    return {"type": "object", "properties": props, "required": req, "additionalProperties": False}
+
+
+def _validate(name, args):
+    if name not in TOOLS:
+        raise RpcError(-32602, f"unknown tool {name!r}")
+    if not isinstance(args, dict):
+        raise RpcError(-32602, "arguments must be an object")
+    schema = _schema(TOOLS[name][2])["properties"]
+    unknown = sorted(set(args) - set(schema))
+    if unknown:
+        raise RpcError(-32602, f"{name}: unknown argument(s) {unknown}")
+    missing = [k for k in _schema(TOOLS[name][2])["required"] if k not in args]
+    if missing:
+        raise RpcError(-32602, f"{name}: missing required argument(s) {missing}")
+    for key, value in args.items():
+        want = schema[key].get("type")
+        if want and (not isinstance(value, _TYPES[want]) or (want == "integer" and isinstance(value, bool))):
+            raise RpcError(-32602, f"{name}: argument {key!r} must be {want}")
+
+
+def _failure(code, message):
+    return {"content": [{"type": "text", "text": json.dumps({"error": {"code": code, "message": message}})}],
+            "isError": True}
+
+
+def _call(name, args):
+    _validate(name, args)
+    try:
+        text = json.dumps(TOOLS[name][0](**args), indent=1)
+    except FileNotFoundError as e:
+        return _failure("not_found", f"{e.filename or 'file'} does not exist")
+    except KeyError as e:
+        return _failure("not_found", str(e.args[0]) if e.args else "not found")
+    except PermissionError as e:
+        return _failure("denied", str(e))
+    except (ValueError, TypeError, re.error) as e:
+        return _failure("invalid_argument", str(e))
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return _failure("internal", f"{type(e).__name__}: {e}")
+    if len(text) > MAX_RESPONSE:
+        return _failure("response_too_large", f"result is {len(text)} characters; use limit/offset to page it")
+    return {"content": [{"type": "text", "text": text}]}
 
 
 # ---- JSON-RPC loop -------------------------------------------------------
@@ -385,21 +458,19 @@ def _handle(req):
     if m == "initialize":
         return {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
                 "serverInfo": {"name": "rdis", "version": "1.0"}}
+    if m == "ping":
+        return {}
     if m == "tools/list":
-        return {"tools": [{"name": n, "description": d, "inputSchema": _schema(p)}
+        return {"tools": [{"name": n, "description": d, "inputSchema": _schema(p),
+                           "annotations": {"readOnlyHint": n not in WRITES, "destructiveHint": False,
+                                           "openWorldHint": False}}
                           for n, (_, d, p) in TOOLS.items()]}
     if m == "tools/call":
-        name = req["params"]["name"]
-        args = req["params"].get("arguments", {})
-        fn = TOOLS[name][0]
-        try:
-            result = fn(**args)
-            text = json.dumps(result, indent=2)
-            return {"content": [{"type": "text", "text": text}]}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": f"error: {e}\n{traceback.format_exc()}"}],
-                    "isError": True}
-    raise ValueError(f"unknown method: {m}")
+        params = req.get("params")
+        if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+            raise RpcError(-32602, "tools/call needs params.name")
+        return _call(params["name"], params.get("arguments", {}))
+    raise RpcError(-32601, f"unknown method: {m}")
 
 
 def main():
@@ -423,9 +494,10 @@ def main():
         try:
             result = _handle(req)
             resp = {"jsonrpc": "2.0", "id": req.get("id"), "result": result}
+        except RpcError as e:
+            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": e.code, "message": str(e)}}
         except Exception as e:
-            resp = {"jsonrpc": "2.0", "id": req.get("id"),
-                    "error": {"code": -32000, "message": str(e)}}
+            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": -32000, "message": str(e)}}
         sys.stdout.write(json.dumps(resp) + "\n")
         sys.stdout.flush()
 

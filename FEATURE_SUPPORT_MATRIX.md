@@ -51,7 +51,7 @@ bounded behavior a test actually checks. Nothing here is a claim of parity with 
 | Capability | Source | Evidence | Status | Not covered |
 |---|---|---|---|---|
 | Web UI, multi-user sessions | `rdis/server.py`, `rdis/web/index.html` | 20-visitor isolation and determinism test; Chromium and Firefox graph tests | Partial | route-by-route threat review; keyboard-only and screen-reader review |
-| MCP server (29 tools) | `rdis/mcp_server.py` | every read-only tool exercised on a real binary and on a PowerPC ELF | Partial | pagination, budgets, cancellation, audit of writes |
+| MCP server (33 tools) | `rdis/mcp_server.py` | typed schemas with read-only annotations; JSON-RPC error codes over a real stdio process; structured tool errors without tracebacks; pagination arithmetic; read-only tools proven not to write a sidecar; response-size guard (`tests/test_mcp_contract.py`) | Verified (bounded) | cancellation of a running tool; audit log and undo for writes; multi-client write coordination |
 | Persistent cache and `.rdb` annotations | `rdis/cache.py`, `rdis/analysis.py` | invalidation and replacement regressions | Partial | schema migration; multi-process races |
 | LLDB debugger | `rdis/debug.py` | argument-sanitization regression | Partial | remote targets; mapping a stopped PC to the static CFG |
 | Plugin SDK | `rdis/plugins.py` | plugin loaders and architectures exist | Partial | versioned contract; broken-plugin isolation |
