@@ -1,0 +1,8 @@
+# Hand-encoded x86-64 loop CFG, loaded at 0x1000.
+# ISA reference: Intel 64 and IA-32 Architectures Software Developer's Manual, Vol. 2.
+# 0x1000: XOR ECX, ECX       bytes 31 c9
+# 0x1002: INC ECX            bytes ff c1
+# 0x1004: CMP ECX, EDI       bytes 39 f9
+# 0x1006: JL 0x1002          bytes 7c fa (next RIP 0x1008 + signed disp8 -6)
+# 0x1008: RET                bytes c3
+31 c9 ff c1 39 f9 7c fa c3
