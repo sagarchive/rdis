@@ -5,8 +5,8 @@
     python tests/scorecard.py --out result.json
 
 A tool that is not installed is recorded as `not_available` with the reason; nothing is estimated. Each
-adapter follows the tool's documented command line. An adapter that has never been run on a real install
-carries `"adapter_verified": false` in the result, so a reader can tell a measurement from an untested wiring.
+adapter follows the tool's documented command line. Radare2 and Ghidra adapters were exercised on real installs
+(radare2 6.2.4, Ghidra 12.1.4 with Temurin 21); the result records each tool's version.
 
 Tasks
   function_discovery   entry points found in a stripped build, scored against the unstripped build's symbols
@@ -63,6 +63,30 @@ def child_peak_rss(cmd, timeout=1800, env=None):
     return proc.returncode, (chunks[0] if chunks else b"").decode("utf-8", "replace"), time.perf_counter() - start, rss
 
 
+def text_ranges(path):
+    import lief
+    lief.logging.disable()
+    fat = lief.MachO.parse(path)
+    if fat is None:
+        return None
+    return [(sec.virtual_address, sec.virtual_address + sec.size) for b in fat for sec in b.sections
+            if sec.name == "__text" and sec.segment_name == "__TEXT"]
+
+
+def restrict(found, path):
+    ranges = text_ranges(path)
+    return found if ranges is None else {a for a in found if any(lo <= a < hi for lo, hi in ranges)}
+
+
+def ghidra_version():
+    home = os.environ.get("GHIDRA_INSTALL_DIR")
+    props = os.path.join(home or "", "Ghidra", "application.properties")
+    if not os.path.exists(props):
+        return None
+    with open(props) as fh:
+        return next((l.split("=", 1)[1].strip() for l in fh if l.startswith("application.version=")), None)
+
+
 def score(truth, found):
     tp = len(truth & found)
     return {"truth": len(truth), "found": len(found), "true_positives": tp, "missed": len(truth - found),
@@ -92,12 +116,14 @@ def radare2_command(binary):
     r2 = shutil.which("r2") or shutil.which("radare2")
     if not r2:
         raise ToolUnavailable("radare2 (r2) not found on PATH")
-    return [r2, "-q", "-e", "scr.color=0", "-e", "bin.relocs.apply=true", "-c", "aaa;aflj", "--", binary]
+    return [r2, "-q", "-e", "scr.color=0", "-e", "bin.relocs.apply=true", "-c", "aaa;aflj", binary]
 
 
 def radare2_parse(stdout):
     start = stdout.find("[")
-    return {f["offset"] for f in json.loads(stdout[start:])} if start >= 0 else set()
+    if start < 0:
+        return set()
+    return {f.get("addr", f.get("offset")) for f in json.loads(stdout[start:]) if not f.get("name", "").startswith("sym.imp.")}
 
 
 def radare2_version():
@@ -116,6 +142,7 @@ def ghidra_command(binary, workdir):
     if not shutil.which("java"):
         raise ToolUnavailable("Ghidra needs a Java runtime; none found")
     out = os.path.join(workdir, "ghidra-functions.json")
+    os.makedirs(os.path.join(workdir, "project"), exist_ok=True)
     return [head, os.path.join(workdir, "project"), "scorecard", "-import", binary, "-overwrite", "-scriptPath",
             GHIDRA_SCRIPT_DIR, "-postScript", "ExportFunctions.java", out, "-deleteProject"], out
 
@@ -132,21 +159,21 @@ def measure_function_discovery(tool, stripped, truth, workdir):
     if tool == "rdis":
         found, secs, rss = rdis_functions(stripped)
         return {"status": "measured", "adapter_verified": True, "version": rdis_version(), "seconds": round(secs, 3),
-                "peak_rss_bytes": rss, **score(truth, found)}
+                "peak_rss_bytes": rss, **score(truth, restrict(found, stripped))}
     if tool == "radare2":
         cmd = radare2_command(stripped)
         rc, out, secs, rss = child_peak_rss(cmd)
         if rc != 0:
             return {"status": "failed", "reason": f"r2 exited {rc}", "version": radare2_version()}
-        return {"status": "measured", "adapter_verified": False, "version": radare2_version(), "seconds": round(secs, 3),
-                "peak_rss_bytes": rss, **score(truth, radare2_parse(out))}
+        return {"status": "measured", "adapter_verified": True, "version": radare2_version(), "seconds": round(secs, 3),
+                "peak_rss_bytes": rss, **score(truth, restrict(radare2_parse(out), stripped))}
     if tool == "ghidra":
         cmd, outfile = ghidra_command(stripped, workdir)
         rc, _, secs, rss = child_peak_rss(cmd, timeout=3600)
         if rc != 0 or not os.path.exists(outfile):
             return {"status": "failed", "reason": f"analyzeHeadless exited {rc}"}
-        return {"status": "measured", "adapter_verified": False, "seconds": round(secs, 3),
-                "peak_rss_bytes": rss, **score(truth, ghidra_parse(outfile))}
+        return {"status": "measured", "adapter_verified": True, "seconds": round(secs, 3),
+                "peak_rss_bytes": rss, **score(truth, restrict(ghidra_parse(outfile), stripped))}
     raise ValueError(tool)
 
 
@@ -173,6 +200,9 @@ def run(args):
                        "python": platform.python_version()},
               "tools": {}, "corpus": [], "tasks": {"function_discovery": {}, "analysis_resources": {}}}
     corpus = build_corpus(workdir)
+    if args.sources:
+        import real_corpus
+        corpus += list(real_corpus.build(args.sources, workdir))
     for entry in corpus:
         result["corpus"].append({"name": entry["name"], "sha256": sha256(entry["stripped"]),
                                  "bytes": os.path.getsize(entry["stripped"]), "truth_functions": len(entry["truth"])})
@@ -194,17 +224,17 @@ def run(args):
                     row = {"status": "measured", "adapter_verified": True, "seconds": round(secs, 3), "peak_rss_bytes": rss}
                 elif tool == "radare2":
                     rc, _, secs, rss = child_peak_rss(radare2_command(path), timeout=args.timeout)
-                    row = {"status": "measured" if rc == 0 else "failed", "adapter_verified": False,
+                    row = {"status": "measured" if rc == 0 else "failed", "adapter_verified": True,
                            "seconds": round(secs, 3), "peak_rss_bytes": rss}
                 else:
                     cmd, _ = ghidra_command(path, workdir)
                     rc, _, secs, rss = child_peak_rss(cmd, timeout=args.timeout)
-                    row = {"status": "measured" if rc == 0 else "failed", "adapter_verified": False,
+                    row = {"status": "measured" if rc == 0 else "failed", "adapter_verified": True,
                            "seconds": round(secs, 3), "peak_rss_bytes": rss}
             except ToolUnavailable as e:
                 row = {"status": "not_available", "reason": str(e)}
             result["tasks"]["analysis_resources"].setdefault(tool, {})[os.path.basename(path)] = {**info, **row}
-    versions = {"rdis": rdis_version(), "radare2": None, "ghidra": None}
+    versions = {"rdis": rdis_version(), "radare2": None, "ghidra": ghidra_version()}
     try:
         versions["radare2"] = radare2_version()
     except Exception:
@@ -221,6 +251,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--tools", default=",".join(TOOLS))
     p.add_argument("--extra", action="append", default=[], help="extra binary to time (hash recorded, no truth)")
+    p.add_argument("--sources", help="directory with pinned program sources (see tests/real_corpus.py)")
     p.add_argument("--timeout", type=int, default=3600)
     p.add_argument("--out")
     args = p.parse_args()

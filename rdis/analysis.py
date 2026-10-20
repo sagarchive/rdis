@@ -320,6 +320,13 @@ class Program:
         self._infer_noreturn()
         self.phase = "recovering jump tables"
         self._recover_tables()
+        if prologues:
+            self.phase = "following address-taken code"
+            before = len(self.functions)
+            self._discover_standalone(list(self._address_taken()) + list(self._pointer_scan()))
+            if len(self.functions) != before:
+                self._infer_noreturn()
+                self._recover_tables()
         self.pretty = demangle_all(self.names.values())
         # NOTE: the sidecar .rdb is NOT auto-loaded here. A shared analysis must stay free of any
         # one user's edits; callers that own a single workspace (the CLI, a single-user server)
@@ -550,6 +557,25 @@ class Program:
             self._covered = getattr(self, "_covered", 0) + sum(b.end - b.addr for b in f.blocks.values())
             self.names.setdefault(a, f"sub_{a:x}")
             work.extend(f.calls)
+
+    def _discover_standalone(self, seeds):
+        """Seeds from data and address references: kept only when their code does not run into another function's."""
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        for a in seeds:
+            if a in self.functions or not self.image.is_code(a) or self._inside_function_extent(a):
+                continue
+            f = self._build(a)
+            if f.blocks and not any(covered(b.addr) for b in f.blocks.values()):
+                self._discover([a])
+
+    def _inside_function_extent(self, a):
+        import bisect
+        key = (len(self.functions), id(self.functions))
+        if getattr(self, "_ext_key", None) != key:
+            self._ext_starts = sorted(self.functions)
+            self._ext_key = key
+        i = bisect.bisect_left(self._ext_starts, a) - 1
+        return i >= 0 and a < self.functions[self._ext_starts[i]].end
 
     def _build(self, start, seeds=()):
         insns, calls, seen = {}, set(), set()
@@ -895,6 +921,7 @@ class Program:
                     off for off in range(0, max(0, len(data) - 3), 4)
                     if self._arm64_stack_adjust_then_fp_lr_save(data, off)
                     or self._arm64_stack_adjust_with_stack_access(data, off)
+                    or self._arm64_pair_push_then_fp_lr_save(data, off)
                 )
             for off in sorted(offsets):
                 a = s.va + off
@@ -904,13 +931,42 @@ class Program:
                 # create false functions. Give their boundary predicate a wider context so it can
                 # verify that the candidate follows a RET/JMP or conventional padding. Other ISAs
                 # have fixed-width/local boundary rules and keep their original four-byte window.
-                window = 16 if self.arch.name.startswith("x86") else 4
+                window = 40 if self.arch.name.startswith("x86") else 4
                 prev = data[max(off - window, 0):off]
                 if after is not None and off and not after(prev):
                     continue
                 if thumb:
                     self._tmode.setdefault(a, True)
                 yield a
+
+    def _address_taken(self):
+        """Uncovered, aligned code whose address a function materialises: function-pointer targets with no caller."""
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        align = self._prologue_pattern()[1]
+        for t, refs in list(self.xrefs.items()):
+            if t is not None and t % align == 0 and self.image.is_code(t) and t not in self.functions \
+                    and not covered(t) and any(k == "data" and not getattr(self.function_at(src), "tables", False)
+                                               for src, k in refs):
+                yield t
+
+    def _pointer_scan(self):
+        """Code addresses stored in data (function-pointer tables, vtables), including Mach-O chained-fixup pointers."""
+        width = 8 if self.arch.bits == 64 else 4
+        align = self._prologue_pattern()[1]
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        chained = self.image.format == "macho" and width == 8
+        seen = set()
+        for sec in self.image.sections:
+            if sec.code or sec.size < width or "cstring" in sec.name:
+                continue
+            data = self.image.read(sec.va, sec.size)
+            for off in range(0, len(data) - width + 1, width):
+                v = int.from_bytes(data[off:off + width], "little")
+                t = (v & 0xFFFFFFFFF) + self.image.base if chained and v >> 36 and not v >> 63 and not self.image.is_code(v) else v
+                if t in seen or t % align or not self.image.is_code(t) or t in self.functions or covered(t):
+                    continue
+                seen.add(t)
+                yield t
 
     _PACIBSP = b"\x7f\x23\x03\xd5"
 
@@ -978,6 +1034,20 @@ class Program:
         return False
 
     @staticmethod
+    def _arm64_pair_push_then_fp_lr_save(data, offset):
+        """STP Xa, Xb, [sp, #-N]! opening a frame, with the x29/x30 save within the next four instructions."""
+        if offset + 4 > len(data) or offset % 4:
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        if (first & 0xFFC003E0) != 0xA98003E0 or not Program._arm64_terminator_before(data, offset):
+            return False
+        for pos in range(offset + 4, min(len(data) - 3, offset + 20), 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if (word >> 24) in (0xA8, 0xA9) and (word & 0x7FFF) == 0x7BFD:
+                return True
+        return False
+
+    @staticmethod
     def _arm64_stack_adjust_then_fp_lr_save(data, offset):
         """Recognize an AArch64 frame whose first instruction allocates the stack.
 
@@ -1006,29 +1076,28 @@ class Program:
                 return True
         return False
 
+    _X86_PAD = re.compile(rb"(?:\x66)*(?:\x2e)?(?:\x0f\x1f(?:\x00|\x40.|\x44\x00.|\x80.{4}|\x84\x00.{4})|\x90)|\xcc", re.S)
+
     @staticmethod
     def _x86_after_terminator(prev):
-        """Conservative x86 gap-scan guard to avoid nested prologue-like byte sequences."""
+        """Conservative x86 gap-scan guard: the bytes before a candidate must be padding after a terminator."""
         if not prev:
             return True
-        # Padding often lies between functions; inspect the bytes before that padding for the
-        # terminal instruction. Keep the recognized set deliberately narrow and auditable.
-        for pad_len in range(min(len(prev), 8) + 1):
-            prefix = prev[:len(prev) - pad_len] if pad_len else prev
-            padding = prev[len(prev) - pad_len:] if pad_len else b""
-            if any(byte not in (0x90, 0xcc) for byte in padding):
-                continue
-            if not prefix:
-                return True  # a section beginning/padding run
-            if prefix[-1] in (0xc3, 0xcb):  # RET / RETF
-                return True
-            if len(prefix) >= 3 and prefix[-3] in (0xc2, 0xca):  # RET imm16 / RETF imm16
-                return True
-            if len(prefix) >= 2 and prefix[-2] == 0xeb:  # JMP rel8 ending exactly at the boundary
-                return True
-            if len(prefix) >= 5 and prefix[-5] == 0xe9:  # JMP rel32 ending exactly at the boundary
-                return True
-        return False
+        end = len(prev)
+        while end:
+            for n in range(min(end, 15), 0, -1):
+                if Program._X86_PAD.fullmatch(prev, end - n, end):
+                    end -= n
+                    break
+            else:
+                break
+        prefix, padded = prev[:end], end < len(prev)
+        if not prefix:
+            return True
+        return ((padded and len(prefix) >= 5 and prefix[-5] == 0xe8) or prefix[-2:] == b"\x0f\x0b" or prefix[-1] in (0xc3, 0xcb) or (len(prefix) >= 3 and prefix[-3] in (0xc2, 0xca))
+                or (len(prefix) >= 2 and prefix[-2] == 0xeb) or (len(prefix) >= 5 and prefix[-5] == 0xe9)
+                or (len(prefix) >= 2 and prefix[-2] == 0xff and 0xe0 <= prefix[-1] <= 0xe7)
+                or (len(prefix) >= 6 and prefix[-6:-4] == b"\xff\x25"))
 
     def _prologue_pattern(self):
         """(byte regex, alignment, previous-bytes check, is_thumb) for function-entry encodings."""

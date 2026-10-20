@@ -71,12 +71,12 @@ class Availability(unittest.TestCase):
             cmd = scorecard.radare2_command("/tmp/bin")
         self.assertEqual(cmd[0], "/usr/bin/r2")
         self.assertIn("aaa;aflj", cmd)
-        self.assertEqual(cmd[-2:], ["--", "/tmp/bin"])
+        self.assertEqual(cmd[-2:], ["aaa;aflj", "/tmp/bin"])
 
 
 class EndToEnd(unittest.TestCase):
     def test_rdis_is_measured_and_absent_competitors_are_marked_not_available(self):
-        args = mock.Mock(tools="rdis,radare2,ghidra", extra=[], timeout=60)
+        args = mock.Mock(tools="rdis,radare2,ghidra", extra=[], timeout=60, sources=None)
         with mock.patch.object(scorecard, "radare2_command", side_effect=scorecard.ToolUnavailable("no r2")), \
                 mock.patch.object(scorecard, "ghidra_command", side_effect=scorecard.ToolUnavailable("no ghidra")):
             result = scorecard.run(args)
