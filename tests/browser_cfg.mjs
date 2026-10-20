@@ -462,7 +462,7 @@ try {
         r.top >= host.top + 38 && r.bottom <= host.bottom - 42;
     };
     const entry = nodes.find(n => n.querySelector("title")?.textContent === "entry");
-    const cases = nodes.filter(n => /^case\\d+$/.test(n.querySelector("title")?.textContent || ""));
+    const cases = nodes.filter(n => /^case\d+$/.test(n.querySelector("title")?.textContent || ""));
     return { entryVisible: !!entry && fullyVisible(entry),
       visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length };
   });
