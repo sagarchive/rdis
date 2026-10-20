@@ -1151,6 +1151,14 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
     const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
     const tallAndNarrow = rect.height > availH * 1.15 && rect.width < availW * 0.8;
     const tooWide = rect.width > availW * 1.15;
+
+    // Small caller/callee neighborhoods should open as complete diagrams. Centering only the root
+    // is useful when traversing a large interprocedural graph, but on a four-node graph it can put
+    // the outgoing targets beyond the viewport and make the graph look broken. Fit the whole
+    // neighborhood up to a bounded node count; retain focus-first navigation for larger graphs.
+    const callGraphNodeCount = svg.querySelectorAll("g.node").length;
+    if (graphKind === "callgraph" && callGraphNodeCount <= 12) return fit();
+
     const root = svg.querySelector(graphKind === "callgraph" ? "g.node.cg-root" : "g.node.entry") ||
       [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === String(addr)) ||
       svg.querySelector("g.node");
