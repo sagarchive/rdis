@@ -187,6 +187,12 @@ def t_diff(path, other, limit=200, offset=0, arch=None, **k):
     out["page"] = {"offset": int(offset), "limit": int(limit), "total": total}
     return out
 
+def t_signatures(path, db, arch=None, **k):
+    from . import signatures
+    out = signatures.match(_prog(path, arch, **k), signatures.load(db))
+    rows = lambda items: [{**r, "addr": hex(r["addr"])} for r in items]
+    return {"matches": rows(out["matches"]), "ambiguous": rows(out["ambiguous"])}
+
 def t_unresolved(path, func=None, arch=None, **k):
     p = _prog(path, arch, **k)
     rows = p.unresolved([_func(p, func)] if func else None)
@@ -322,6 +328,8 @@ TOOLS = {
                 {"path": "string", "func": "string", "arch": "string?"}),
     "diff": (t_diff, "Match functions of two builds (name, exact, shape, strings, call graph, similarity) with confidence and ambiguity.",
              {"path": "string", "other": "string", "limit": "integer?", "offset": "integer?", "arch": "string?"}),
+    "signatures": (t_signatures, "Name unnamed functions from a local signature database (confidence + source; ambiguous hashes are listed, not guessed).",
+                   {"path": "string", "db": "string", "arch": "string?"}),
     "unresolved": (t_unresolved, "Indirect jumps and calls whose target could not be established (never guessed).",
                    {"path": "string", "func": "string?", "arch": "string?"}),
     "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",

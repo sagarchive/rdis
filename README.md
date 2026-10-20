@@ -20,6 +20,7 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Binary diff | function matching across builds (name, address-masked bytes, CFG shape, strings, call graph, similarity) with confidence and explicit ambiguity; annotation transfer above a threshold | not listed on its product page |
+| Library recognition | local signature databases built from any binary with symbols (`--sig-make`, `--sig`): relocation-masked hashes, no tiny or ambiguous matches, every name carries its source and confidence | not listed on its product page |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
 | Control-flow graph | Interactive browser CFG with automatic left-to-right layout for broad switch/fan-out graphs, reversible TB/LR layout, fit/Entry/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
 | Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
@@ -114,6 +115,8 @@ python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar'
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
 python -m rdis --list-archs                                      # every CPU rdis can load
 python -m rdis OLD --diff NEW                                   # match functions across two builds
+python -m rdis LIB --sig-make lib.sig                           # signatures from a binary with symbols
+python -m rdis STRIPPED --sig lib.sig                           # name its unnamed functions from them
 python -m rdis OLD --diff NEW --transfer --min-confidence 0.9   # carry renames/comments over (never overwrites)
 ```
 

@@ -61,6 +61,25 @@ def run_diff(a, prog):
             print(f"  skipped {row['a']}: {row['reason']}")
 
 
+def run_signatures(a, prog):
+    from . import signatures
+    if a.sig_make:
+        db = signatures.make(prog)
+        signatures.dump(db, a.sig_make)
+        print(f"wrote {len(db['entries'])} signatures from {db['source']['name']} to {a.sig_make}")
+        return
+    out = signatures.match(prog, signatures.load(a.sig))
+    if a.json:
+        print(json.dumps({"matches": [{**m, "addr": hex(m["addr"])} for m in out["matches"]],
+                          "ambiguous": [{**m, "addr": hex(m["addr"])} for m in out["ambiguous"]]}, sort_keys=True))
+        return
+    for m in out["matches"]:
+        print(f"{m['addr']:#012x}  {m['name']}  confidence {m['confidence']:.2f}  ({m['size']} insns, from {m['source']})")
+    for m in out["ambiguous"]:
+        print(f"{m['addr']:#012x}  ambiguous: {', '.join(m['candidates'])}")
+    print(f"{len(out['matches'])} named, {len(out['ambiguous'])} ambiguous")
+
+
 def list_containers(path, libs, as_json=False):
     if as_json:
         print(json.dumps([{"entry": s["entry"], "arch": s.get("arch"), "size": s.get("size")}
@@ -111,6 +130,8 @@ def main(argv=None):
     p.add_argument("--base", help="load address for --loader raw")
     p.add_argument("--allow-legacy-rdb", action="store_true",
                    help="import an old sidecar without a content hash (verify the original binary first)")
+    p.add_argument("--sig-make", metavar="DB", help="write a signature database from this binary's named functions")
+    p.add_argument("--sig", metavar="DB", help="name this binary's unnamed functions from a signature database")
     p.add_argument("--diff", metavar="OTHER", help="match this binary's functions against another build of it")
     p.add_argument("--transfer", action="store_true",
                    help="with --diff: copy renames and comments onto OTHER for matches at or above --min-confidence")
@@ -140,6 +161,8 @@ def main(argv=None):
         prog = build(a, path)
         if a.diff:
             return run_diff(a, prog)
+        if a.sig or a.sig_make:
+            return run_signatures(a, prog)
     except (KeyError, ValueError) as e:
         sys.exit(f"rdis: {e}")
 
