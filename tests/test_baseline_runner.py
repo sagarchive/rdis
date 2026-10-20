@@ -26,8 +26,8 @@ class BaselineCorpusTests(unittest.TestCase):
         manifest = json.loads(raw.decode("utf-8"))
         baseline.validate_manifest(manifest)
         entries, by_id = baseline.verify_entries(manifest, root, baseline.host_context())
-        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v2")
-        for identifier in ("cfg-fixture-source", "arm64-branch-fixture"):
+        self.assertEqual(manifest["corpus_id"], "rdis-baseline-corpus-v3")
+        for identifier in ("cfg-fixture-source", "arm64-branch-fixture", "function-discovery-fixture-source"):
             with self.subTest(entry=identifier):
                 self.assertEqual(by_id[identifier]["status"], "passed", by_id[identifier])
                 self.assertEqual(
@@ -73,16 +73,30 @@ class BaselineCorpusTests(unittest.TestCase):
         self.assertIn('--constraints-file "$CONSTRAINTS_OVERLAY"', workflow)
         self.assertIn('-c "$CONSTRAINTS_OVERLAY"', workflow)
 
-    def test_promoted_baseline_record_matches_live_corpus_and_constraint_hashes(self):
+    def test_promoted_v2_baseline_record_matches_immutable_manifest_and_constraint_hashes(self):
         root = SCRIPT.parents[1]
         record_path = root / "benchmarks" / "baselines" / "rdis-baseline-corpus-v2" / "2026-10-19" / "record.json"
         record = json.loads(record_path.read_text(encoding="utf-8"))
         self.assertEqual(record["baseline_id"], "rdis-baseline-corpus-v2/2026-10-19")
         self.assertEqual(record["corpus"]["id"], "rdis-baseline-corpus-v2")
 
+        # The v2 record is immutable historical evidence. The live manifest has advanced to v3;
+        # verify v2 against its frozen manifest snapshot instead of silently changing old provenance.
         manifest_path = root / record["corpus"]["manifest_path"]
+        self.assertEqual(
+            manifest_path.relative_to(root).as_posix(),
+            "benchmarks/baselines/rdis-baseline-corpus-v2/2026-10-19/manifest.json",
+        )
         self.assertEqual(hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
                          record["corpus"]["manifest_sha256"])
+        live_manifest_path = root / "tests" / "baseline_corpus.json"
+        live_manifest = json.loads(live_manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(live_manifest["corpus_id"], "rdis-baseline-corpus-v3")
+        self.assertNotEqual(
+            hashlib.sha256(live_manifest_path.read_bytes()).hexdigest(),
+            record["corpus"]["manifest_sha256"],
+            "a new corpus version must not reuse the old v2 provenance hash",
+        )
         self.assertEqual(record["ci"]["workflow_url"],
                          "https://github.com/sagarchive/rdis/actions/runs/39271318107")
         self.assertEqual(record["ci"]["conclusion"], "success")
