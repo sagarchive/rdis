@@ -14,7 +14,7 @@ try:
 except ImportError:
     pypcode = None
 
-from . import ir_front
+from . import ir_front, sleigh
 
 PAGE = 4096
 STACK_SIZE = 1 << 20
@@ -90,7 +90,7 @@ class Machine:
         lang = ir_front._lang(prog.arch, False)
         if lang is None:
             raise EmulationError(f"no SLEIGH language for {prog.arch.name}")
-        self.prog, self.max_steps = prog, max_steps
+        self.prog, self.max_steps, self.lang = prog, max_steps, lang
         self.ctx = pypcode.Context(lang)
         self.regs = {name: v for name, v in self.ctx.registers.items()}
         self.reg_bytes, self.uniq = _Sparse(), _Sparse()
@@ -202,7 +202,7 @@ class Machine:
         if not code:
             raise EmulationError(f"execution reached unmapped address {pc:#x}")
         try:
-            ops = self.ctx.translate(code, pc, max_instructions=1).ops
+            ops = sleigh.safe_translate(self.ctx, self.lang, code, pc, max_instructions=1).ops
         except Exception as e:
             raise EmulationError(f"cannot translate instruction at {pc:#x}: {e}") from None
         fall, i = pc, 0

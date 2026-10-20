@@ -114,5 +114,57 @@ class SleighCpuTests(unittest.TestCase):
             self.assertIn(mov, p.functions[f].blocks)
 
 
+@unittest.skipIf(pypcode is None, "pypcode is not installed (pip install 'rdis[ir]')")
+class DelaySlotCrashRegressions(unittest.TestCase):
+    """SLEIGH aborts the whole process (SIGSEGV) when a delay slot is missing, is another control transfer, or
+    cannot be translated. tests/fuzz.py found all three; each runs in a child so a crash fails the test
+    instead of killing the runner."""
+
+    CHILD = (
+        "import sys; sys.path.insert(0, sys.argv[1])\n"
+        "from rdis import arch\n"
+        "a = arch.make(sys.argv[2]); out = a.decode_run(bytes.fromhex(sys.argv[3]), 0x1000)\n"
+        "print([(i.mnemonic, a.kind(i)) for i in out])\n"
+    )
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def decode(self, cpu, hexbytes):
+        import subprocess
+        r = subprocess.run([sys.executable, "-c", self.CHILD, self.ROOT, cpu, hexbytes], capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, f"{cpu} {hexbytes}: process died with {r.returncode}")
+        return eval(r.stdout)
+
+    def test_branch_with_no_bytes_for_its_slot(self):
+        self.assertEqual(self.decode("sparc", "10800004"), [("ba", "jmp")])
+        self.assertEqual(self.decode("sparc", "81c3e008"), [("retl", "ret")])
+        self.assertEqual(self.decode("sh4", "000b"), [("rts", "ret")])
+
+    def test_control_transfer_inside_a_delay_slot(self):
+        self.assertEqual(self.decode("sparc", "40000004" "40000004"), [("call", "call"), ("call", "other")])
+        self.assertEqual(self.decode("sparc", "10800004" "10800004"), [("ba", "jmp"), ("ba", "other")])
+        self.assertEqual(self.decode("sh4", "a004" "a004"), [("bra", "jmp"), ("bra", "other")])
+
+    def test_delay_slot_instruction_that_cannot_be_translated(self):
+        self.assertEqual(self.decode("sparc", "40000004" "9db560ea" "01000000"),
+                         [("call", "call"), ("impdef1", "other"), ("nop", "other")])
+
+    def test_the_ir_front_end_and_emulator_are_protected_too(self):
+        """Fuzzing first crashed decode_run, then PcodeFront.translate: every translate caller must be safe."""
+        import subprocess
+        child = (
+            "import sys; sys.path.insert(0, sys.argv[1])\n"
+            "from rdis import arch, ir_front\n"
+            "a = arch.make('sparc'); front = ir_front.PcodeFront(a)\n"
+            "for h in ('40000004', '4000000440000004', '400000049db560ea01000000', '10800004'):\n"
+            "    front.translate(bytes.fromhex(h) + bytes(8), 0x1000)\n"
+            "print('ok')\n")
+        r = subprocess.run([sys.executable, "-c", child, self.ROOT], capture_output=True, text=True, timeout=60)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "ok"), r.stderr[-300:])
+
+    def test_well_formed_delay_slots_are_unchanged(self):
+        self.assertEqual(self.decode("sparc", "81c3e008" "01000000"), [("retl", "ret"), ("nop", "other")])
+
+
 if __name__ == "__main__":
     unittest.main()

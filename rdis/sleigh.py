@@ -12,6 +12,7 @@ Short names carry a calling convention (arguments / return / stack registers) so
 name parameters; `sleigh:<id>` works for every language but has no ABI, so parameters are not
 recovered. Control flow and delay slots come from the spec; data cross-references do not (yet).
 """
+import re
 import threading
 
 from .arch import Arch, CALL, RET, JMP, CJMP, IJMP, OTHER
@@ -23,6 +24,73 @@ except ImportError:                       # optional dependency, like the IR fro
 
 _CTX, _LOCK = {}, threading.RLock()       # a Context is not thread-safe; decode under one lock
 _NON_ADDRESS = ("const", "unique", "register")
+_PAD = 16
+
+# SLEIGH's translate() segfaults on a delay-slot instruction with no bytes after it, and on a
+# control transfer sitting in another one's delay slot (pypcode 4.0.1; found by tests/fuzz.py). Real
+# code never has either, but a crafted file can. These are the mnemonics that transfer control and the
+# no-op swapped into such a slot in the buffer handed to SLEIGH.
+_DELAY = {
+    "sparc": (re.compile(r"^(b|fb|cb)[a-z]*(,a)?$|^(call|jmpl|ret|retl|rett|return|done|retry|t[a-z]{1,4})$"),
+              {"BE": bytes.fromhex("01000000"), "LE": bytes.fromhex("00000001")}),
+    "superh": (re.compile(r"^(bra|bsr|braf|bsrf|jmp|jsr|rts|rte|bt|bf|bt/s|bf/s|trapa)$"),
+               {"BE": bytes.fromhex("0009"), "LE": bytes.fromhex("0900")}),
+    "pa-risc": (re.compile(r"^(b|be|bl|ble|bv|bve|bb|bvb|cmpb|addb|movb|blr|bve)[a-z,.]*$"),
+                {"BE": bytes.fromhex("08000240"), "LE": bytes.fromhex("40020008")}),
+    "mips": (re.compile(r"^(j|jal|jr|jalr|jalx|b|bal|b[a-z0-9]+)$"),
+             {"BE": bytes.fromhex("00000000"), "LE": bytes.fromhex("00000000")}),
+}
+
+
+def _delay_rule(lang):
+    if not lang:
+        return None
+    processor, endian, _, variant = (lang.split(":") + ["", "", "", ""])[:4]
+    key = "superh" if processor.lower().startswith("superh") else processor.lower()
+    rule = _DELAY.get(key)
+    if rule is None or (key == "mips" and variant not in ("default", "R6")):
+        return None
+    return rule[0], rule[1][endian]
+
+
+def _translates(ctx, raw, address, nop):
+    try:
+        ctx.translate(raw + nop * (_PAD // len(nop)), address)
+        return True
+    except Exception:
+        return False
+
+
+def _sanitize(ctx, rule, insns, code):
+    """Buffer for translate(): each delay slot that is a control transfer or cannot be translated alone is
+    replaced by a no-op, and padding follows so a final slot has bytes. The caller's own bytes and
+    mnemonics are never altered."""
+    transfer, nop = rule
+    buf = bytearray(code)
+    base = insns[0].addr.offset
+    for before, slot in zip(insns, insns[1:]):
+        if not transfer.match(before.mnem.lower()):
+            continue
+        at = slot.addr.offset - base
+        if transfer.match(slot.mnem.lower()) or not _translates(ctx, bytes(buf[at:at + slot.length]),
+                                                                slot.addr.offset, nop):
+            buf[at:at + slot.length] = nop[:slot.length].ljust(slot.length, nop[-1:])
+    return bytes(buf) + nop * (_PAD // len(nop))
+
+
+def safe_translate(ctx, lang, code, addr, insns=None, **kwargs):
+    """ctx.translate() that cannot abort the process on delay-slot languages (pypcode 4.0.1 segfaults on a
+    missing, control-transfer or untranslatable delay slot; tests/fuzz.py found all three). Languages
+    without delay slots go straight through."""
+    rule = _delay_rule(lang)
+    if rule is None:
+        return ctx.translate(code, addr, **kwargs)
+    if insns is None:
+        insns = list(ctx.disassemble(code, addr, max_instructions=3).instructions)
+    if not insns:
+        return ctx.translate(code, addr, **kwargs)
+    span = sum(i.length for i in insns)
+    return ctx.translate(_sanitize(ctx, rule, insns, code[:span]), addr, **kwargs)
 
 
 def _regs(prefix, lo, hi):
@@ -158,13 +226,15 @@ class SleighArch(Arch):
                 if not insns:
                     return []
                 span = sum(i.length for i in insns)
-                ops = ctx.translate(code[:span], addr).ops
+                ops = safe_translate(ctx, self.lang, code[:span], addr, insns=insns).ops
             except Exception:
                 return []
             control, key, slotted = {}, None, set()
             for op in ops:
                 name = op.opcode.name
                 if name == "IMARK":
+                    if int(op.inputs[0].offset) >= addr + span:
+                        break                              # padding, not input
                     key = int(op.inputs[0].offset)        # a delay-slot bundle starts with the branch
                     control.setdefault(key, [])
                     if len(op.inputs) > 1:                # ...and names the slot instruction(s) too

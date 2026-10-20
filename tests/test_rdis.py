@@ -646,8 +646,8 @@ def test_hostile_inputs():
     try:
         containers.extract(zp, "lib/x86/bad.so", os.path.join(d, "c"))
         raise AssertionError("bad CRC accepted")
-    except zipfile.BadZipFile:
-        pass
+    except ValueError as e:
+        assert "malformed archive" in str(e) and "CRC" in str(e), e
     assert set(os.listdir(os.path.join(d, "c"))) == before, "temp file leaked on failed extract"
     # analysis cache: a truncated or non-object cache file falls back to a fresh analysis
     old = os.environ.get("RDIS_CACHE_DIR"), cache.MIN_SECONDS

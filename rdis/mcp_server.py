@@ -473,33 +473,40 @@ def _handle(req):
     raise RpcError(-32601, f"unknown method: {m}")
 
 
+def process_line(raw):
+    """One JSON-RPC line in, the reply line out (None when no reply is due). Never raises."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        req = json.loads(raw)
+    except (ValueError, RecursionError) as e:
+        return json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": f"parse error: {e}"}})
+    if not isinstance(req, dict):
+        return json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}})
+    if str(req.get("method") or "").startswith("notifications/"):
+        return None
+    ident = req.get("id")
+    if ident is not None and not isinstance(ident, (str, int, float)):
+        ident = None
+    try:
+        reply = {"jsonrpc": "2.0", "id": ident, "result": _handle(req)}
+    except RpcError as e:
+        reply = {"jsonrpc": "2.0", "id": ident, "error": {"code": e.code, "message": str(e)}}
+    except Exception as e:
+        reply = {"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": f"{type(e).__name__}: {e}"}}
+    try:
+        return json.dumps(reply)
+    except (TypeError, ValueError, RecursionError):
+        return json.dumps({"jsonrpc": "2.0", "id": ident, "error": {"code": -32603, "message": "unserializable result"}})
+
+
 def main():
     for raw in sys.stdin:
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:   # one malformed line must not kill the server (JSON-RPC: reply with an error)
-            req = json.loads(raw)
-        except ValueError as e:
-            req, bad = {}, {"code": -32700, "message": f"parse error: {e}"}
-        else:
-            bad = None if isinstance(req, dict) else {"code": -32600, "message": "invalid request"}
-            req = req if isinstance(req, dict) else {}
-        if bad:
-            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": bad}) + "\n")
+        reply = process_line(raw)
+        if reply is not None:
+            sys.stdout.write(reply + "\n")
             sys.stdout.flush()
-            continue
-        if str(req.get("method") or "").startswith("notifications/"):
-            continue  # no response expected
-        try:
-            result = _handle(req)
-            resp = {"jsonrpc": "2.0", "id": req.get("id"), "result": result}
-        except RpcError as e:
-            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": e.code, "message": str(e)}}
-        except Exception as e:
-            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": -32000, "message": str(e)}}
-        sys.stdout.write(json.dumps(resp) + "\n")
-        sys.stdout.flush()
 
 
 if __name__ == "__main__":
