@@ -1192,13 +1192,22 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
               targetSet.has(target.toLowerCase())) continue;
           successorFrequency.set(target, (successorFrequency.get(target) || 0) + 1);
         }
-        const sharedSuccessors = [...successorFrequency.entries()]
+        const sharedSuccessorNames = [...successorFrequency.entries()]
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .filter(([, count]) => count >= 2)
           .slice(0, 2)
-          .map(([name]) => findNode(name))
-          .filter(Boolean);
-        const context = [root, ...targets, ...sharedSuccessors];
+          .map(([name]) => name);
+        const sharedSuccessors = sharedSuccessorNames.map(findNode).filter(Boolean);
+        // Include a small number of outgoing targets from the shared join (often a return block).
+        // This keeps the entire branch -> join -> exit story visible without trying to fit the
+        // entire function or unrelated branches into the initial readable viewport.
+        const sharedSet = new Set(sharedSuccessorNames.map(name => name.toLowerCase()));
+        const tailNames = [...new Set(edges
+          .filter(([source, target]) => sharedSet.has(source.toLowerCase()) &&
+            !targetSet.has(target.toLowerCase()) && !sharedSet.has(target.toLowerCase()))
+          .map(([, target]) => target))].slice(0, 2);
+        const tailNodes = tailNames.map(findNode).filter(Boolean);
+        const context = [root, ...targets, ...sharedSuccessors, ...tailNodes];
         const boxes = context.map(node => node.getBoundingClientRect()).filter(r => r.width && r.height);
         const left = boxes.length ? Math.min(...boxes.map(r => r.left)) : rootRect.left;
         const right = boxes.length ? Math.max(...boxes.map(r => r.right)) : rootRect.right;
@@ -1258,7 +1267,7 @@ async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {
   $("#zin").onclick = () => zoomAt(1.25, g.clientWidth / 2, g.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
-  if (graphKind !== "callgraph") $("#zentry").onclick = fitInitial;
+  if (graphKind !== "callgraph") $("#zentry").onclick = () => showCFG(addr, detail, graphKind, {...graphOptions, layout: undefined});
   $("#glayout").onclick = () => showCFG(addr, detail, graphKind, {
     ...graphOptions, layout: layout === "LR" ? "TB" : "LR"
   });
