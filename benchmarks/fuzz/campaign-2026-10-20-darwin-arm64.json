@@ -1,0 +1,33 @@
+{
+ "case_timeout_s": 20,
+ "cases_per_seed": 200,
+ "platform": "Darwin arm64",
+ "python": "3.14.7",
+ "seeds": 18,
+ "targets": {
+  "decode": {
+   "distinct": [],
+   "ran": 3600
+  },
+  "elf": {
+   "distinct": [],
+   "ran": 3600
+  },
+  "ir": {
+   "distinct": [],
+   "ran": 3600
+  },
+  "mcp": {
+   "distinct": [],
+   "ran": 3600
+  },
+  "wasm": {
+   "distinct": [],
+   "ran": 3600
+  },
+  "zip": {
+   "distinct": [],
+   "ran": 3600
+  }
+ }
+}
