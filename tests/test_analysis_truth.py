@@ -408,6 +408,26 @@ class MachOFunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                         "function_names": truth,
                         **metrics,
                     }
+                    if mode == "stripped":
+                        diagnostic_image = open_image(str(candidate), arch="arm64")
+                        target = truth["truth_address_taken"]
+                        section = diagnostic_image.section_at(target)
+                        section_bytes = (
+                            diagnostic_image.read(section.va, section.size) if section else b""
+                        )
+                        report["address_taken_diagnostic"] = {
+                            "prefix_hex": diagnostic_image.read(target, 32).hex(" "),
+                            "section": section.name if section else None,
+                            "section_va": hex(section.va) if section else None,
+                            "section_code": section.code if section else None,
+                            "is_code": diagnostic_image.is_code(target),
+                            "loader_symbol": diagnostic_image.symbols.get(target),
+                            "allocation_first_prologue_match": (
+                                Program(diagnostic_image)._arm64_stack_adjust_then_fp_lr_save(
+                                    section_bytes, target - section.va
+                                ) if section else False
+                            ),
+                        }
                     print("FUNCTION_DISCOVERY_METRIC " + json.dumps(report, sort_keys=True))
                     with self.subTest(optimization=optimization, mode=mode):
                         self.assertEqual(
