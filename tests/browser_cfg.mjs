@@ -465,13 +465,16 @@ try {
     const entry = nodes.find(n => nodeName(n) === "entry");
     const cases = nodes.filter(n => /^case\d+$/.test(nodeName(n)));
     const join = nodes.find(n => nodeName(n) === "join");
+    const exit = nodes.find(n => nodeName(n) === "exit");
     return { entryVisible: !!entry && fullyVisible(entry),
       joinVisible: !!join && fullyVisible(join),
+      exitVisible: !!exit && fullyVisible(exit),
       visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length,
       titles: nodes.map(nodeName) };
   });
   assert(wideNeighborhood.entryVisible, "horizontal layout must keep the entry inside the unobscured viewport");
   assert(wideNeighborhood.joinVisible, "horizontal entry view must include the shared join instead of clipping it at the right edge: " + JSON.stringify(wideNeighborhood));
+  assert(wideNeighborhood.exitVisible, "horizontal entry view should include the return/exit successor when its join is visible: " + JSON.stringify(wideNeighborhood));
   assert(wideNeighborhood.visibleCases >= 10,
     "wide CFG should fit nearly all 12 direct branch targets in the readable initial view: " +
     JSON.stringify(wideNeighborhood));
@@ -506,9 +509,14 @@ try {
   assert(topDownFit.graph.right <= topDownFit.viewport.right - 2, JSON.stringify(topDownFit));
   assert(topDownFit.graph.bottom <= topDownFit.viewport.bottom - 40, JSON.stringify(topDownFit));
   await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
-  await page.locator("#glayout").click();
+  // Entry is a semantic reset, not another Fit-all: return to the automatic fan-out-friendly
+  // orientation and readable root/cases/join/exit context after the user tries top-down layout.
+  await page.locator("#zentry").click();
   await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "LR");
   await page.locator("#graph > svg g.graph").waitFor();
+  await page.waitForTimeout(120);
+  assert(parseInt(await page.locator("#zval").textContent(), 10) >= 60,
+    "Entry should restore readable fan-out view after top-down fit");
 
   await page.locator("#zfit").click();
   await page.waitForTimeout(150);
