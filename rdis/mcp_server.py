@@ -179,6 +179,14 @@ def t_callers(path, func, arch=None, **k):
             seen.add(c.addr)
     return {"callers": [_ref(p, a) for a in sorted(seen)]}
 
+def t_diff(path, other, limit=200, offset=0, arch=None, **k):
+    from . import diff as diffmod
+    out = diffmod.diff(_prog(path, arch, **k), _prog(other, arch, **k)).as_dict()
+    total = len(out["matches"])
+    out["matches"] = out["matches"][int(offset):int(offset) + int(limit)]
+    out["page"] = {"offset": int(offset), "limit": int(limit), "total": total}
+    return out
+
 def t_unresolved(path, func=None, arch=None, **k):
     p = _prog(path, arch, **k)
     rows = p.unresolved([_func(p, func)] if func else None)
@@ -312,6 +320,8 @@ TOOLS = {
                 {"path": "string", "func": "string", "arch": "string?"}),
     "callers": (t_callers, "Functions that call (or tail-call) a function.",
                 {"path": "string", "func": "string", "arch": "string?"}),
+    "diff": (t_diff, "Match functions of two builds (name, exact, shape, strings, call graph, similarity) with confidence and ambiguity.",
+             {"path": "string", "other": "string", "limit": "integer?", "offset": "integer?", "arch": "string?"}),
     "unresolved": (t_unresolved, "Indirect jumps and calls whose target could not be established (never guessed).",
                    {"path": "string", "func": "string?", "arch": "string?"}),
     "basic_blocks": (t_basic_blocks, "Basic blocks of a function with successor edges.",

@@ -33,6 +33,34 @@ def build(args, path):
     return prog
 
 
+def run_diff(a, prog):
+    from . import diff as diffmod
+    other = build(a, a.diff)
+    result = diffmod.diff(prog, other)
+    out = result.as_dict()
+    if a.transfer:
+        report = diffmod.transfer(prog, other, result, a.min_confidence)
+        other.save(other.rdb_path())
+        out["transfer"] = {k: [{f: (hex(v) if isinstance(v, int) else v) for f, v in row.items()} for row in rows]
+                           for k, rows in report.items()}
+    if a.json:
+        print(json.dumps(out, sort_keys=True))
+        return
+    c = out["counts"]
+    print(f"matched {c['matched']}  only in A {c['only_a']}  only in B {c['only_b']}  ambiguous {c['ambiguous']}")
+    print("by method: " + ", ".join(f"{k} {v}" for k, v in sorted(c["by_method"].items())))
+    for m in out["matches"]:
+        name = prog.display(int(m["a"], 16)) or ""
+        print(f"  {m['a']} -> {m['b']}  {m['method']:<10} {m['confidence']:.2f}  {name}")
+    for row in out["ambiguous"]:
+        print(f"  {row['a']} ambiguous: {', '.join(row['candidates'])}")
+    if a.transfer:
+        t = out["transfer"]
+        print(f"transferred {len(t['applied'])} annotations; skipped {len(t['skipped'])}")
+        for row in t["skipped"]:
+            print(f"  skipped {row['a']}: {row['reason']}")
+
+
 def list_containers(path, libs, as_json=False):
     if as_json:
         print(json.dumps([{"entry": s["entry"], "arch": s.get("arch"), "size": s.get("size")}
@@ -83,8 +111,14 @@ def main(argv=None):
     p.add_argument("--base", help="load address for --loader raw")
     p.add_argument("--allow-legacy-rdb", action="store_true",
                    help="import an old sidecar without a content hash (verify the original binary first)")
+    p.add_argument("--diff", metavar="OTHER", help="match this binary's functions against another build of it")
+    p.add_argument("--transfer", action="store_true",
+                   help="with --diff: copy renames and comments onto OTHER for matches at or above --min-confidence")
+    p.add_argument("--min-confidence", type=float, default=0.9, help="annotation transfer threshold (default 0.9)")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+    if a.transfer and not a.diff:
+        p.error("--transfer requires --diff")
     if a.callgraph and not a.func:
         p.error("--callgraph requires -f/--func")
     if a.callgraph and (a.cfg or a.decompile):
@@ -104,6 +138,8 @@ def main(argv=None):
                 print(f"rdis: 1 native library; analyzing {libs[0]['entry']}", file=sys.stderr)
                 path = containers.extract(path, libs[0]["entry"])
         prog = build(a, path)
+        if a.diff:
+            return run_diff(a, prog)
     except (KeyError, ValueError) as e:
         sys.exit(f"rdis: {e}")
 

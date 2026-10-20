@@ -40,6 +40,7 @@ bounded behavior a test actually checks. Nothing here is a claim of parity with 
 | Very large binaries | `rdis/analysis.py` | 130 MB stripped Bun executable: 72,891 functions in 716 s at 8 GB peak (previously did not finish) | Verified (bounded) | no competitor timing on the same file; Python per-instruction overhead dominates |
 | CFG edges | `rdis/analysis.py` | direct switch 48/48 edges at `-O0`; optimized x86-64 relative jump table 14/14 at `-O2`; AArch64 4/4; x86 loop 3/3; all F1 = 1.0 | Verified (bounded) | absolute-pointer tables; other compilers and ISAs |
 | Unresolved indirect transfers | `Program.unresolved`, MCP `unresolved` | same x86-64 jump-table dispatcher with and without its bounds check: 6/6 edges versus none invented; bare `jmp rax`, `call rax`, AArch64 `br`/`blr` reported, not guessed (`tests/test_cfg_unresolved.py`) | Verified (bounded) | absolute-pointer tables; exception and unwind flow |
+| Binary diffing and annotation transfer | `rdis/diff.py`, `rdis/fingerprint.py`, `--diff`, MCP `diff` | two builds of a 36-function program (5 modified, 3 deleted, 3 added, order reversed), scored against symbol-table truth: with symbols 44/44; stripped precision 0.974, recall 0.884; renames and comments transfer only at confidence >= 0.9 and never overwrite (`tests/test_diff.py`) | Verified (bounded) | modified functions with structural twins and no call context stay unmatched; one near-clone replacement is mispaired when stripped; synthetic corpus, no real release pairs |
 | Call graph (callers, callees, both) | `rdis/render.py`, GUI, CLI, console, MCP | unit tests; Chromium and Firefox geometry tests | Partial | independent call-graph precision/recall |
 | Decompiler and typed IR | `rdis/decompile.py`, `rdis/ir.py` | 124/124 execution-equivalence cases | Partial | optimized exceptions, aliasing, vectors; address mapping from C back to instructions |
 | Objective-C, Swift, JNI metadata | `rdis/objc.py`, `rdis/swift.py`, `rdis/jni.py` | self-check fixtures | Partial | versioned real binaries; malformed metadata |
@@ -54,4 +55,3 @@ bounded behavior a test actually checks. Nothing here is a claim of parity with 
 | LLDB debugger | `rdis/debug.py` | argument-sanitization regression | Partial | remote targets; mapping a stopped PC to the static CFG |
 | Plugin SDK | `rdis/plugins.py` | plugin loaders and architectures exist | Partial | versioned contract; broken-plugin isolation |
 | Emulation, symbolic execution, taint | none | none | Unsupported | |
-| Binary diffing and annotation transfer | none | none | Unsupported | |

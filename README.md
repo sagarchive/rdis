@@ -19,6 +19,7 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM**; with `pypcode`, **12 more CPU families (19 named variants) through Ghidra's SLEIGH specs** (PowerPC, SPARC, 68k, AVR, MSP430, SuperH, Z80, 6502, Xtensa, eBPF, LoongArch, TriCore) and **any of its 194 language variants** as `--arch sleigh:<id>` (`rdis --list-archs`) | x86/x64/ARM |
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
+| Binary diff | function matching across builds (name, address-masked bytes, CFG shape, strings, call graph, similarity) with confidence and explicit ambiguity; annotation transfer above a threshold | not listed on its product page |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
 | Control-flow graph | Interactive browser CFG with automatic left-to-right layout for broad switch/fan-out graphs, reversible TB/LR layout, fit/Entry/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
 | Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
@@ -103,13 +104,17 @@ export PYTHONPATH=.
 python -m rdis BIN                      # list functions
 python -m rdis BIN -f main              # disassemble (annotated with names + strings)
 python -m rdis BIN -f main -d           # decompile to C pseudo-code
-python -m rdis BIN -f main --cfg | dot -Tpng -o cfg.png\npython -m rdis BIN -f main --callgraph --callgraph-direction callers --callgraph-depth 2 | dot -Tsvg -o callers.svg
+python -m rdis BIN -f main --cfg | dot -Tpng -o cfg.png
+python -m rdis BIN -f main --callgraph --callgraph-direction callers --callgraph-depth 2 | dot -Tsvg -o callers.svg
 python -m rdis BIN --strings
 python -m rdis BIN --classes            # Objective-C / Swift declarations
 python -m rdis BIN --imports
 python -m rdis BIN --arch arm64 ...     # pick a fat Mach-O slice
 python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar's original binary
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
+python -m rdis --list-archs                                      # every CPU rdis can load
+python -m rdis OLD --diff NEW                                   # match functions across two builds
+python -m rdis OLD --diff NEW --transfer --min-confidence 0.9   # carry renames/comments over (never overwrites)
 ```
 
 Add `--json` to most commands for machine-readable output.
