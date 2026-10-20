@@ -731,6 +731,7 @@ class Program:
                 offsets.update(
                     off for off in range(0, max(0, len(data) - 3), 4)
                     if self._arm64_stack_adjust_then_fp_lr_save(data, off)
+                    or self._arm64_stack_adjust_with_stack_access(data, off)
                 )
             for off in sorted(offsets):
                 a = s.va + off
@@ -749,6 +750,69 @@ class Program:
                 yield a
 
     _PACIBSP = b"\x7f\x23\x03\xd5"
+
+    @staticmethod
+    def _arm64_terminator_before(data, offset):
+        """Require a real code boundary (or section start) before a gap-scan candidate."""
+        if offset <= 0:
+            return True
+        # Permit a short run of AArch64 NOP alignment after a terminating instruction.
+        pos = offset - 4
+        for _ in range(4):
+            if pos < 0:
+                return True
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if word == 0xD503201F:  # NOP padding
+                pos -= 4
+                continue
+            if (word & 0xFFFFFC1F) == 0xD65F0000:  # RET Xn (including RET X30)
+                return True
+            if (word & 0xFC000000) == 0x14000000:  # unconditional B, not BL
+                return True
+            if (word & 0xFFFFFC1F) == 0xD61F0000:  # BR Xn tail branch
+                return True
+            return False
+        return False
+
+    @staticmethod
+    def _arm64_stack_adjust_with_stack_access(data, offset):
+        """Find leaf AArch64 frames that allocate SP and spill locals without saving FP/LR.
+
+        Leaf functions often do not save x29/x30 at all. Their first instruction can be
+        SUB SP,SP,#N followed by STR/LDR through SP; the old STP-based pattern misses these.
+        Requiring both a terminating preceding instruction and a nearby SP-based memory access
+        avoids treating arbitrary SUB instructions in a live basic block as function starts.
+        """
+        if offset < 0 or offset + 4 > len(data) or offset % 4:
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        # SUB SP, SP, #imm12{, LSL #12}. Mask the immediate and shift bit, then require
+        # a real nonzero allocation (zero imm12 with LSL #12 is also a valid 4 KiB frame).
+        if (first & 0xFF0003FF) != 0xD10003FF:
+            return False
+        imm12 = (first >> 10) & 0xFFF
+        shift12 = (first >> 22) & 1
+        if imm12 == 0 and not shift12:
+            return False
+        if not Program._arm64_terminator_before(data, offset):
+            return False
+
+        stack_memory_ops = {
+            0xB8000000, 0xB8400000, 0xB9000000, 0xB9400000,
+            0xF8000000, 0xF8400000, 0xF9000000, 0xF9400000,
+            0xA8800000, 0xA8C00000, 0xA9000000, 0xA9400000,
+        }
+        # Search the start of the prologue, not the entire function, for an SP-based access.
+        for pos in range(offset + 4, min(len(data) - 3, offset + 24), 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if (word & 0xFFC00000) in stack_memory_ops and ((word >> 5) & 0x1F) == 31:
+                return True
+            # A branch or return before any stack access means this is not a frame prologue.
+            if ((word & 0xFFFFFC1F) == 0xD65F0000
+                    or (word & 0xFC000000) in (0x14000000, 0x94000000)
+                    or (word & 0xFFFFFC1F) in (0xD61F0000, 0xD63F0000)):
+                return False
+        return False
 
     @staticmethod
     def _arm64_stack_adjust_then_fp_lr_save(data, offset):
