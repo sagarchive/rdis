@@ -610,7 +610,15 @@ try {
   // product content instead of a transient, partially transparent frame.
   await pagesPage.emulateMedia({reducedMotion: "reduce"});
   await pagesPage.goto("http://127.0.0.1:8765/docs/index.html", {waitUntil: "domcontentloaded"});
-  await pagesPage.locator("#calls-h").waitFor();
+  await pagesPage.locator("#deep-h").waitFor();
+  await pagesPage.locator("#deep-h").scrollIntoViewIfNeeded();
+  assert(await pagesPage.getByText("See the shape of a function.", {exact: true}).isVisible());
+  const cfgHelp = await pagesPage.locator("#deep-h").locator("xpath=following-sibling::div[contains(@class,'duo')][1]").innerText();
+  assert(cfgHelp.includes("Entry") && cfgHelp.includes("LR/TB"), "Pages CFG help must explain Entry and layout switching");
+  assert(!cfgHelp.includes("**Entry**") && !cfgHelp.includes("**LR/TB**"), "HTML help must not show literal Markdown asterisks");
+  await pagesPage.waitForTimeout(150);
+  await pagesPage.screenshot({path: out + "/github-pages-cfg-feature.png", fullPage: false});
+
   await pagesPage.locator("#calls-h").scrollIntoViewIfNeeded();
   assert(await pagesPage.getByText("Follow a function through the program.", {exact: true}).isVisible());
   assert.equal(await pagesPage.locator('svg[aria-label*="Call graph with a selected parse_packet function"]').count(), 1);
