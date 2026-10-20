@@ -479,6 +479,300 @@ class FunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
+    platform.system() == "Linux"
+    and platform.machine().lower() in ("x86_64", "amd64")
+    and all(shutil.which(tool) for tool in ("cc", "nm", "objdump")),
+    "optimized ELF jump-table truth currently runs on Linux x86-64",
+)
+class OptimizedJumpTableTruthTests(unittest.TestCase):
+    """Exercise the relative-offset jump-table recovery path against GNU objdump bytes."""
+
+    CASE_COUNT = 12
+
+    @staticmethod
+    def _symbol_address(binary, wanted):
+        result = subprocess.run(
+            [shutil.which("nm"), "-n", "--defined-only", str(binary)],
+            check=True, capture_output=True, text=True,
+        )
+        symbols = {}
+        for line in result.stdout.splitlines():
+            match = re.match(r"^\s*([0-9a-fA-F]+)\s+[Tt]\s+(\S+)\s*$", line)
+            if match:
+                symbols[match.group(2)] = int(match.group(1), 16)
+        if wanted not in symbols:
+            raise AssertionError(f"nm did not find required symbol {wanted!r}")
+        return symbols[wanted]
+
+    @staticmethod
+    def _disassembly(binary):
+        result = subprocess.run(
+            [shutil.which("objdump"), "-d", "--disassemble=truth_switch_jump_table", str(binary)],
+            check=True, capture_output=True, text=True,
+        )
+        pattern = re.compile(
+            r"^\s*([0-9a-fA-F]+):\s*((?:[0-9a-fA-F]{2}\s+)+)\s*"
+            r"([A-Za-z][A-Za-z0-9.]*)\s*(.*?)\s*$"
+        )
+        rows = []
+        for line in result.stdout.splitlines():
+            match = pattern.match(line)
+            if not match:
+                continue
+            rows.append({
+                "addr": int(match.group(1), 16),
+                "size": len(match.group(2).split()),
+                "mnemonic": match.group(3).lower(),
+                "operands": match.group(4),
+            })
+        rows.sort(key=lambda row: row["addr"])
+        if not rows:
+            raise AssertionError("GNU objdump produced no instructions for truth_switch_jump_table")
+        return rows
+
+    @staticmethod
+    def _section_bytes(binary, section_name):
+        result = subprocess.run(
+            [shutil.which("objdump"), "-s", "-j", section_name, str(binary)],
+            check=True, capture_output=True, text=True,
+        )
+        memory = {}
+        # objdump -s prints each row as an address followed by groups of eight hex digits,
+        # then an ASCII preview. Only the explicit hexadecimal groups are parsed.
+        row_pattern = re.compile(r"^\s*([0-9a-fA-F]+)\s+((?:[0-9a-fA-F]{8}\s+)+)")
+        for line in result.stdout.splitlines():
+            match = row_pattern.match(line)
+            if not match:
+                continue
+            start = int(match.group(1), 16)
+            raw = bytes.fromhex(match.group(2))
+            for offset, value in enumerate(raw):
+                memory[start + offset] = value
+        if not memory:
+            raise AssertionError(f"GNU objdump produced no bytes for section {section_name!r}")
+        return memory
+
+    @staticmethod
+    def _is_conditional_jump(row):
+        mnemonic = row["mnemonic"]
+        return mnemonic.startswith("j") and mnemonic not in ("jmp", "jmpq")
+
+    @classmethod
+    def _oracle_cfg(cls, binary):
+        """Build expected in-function edges from decoded bytes, not from RDIS output.
+
+        GNU objdump supplies instruction boundaries and direct branch destinations. The table
+        base is recovered independently from the RIP-relative LEA comment and its 12 signed
+        32-bit offsets are read from the ELF .rodata bytes.
+        """
+        rows = cls._disassembly(binary)
+        addresses = {row["addr"] for row in rows}
+        by_address = {row["addr"]: row for row in rows}
+        start = rows[0]["addr"]
+
+        table_load = next(
+            (row for row in rows
+             if row["mnemonic"] == "lea" and "(%rip)" in row["operands"] and "#" in row["operands"]),
+            None,
+        )
+        if table_load is None:
+            raise AssertionError("compiler did not emit a RIP-relative LEA for the jump-table base")
+        table_match = re.search(r"#\s*([0-9a-fA-F]+)\b", table_load["operands"])
+        if table_match is None:
+            raise AssertionError("could not recover jump-table base from GNU objdump's LEA comment")
+        table_base = int(table_match.group(1), 16)
+
+        dispatch = next(
+            (row for row in rows
+             if row["mnemonic"] in ("jmp", "jmpq") and row["operands"].lstrip().startswith("*")),
+            None,
+        )
+        if dispatch is None:
+            raise AssertionError("optimized compiler output contains no indirect jump-table dispatch")
+        memory = cls._section_bytes(binary, ".rodata")
+        table_targets = []
+        for index in range(cls.CASE_COUNT):
+            entry = table_base + index * 4
+            locations = range(entry, entry + 4)
+            if not all(address in memory for address in locations):
+                raise AssertionError(f"jump-table entry {index} at {entry:#x} is outside .rodata")
+            raw = bytes(memory[address] for address in locations)
+            target = table_base + int.from_bytes(raw, "little", signed=True)
+            if target not in addresses:
+                raise AssertionError(
+                    f"jump-table entry {index} resolves to {target:#x}, not an instruction in the function"
+                )
+            table_targets.append(target)
+        if len(set(table_targets)) != cls.CASE_COUNT:
+            raise AssertionError(f"the jump table unexpectedly aliases case targets: {table_targets!r}")
+
+        def next_address(row):
+            return row["addr"] + row["size"]
+
+        def successors(row):
+            address = row["addr"]
+            mnemonic = row["mnemonic"]
+            operands = row["operands"]
+            following = next_address(row)
+            if mnemonic.startswith("ret"):
+                return set()
+            if address == dispatch["addr"]:
+                return set(table_targets)
+            if mnemonic in ("jmp", "jmpq"):
+                # A direct tail jump to another function leaves this function's CFG.
+                target_match = re.match(r"^\s*(?:0x)?([0-9a-fA-F]+)\b", operands)
+                if target_match:
+                    target = int(target_match.group(1), 16)
+                    return {target} if target in addresses else set()
+                return set()
+            if cls._is_conditional_jump(row):
+                result = set()
+                target_match = re.match(r"^\s*(?:0x)?([0-9a-fA-F]+)\b", operands)
+                if target_match:
+                    target = int(target_match.group(1), 16)
+                    if target in addresses:
+                        result.add(target)
+                if following in addresses:
+                    result.add(following)
+                return result
+            return {following} if following in addresses else set()
+
+        successors_by_address = {row["addr"]: successors(row) for row in rows}
+        reachable = set()
+        pending = [start]
+        while pending:
+            address = pending.pop()
+            if address in reachable:
+                continue
+            reachable.add(address)
+            pending.extend(successors_by_address[address] - reachable)
+
+        leaders = {start}
+        for row in rows:
+            address = row["addr"]
+            if address not in reachable:
+                continue
+            # Only control-flow destinations and conditional fallthroughs start blocks. Ordinary
+            # instruction fallthroughs must not turn every instruction into its own basic block.
+            if (row["mnemonic"].startswith("j") or row["mnemonic"].startswith("ret")):
+                leaders.update(successors_by_address[address] & reachable)
+
+        blocks = {}
+        current = None
+        previous = None
+        for row in rows:
+            address = row["addr"]
+            if address not in reachable:
+                continue
+            previous_terminates = (
+                previous is not None
+                and (previous["mnemonic"].startswith("j") or previous["mnemonic"].startswith("ret"))
+            )
+            contiguous = previous is not None and next_address(previous) == address
+            if current is None or address in leaders or previous_terminates or not contiguous:
+                current = address
+                blocks[current] = []
+            blocks[current].append(row)
+            previous = row
+
+        edges = set()
+        for block_start, block_rows in blocks.items():
+            last = block_rows[-1]
+            edges.update(
+                (block_start, target)
+                for target in successors_by_address[last["addr"]]
+                if target in blocks
+            )
+        return {
+            "entry": start,
+            "dispatch": dispatch["addr"],
+            "table_base": table_base,
+            "table_targets": set(table_targets),
+            "rows": rows,
+            "reachable": reachable,
+            "block_starts": set(blocks),
+            "edges": edges,
+        }
+
+    def test_o2_relative_jump_table_edges_match_independent_rodata_oracle(self):
+        source = Path(__file__).resolve().parent / "fixtures" / "switch_jump_table_fixture.c"
+        compiler = shutil.which("cc")
+        with tempfile.TemporaryDirectory(prefix="rdis-relative-jump-table-") as temporary:
+            binary = Path(temporary) / "switch-jump-table-pie"
+            command = [
+                compiler, "-O2", "-fPIE", "-pie", "-fno-inline",
+                "-fno-omit-frame-pointer", "-fno-stack-protector",
+                "-fno-unwind-tables", "-fno-asynchronous-unwind-tables",
+                str(source), "-o", str(binary),
+            ]
+            built = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(
+                built.returncode, 0,
+                "jump-table fixture compiler failed: " + " ".join(command) + "\n" + built.stderr,
+            )
+
+            switch_address = self._symbol_address(binary, "truth_switch_jump_table")
+            oracle = self._oracle_cfg(binary)
+            self.assertEqual(oracle["entry"], switch_address)
+            self.assertEqual(len(oracle["table_targets"]), self.CASE_COUNT)
+            self.assertGreaterEqual(len(oracle["edges"]), self.CASE_COUNT + 2)
+
+            program = Program(open_image(str(binary), arch="x86_64")).analyze(
+                objc=False, swift=False, prologues=True
+            )
+            self.assertIn(switch_address, program.functions, "RDIS failed to discover the named switch")
+            function = program.functions[switch_address]
+            observed_edges = {
+                (block.addr, successor)
+                for block in function.blocks.values()
+                for successor in block.succs
+            }
+            dispatch_block = next(
+                (block for block in function.blocks.values()
+                 if block.insns and block.insns[-1].address == oracle["dispatch"]),
+                None,
+            )
+            self.assertIsNotNone(dispatch_block, "RDIS CFG omitted the indirect-dispatch block")
+            self.assertEqual(
+                set(dispatch_block.succs), oracle["table_targets"],
+                "RDIS did not resolve every relative jump-table target",
+            )
+            jump_table = program.jump_tables.get(oracle["dispatch"])
+            self.assertIsNotNone(jump_table, "RDIS did not retain decoded jump-table provenance")
+            self.assertEqual(set(jump_table["cases"].values()), oracle["table_targets"])
+
+            metrics = _precision_recall_f1(oracle["edges"], observed_edges)
+            report = {
+                "fixture": "optimized-relative-jump-table-v1",
+                "architecture": "x86_64",
+                "compiler": subprocess.run(
+                    [compiler, "--version"], check=True,
+                    capture_output=True, text=True,
+                ).stdout.splitlines()[0],
+                "oracle": "GNU objdump instruction decode + independently parsed signed int32 .rodata offsets",
+                "optimization": "-O2",
+                "pie": True,
+                "table_base": hex(oracle["table_base"]),
+                "dispatch": hex(oracle["dispatch"]),
+                "case_count": self.CASE_COUNT,
+                "expected_blocks": len(oracle["block_starts"]),
+                "expected_edges": len(oracle["edges"]),
+                **metrics,
+            }
+            print("CFG_EDGE_METRIC " + json.dumps(report, sort_keys=True))
+            self.assertEqual(
+                observed_edges, oracle["edges"],
+                "RDIS's optimized jump-table CFG differs from the independent byte oracle: "
+                + json.dumps(report, sort_keys=True)
+                + "\nexpected-only=" + repr(sorted(oracle["edges"] - observed_edges))
+                + "\nobserved-only=" + repr(sorted(observed_edges - oracle["edges"])),
+            )
+            self.assertEqual(metrics["precision"], 1.0, json.dumps(report, sort_keys=True))
+            self.assertEqual(metrics["recall"], 1.0, json.dumps(report, sort_keys=True))
+            self.assertEqual(metrics["f1"], 1.0, json.dumps(report, sort_keys=True))
+
+
+@unittest.skipUnless(
     platform.system() == "Darwin"
     and platform.machine().lower() in ("arm64", "aarch64")
     and all(shutil.which(tool) for tool in ("cc", "nm", "strip")),
