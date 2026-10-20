@@ -155,6 +155,9 @@ def main(argv=None):
         return list_archs()
     if "--list-plugins" in (sys.argv[1:] if argv is None else argv):
         return list_plugins()
+    if "--capabilities" in (sys.argv[1:] if argv is None else argv):
+        from .capabilities import capabilities
+        return print(json.dumps(capabilities(), indent=1, sort_keys=True))
     p = argparse.ArgumentParser(prog="rdis", description="multi-format disassembler and decompiler")
     p.add_argument("binary")
     p.add_argument("-f", "--func", help="function name, sub_xxx, or 0xADDR")
@@ -174,6 +177,7 @@ def main(argv=None):
     p.add_argument("--arch", help="slice for a fat Mach-O (x86_64, arm64, ...), or the CPU for --loader raw "
                                   "(ppc, sparc, m68k, avr8, ebpf, ...; see --list-archs)")
     p.add_argument("--list-archs", action="store_true", help="print every CPU rdis can load, then exit")
+    p.add_argument("--capabilities", action="store_true", help="print what rdis supports per CPU and level, as JSON, then exit")
     p.add_argument("--list-plugins", action="store_true", help="print each plugin from RDIS_PLUGINS and why any was rejected")
     p.add_argument("--tool", metavar="NAME", help="run a tool registered by a plugin on this binary")
     p.add_argument("--tool-args", metavar="JSON", default="{}", help="keyword arguments for --tool, as a JSON object")

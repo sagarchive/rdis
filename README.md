@@ -115,6 +115,7 @@ python -m rdis BIN --arch arm64 ...     # pick a fat Mach-O slice
 python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar's original binary
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
 python -m rdis --list-archs                                      # every CPU rdis can load
+python -m rdis --capabilities                                   # what is supported per CPU and level, as JSON
 python -m rdis OLD --diff NEW                                   # match functions across two builds
 python -m rdis BIN --triage                                     # entropy, packing indicators, runtime hints
 python -m rdis BIN -f hash --emulate 0x1234                     # run a function in the P-code emulator
@@ -195,11 +196,11 @@ PYTHONPATH=. python -m rdis.mcp_server
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
 (use the venv's python).
 
-34 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+35 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
 
 | Group | Tools |
 |---|---|
-| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage` |
+| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage`, `capabilities` |
 | Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
 | Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
 | Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |

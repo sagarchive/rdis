@@ -20,6 +20,10 @@ from . import cache, containers, render, console
 from .decompile import Decompiler
 
 WEB = os.path.join(os.path.dirname(__file__), "web")
+# The page's own inline script and styles, the pinned viz.js from jsDelivr (it needs WebAssembly), nothing else.
+CSP = ("default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; "
+       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; "
+       "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
 CFG = {"allow_python": False, "allow_paths": True, "persist": True, "single_user": True,
        "upload_dir": ".rdis_uploads", "max_mb": 128, "max_sessions": 128, "max_docs": 256,
        "max_analyses": 24, "request_timeout": 15, "max_workers": 64, "max_upload_storage_mb": 1024,
@@ -616,6 +620,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+        if not ctype.startswith("text/html"):
+            self.send_header("Cache-Control", "no-store")
         if getattr(self, "_new_sid", None):
             self.send_header("Set-Cookie", f"rdis_sid={self._new_sid}; Path=/; HttpOnly; SameSite=Strict")
         self.end_headers()

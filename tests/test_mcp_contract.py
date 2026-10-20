@@ -41,7 +41,8 @@ class SchemaContract(unittest.TestCase):
                 schema = t["inputSchema"]
                 self.assertEqual(schema["type"], "object")
                 self.assertIs(schema["additionalProperties"], False)
-                self.assertIn("path", schema["required"])
+                if t["name"] != "capabilities":                # the one tool that needs no file
+                    self.assertIn("path", schema["required"])
                 self.assertTrue(set(schema["required"]) <= set(schema["properties"]))
                 self.assertEqual(t["annotations"]["readOnlyHint"], t["name"] not in WRITES)
                 self.assertIs(t["annotations"]["openWorldHint"], False)
