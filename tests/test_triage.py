@@ -15,7 +15,7 @@ import sleigh_fixtures as F
 from rdis import triage as T
 
 
-def elf(directory, name="x.elf", cpu="ppc", **kwargs):
+def elf(directory, name="x.elf", cpu="x86_64", **kwargs):
     data, _, _ = F.elf(cpu, **kwargs)
     path = os.path.join(directory, name)
     with open(path, "wb") as fh:
@@ -45,7 +45,7 @@ class Indicators(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_ordinary_code_raises_nothing(self):
-        code = bytes.fromhex("9421fff0" "7c0802a6" "38600001" "4e800020") * 200
+        code = bytes.fromhex("554889e5" "31c0" "5dc3") * 200
         report = T.triage(elf(self.dir, code=code))
         self.assertEqual(report["indicators"], [])
 

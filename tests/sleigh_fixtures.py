@@ -72,12 +72,18 @@ ELF_MACHINE = {"ppc": (20, 32, ">"), "m68k": (4, 32, ">"), "avr8": (83, 32, "<")
                "loongarch64": (258, 64, "<")}
 
 
-def elf(name, code=None, section=".text", sh_flags=6, ph_flags=5, entry=None):
+PLAIN_ELF = {"x86_64": (62, 64, "<")}      # CPUs Capstone decodes; no pypcode needed to build or open these
+
+
+def elf(name, code=None, section=".text", sh_flags=6, ph_flags=5, entry=None, base=0x10000):
     """Smallest ELF that LIEF parses: one PT_LOAD and one section holding the fixture (or `code`)."""
-    fixture_code, base, fixture_entry, _, _ = FIXTURES[name]()
+    if name in FIXTURES:
+        fixture_code, base, fixture_entry, _, _ = FIXTURES[name]()
+    else:
+        fixture_code, fixture_entry = b"\xc3", base
     code = fixture_code if code is None else code
     entry = fixture_entry if entry is None else entry
-    machine, bits, e = ELF_MACHINE[name]
+    machine, bits, e = ELF_MACHINE.get(name) or PLAIN_ELF[name]
     wide = bits == 64
     ehsize, phsize, shsize = (64, 56, 64) if wide else (52, 32, 40)
     shstr = b"\0" + section.encode() + b"\0.shstrtab\0"
