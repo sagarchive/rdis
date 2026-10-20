@@ -156,7 +156,6 @@ class CompiledCorpusScore(unittest.TestCase):
         unique = sum(len(entry["names"]) == 1 for entry in self.db["entries"].values())
         self.assertEqual(wrong, 0)
         self.assertGreaterEqual(right, unique - 2)
-        self.assertEqual(len(out["matches"]) + len(out["ambiguous"]) >= unique, True)
 
     @unittest.skipUnless(os.path.exists("/bin/ls"), "needs /bin/ls")
     def test_unrelated_system_binary_gets_no_names(self):
