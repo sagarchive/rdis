@@ -92,7 +92,7 @@ function dotWideGraph() {
     'graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.18", ranksep="0.52", splines=true];',
     'node [shape=box, style="rounded,filled", fillcolor="#222834", color="#4b5566", fontcolor="#e4eaf2", fontname="monospace", fontsize=10, margin="0.12,0.08"];',
     'edge [color="blue", arrowsize=0.65, fontname="monospace", fontsize=9];',
-    'entry [label="0x3000\\lentry: validate packet length and metadata\\l", color="#d9974f", penwidth=2.2];',
+    'entry [label="0x3000\\lentry: validate packet length and metadata\\l", class="entry", color="#d9974f", penwidth=2.2];',
     'join [label="0x3100\\ljoin: normalize status and cleanup\\l"];',
     'exit [label="0x3110\\lreturn status\\l"];'
   ];
@@ -439,9 +439,11 @@ try {
   // Wide fan-out/join graph with long labels catches horizontal clipping and minimap aspect bugs.
   await page.evaluate(() => go("0x3000", {mode: "cfg"}));
   await page.locator("#graph > svg g.graph").waitFor();
+  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "LR",
+    "a switch-style high-fanout CFG should auto-select a vertical fan-out layout");
   const wideEntryZoom = parseInt(await page.locator("#zval").textContent(), 10);
-  assert(wideEntryZoom >= 60 && wideEntryZoom <= 75,
-    "wide CFG should expose multiple branch destinations while preserving readable labels, got " + wideEntryZoom + "%");
+  assert(wideEntryZoom >= 80 && wideEntryZoom <= 100,
+    "wide CFG entry layout should keep labels readable, got " + wideEntryZoom + "%");
   const visibleWideNodes = await page.evaluate(() => {
     const host = document.querySelector("#graph").getBoundingClientRect();
     return [...document.querySelectorAll("#graph > svg g.node")].filter(node => {
@@ -468,6 +470,18 @@ try {
   });
   assert.deepEqual(labelOverflow, [], "CFG text must fit inside its rendered node shape: " + JSON.stringify(labelOverflow));
   await page.screenshot({ path: out + "/wide-graph-entry-view.png", fullPage: false });
+
+  // The user can switch layout direction explicitly; the graph must re-render in the chosen
+  // orientation, preserve all nodes, and return to the fan-out-friendly automatic layout.
+  await page.locator("#glayout").click();
+  await page.locator("#graph > svg g.graph").waitFor();
+  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "TB");
+  assert.equal(await page.locator("#graph > svg g.node").count(), 15);
+  await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
+  await page.locator("#glayout").click();
+  await page.locator("#graph > svg g.graph").waitFor();
+  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "LR");
+
   await page.locator("#zfit").click();
   await page.waitForTimeout(150);
   const wideFit = await fitCheck();
