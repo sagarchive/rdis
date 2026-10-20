@@ -723,9 +723,16 @@ class Program:
             if not s.code or "plt" in s.name or "stub" in s.name:
                 continue
             data = self.image.read(s.va, s.size)
-            # match encodings, not decoded text: decoding every word dominated analysis time
-            for m in re.finditer(b"(?=(?:" + pat + b"))", data, re.S):   # overlapping
-                off = m.start()
+            # Match encodings, not decoded text: decoding every word dominated analysis time.
+            # Add the valid AArch64 allocation-first frame shape separately. Keep the existing
+            # regex specific to frame-save-first prologues so an interior STP is not a new function.
+            offsets = {m.start() for m in re.finditer(b"(?=(?:" + pat + b"))", data, re.S)}
+            if self.arch.name == "arm64":
+                offsets.update(
+                    off for off in range(0, max(0, len(data) - 3), 4)
+                    if self._arm64_stack_adjust_then_fp_lr_save(data, off)
+                )
+            for off in sorted(offsets):
                 a = s.va + off
                 if a % align or a in covered:
                     continue
@@ -742,6 +749,35 @@ class Program:
                 yield a
 
     _PACIBSP = b"\x7f\x23\x03\xd5"
+
+    @staticmethod
+    def _arm64_stack_adjust_then_fp_lr_save(data, offset):
+        """Recognize an AArch64 frame whose first instruction allocates the stack.
+
+        Clang commonly emits SUB SP, SP, #frame_size before saving x29/x30 at a
+        positive offset inside that frame. The older gap scan only recognized a paired
+        frame save as the first instruction, so stripped Mach-O functions with larger
+        stack frames could be missed despite having a conventional prologue.
+
+        Require a non-zero immediate stack allocation followed within four instructions
+        by an STP x29,x30 whose base is SP. The scan runs only on uncovered, aligned code.
+        """
+        if offset < 0 or offset + 4 > len(data):
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        # SUB (immediate), 64-bit, flags not set, Rd=SP and Rn=SP. Mask out imm12
+        # and its optional shift bit; reject SUB SP,SP,#0.
+        if (first & 0xFF8003FF) != 0xD10003FF or ((first >> 10) & 0xFFF) == 0:
+            return False
+
+        stop = min(len(data) - 3, offset + 20)
+        for pos in range(offset + 4, stop, 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            # STP x29,x30,[sp,#imm], including offset/pre-index/post-index address modes.
+            # Rt=x29, Rn=sp, Rt2=x30; A8/A9 are 64-bit integer pair-store encodings.
+            if (word >> 24) in (0xA8, 0xA9) and (word & 0x7FFF) == 0x7BFD:
+                return True
+        return False
 
     @staticmethod
     def _x86_after_terminator(prev):
