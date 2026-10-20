@@ -289,9 +289,9 @@ try {
   assert.equal(darkTextStyle.fill, "rgb(228, 234, 242)", JSON.stringify(darkTextStyle));
   assert.equal(darkTextStyle.stroke, "none", "node text must not inherit the graph's edge stroke");
   assert(fit.graph.left >= fit.viewport.left + 3, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 3, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 3, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 3, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
   await page.screenshot({ path: `${out}/branch-loop-dark.png`, fullPage: false });
 
   // Keyboard access must select a block and visibly expose focus.
@@ -336,9 +336,9 @@ try {
   assert.equal(await page.locator("#gminimap").isVisible(), true, "large graphs should show the minimap");
   assert.equal(await page.locator("#gminimap .minimap-viewport").count(), 1, "minimap should show the current viewport");
   assert(fit.graph.left >= fit.viewport.left + 2, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 2, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 2, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 2, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
   await page.screenshot({ path: `${out}/large-graph-fit.png`, fullPage: false });
 
   // Minimap clicks should recenter the viewport without starting a background drag.
@@ -411,9 +411,9 @@ try {
     "minimap should preserve block silhouettes rather than collapsing into a text line");
   assert(await page.locator("#graph > svg g.node text").count() > 0, "main graph must retain its full labels");
   assert(fit.graph.left >= fit.viewport.left + 2, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 2, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 2, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 2, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
   const fitAllZoom = parseInt(await page.locator("#zval").textContent(), 10);
   assert(fitAllZoom < 20, "stress fixture should reproduce the expected small fit-all scale: " + fitAllZoom);
   await page.screenshot({ path: `${out}/stress-180-graph-fit.png`, fullPage: false });
@@ -431,7 +431,7 @@ try {
       viewport:{left:v.left,top:v.top,right:v.right,bottom:v.bottom}};
   });
   assert(entryNodeBounds.left >= entryNodeBounds.viewport.left, JSON.stringify(entryNodeBounds));
-  assert(entryNodeBounds.top >= entryNodeBounds.viewport.top, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.top >= entryNodeBounds.viewport.top + 50, JSON.stringify(entryNodeBounds));
   assert(entryNodeBounds.right <= entryNodeBounds.viewport.right, JSON.stringify(entryNodeBounds));
   assert(entryNodeBounds.bottom <= entryNodeBounds.viewport.bottom, JSON.stringify(entryNodeBounds));
   await page.screenshot({ path: `${out}/stress-180-entry-after-fit.png`, fullPage: false });
@@ -459,7 +459,7 @@ try {
     const fullyVisible = node => {
       const r = node.getBoundingClientRect();
       return r.left >= host.left + 1 && r.right <= host.right - 1 &&
-        r.top >= host.top + 38 && r.bottom <= host.bottom - 42;
+        r.top >= host.top + 50 && r.bottom <= host.bottom - 42;
     };
     const nodeName = node => node.querySelector(":scope > title")?.textContent?.trim() || "";
     const entry = nodes.find(n => nodeName(n) === "entry");
@@ -502,9 +502,9 @@ try {
   assert.equal(await page.locator("#graph > svg g.node").count(), 15);
   const topDownFit = await fitCheck();
   assert(topDownFit.graph.left >= topDownFit.viewport.left + 2, JSON.stringify(topDownFit));
-  assert(topDownFit.graph.top >= topDownFit.viewport.top + 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.top >= topDownFit.viewport.top + 50, JSON.stringify(topDownFit));
   assert(topDownFit.graph.right <= topDownFit.viewport.right - 2, JSON.stringify(topDownFit));
-  assert(topDownFit.graph.bottom <= topDownFit.viewport.bottom - 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.bottom <= topDownFit.viewport.bottom - 40, JSON.stringify(topDownFit));
   await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
   await page.locator("#glayout").click();
   await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "LR");
@@ -650,9 +650,9 @@ try {
   assert(realMetrics.nodes >= 4, "real RDIS CFG should contain multiple basic blocks: " + JSON.stringify(realMetrics));
   assert(realMetrics.edges >= 3, "real RDIS CFG should contain control-flow edges: " + JSON.stringify(realMetrics));
   assert(realMetrics.graph.left >= realMetrics.viewport.left + 2, JSON.stringify(realMetrics));
-  assert(realMetrics.graph.top >= realMetrics.viewport.top + 2, JSON.stringify(realMetrics));
+  assert(realMetrics.graph.top >= realMetrics.viewport.top + 50, JSON.stringify(realMetrics));
   assert(realMetrics.graph.right <= realMetrics.viewport.right - 2, JSON.stringify(realMetrics));
-  assert(realMetrics.graph.bottom <= realMetrics.viewport.bottom - 2, JSON.stringify(realMetrics));
+  assert(realMetrics.graph.bottom <= realMetrics.viewport.bottom - 40, JSON.stringify(realMetrics));
   await realPage.screenshot({ path: `${out}/real-binary-cfg.png`, fullPage: false });
   await browser.close();
   console.log("CFG browser tests passed in " + browserName + "; screenshots and SVG are in " + out + "/");
