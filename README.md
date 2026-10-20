@@ -16,7 +16,7 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 |---|---|---|
 | Formats | Mach-O (thin + fat), ELF, PE, **WebAssembly**, raw firmware | Mach-O/ELF/PE |
 | Containers | **APK / IPA / AAR / JAR / ZIP** (open one lib or the whole package), **DMG** (via `hdiutil`), **tar / tar.gz / tar.xz**, transparent **gzip / xz / bzip2**; any other file opens as a **raw** binary | — |
-| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM** | x86/x64/ARM |
+| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM**; with `pypcode`, **12 more CPU families (19 named variants) through Ghidra's SLEIGH specs** (PowerPC, SPARC, 68k, AVR, MSP430, SuperH, Z80, 6502, Xtensa, eBPF, LoongArch, TriCore) and **any of its 194 language variants** as `--arch sleigh:<id>` (`rdis --list-archs`) | x86/x64/ARM |
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
@@ -51,7 +51,14 @@ python tests/compile_rate.py arm64 40 40       # real /usr/bin functions whose o
 API calls are typed from a library of 206 system prototypes (libc, POSIX, CoreFoundation, the
 Objective-C runtime), and Objective-C methods decompile to valid Objective-C. 32-bit ARM/Thumb has
 fewer verified idioms than arm64/x86-64. MIPS and RISC-V decompile through the IR,
-tested on Debian's static busybox (1,200 functions, 0 failures). The pseudo-code is a reconstruction
+tested on Debian's static busybox (1,200 functions, 0 failures).
+
+The SLEIGH-backed CPUs are newer. For PowerPC, 68k, AVR, MSP430, SPARC, SuperH, Z80, 6502, Xtensa, eBPF and
+LoongArch, function discovery, call edges, CFGs (including delay slots) and the P-code IR are checked against
+hand-assembled programs (`tests/test_sleigh.py`); TriCore and the other endian/word-size variants use the same
+path without a fixture of their own, and there is no compiler-built corpus for any of them yet. Data cross-references (strings, globals) are not recovered, the AVR register
+file shows up as memory, SPARC register windows are not modelled, and `sleigh:<id>` has no calling convention,
+so parameters and return values are not recovered. Treat their pseudo-code as a P-code reading, not a verified decompile. The pseudo-code is a reconstruction
 of what the machine code computes, not the original source.
 
 ## Install

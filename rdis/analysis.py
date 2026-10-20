@@ -556,7 +556,7 @@ class Program:
                 if not tables and (k == IJMP or i.mnemonic.startswith(("ldr", "mov", "ldur"))
                                    and _INDEXED.search(i.op_str)):
                     tables = True
-                if self.arch.delay_slot and k in (JMP, CJMP, IJMP, RET):
+                if self.arch.slot(i, k):
                     d = self.insn(a + i.size)          # executes before the branch takes effect
                     if d is not None:
                         insns[d.address] = d

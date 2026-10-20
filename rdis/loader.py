@@ -89,7 +89,8 @@ def _str(n):
 
 def _arch_name(b):
     if isinstance(b, lief.MachO.Binary):
-        return {"X86_64": "x86_64", "X86": "x86", "ARM64": "arm64", "ARM": "arm"}[b.header.cpu_type.__name__]
+        return {"X86_64": "x86_64", "X86": "x86", "ARM64": "arm64", "ARM": "arm",
+                "POWERPC": "ppc", "POWERPC64": "ppc64"}[b.header.cpu_type.__name__]   # classic Mac PPC slices
     if isinstance(b, lief.ELF.Binary):
         m = b.header.machine_type.__name__
         wide = b.header.identity_class == lief.ELF.Header.CLASS.ELF64
@@ -98,6 +99,20 @@ def _arch_name(b):
             return ("mips64" if wide else "mips") + ("el" if le else "")
         if m == "RISCV":
             return "riscv64" if wide else "riscv32"
+        le = b.header.identity_data == lief.ELF.Header.ELF_DATA.LSB
+        if m in ("PPC", "PPC64"):                   # CPUs only a SLEIGH spec decodes (rdis/sleigh.py)
+            return ("ppc64" if wide else "ppc") + ("le" if le else "")
+        if m in ("SPARC", "SPARC32PLUS", "SPARCV9"):
+            return "sparc64" if wide else "sparc"
+        if m == "SH":
+            return "sh4le" if le else "sh4"
+        if m == "XTENSA":
+            return "xtensa" if le else "xtensabe"
+        if m == "BPF":
+            return "ebpf" if le else "ebpfbe"
+        sleigh = {"M68K": "m68k", "AVR": "avr8", "MSP430": "msp430", "LOONGARCH": "loongarch64", "TRICORE": "tricore"}
+        if m in sleigh:
+            return sleigh[m]
         return {"X86_64": "x86_64", "I386": "x86", "AARCH64": "arm64", "ARM": "arm"}[m]
     return {"AMD64": "x86_64", "I386": "x86", "ARM64": "arm64", "ARMNT": "arm"}[b.header.machine.__name__]
 

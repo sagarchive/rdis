@@ -136,7 +136,13 @@ jobs:
           path: artifacts/baseline/
           if-no-files-found: warn
           retention-days: 30
-
+      # After the baseline capture on purpose: pypcode is an optional extra, so it must not change the
+      # recorded environment. This is the only job that exercises the SLEIGH multi-CPU backend.
+      - name: Run SLEIGH multi-CPU tests (optional pypcode extra)
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m pip install "pypcode==4.0.1"
+          python -m unittest discover -s tests -p 'test_sleigh.py' -v
 
   browser-cfg:
     runs-on: ubuntu-latest

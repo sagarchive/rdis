@@ -21,6 +21,8 @@ except ImportError:      # optional: NativeFront covers MIPS / RISC-V without it
 
 
 def _lang(arch, thumb):
+    if getattr(arch, "lang", None):          # a SleighArch carries its own language id
+        return arch.lang
     n = arch.name
     if n == "x86_64":
         return "x86:LE:64:default"

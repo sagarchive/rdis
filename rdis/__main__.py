@@ -45,7 +45,21 @@ def list_containers(path, libs, as_json=False):
         print(f"\npick one with:  rdis {path} -l {libs[0]['entry']}")
 
 
+def list_archs():
+    """CPUs rdis can load: Capstone-backed ones, then everything a SLEIGH spec describes."""
+    from . import sleigh
+    print("Capstone (full decompiler): x86 x86_64 arm arm64 mips mipsel mips64 mips64el riscv32 riscv64")
+    print("\nSLEIGH short names (disassembly, CFG, P-code IR; --arch NAME):")
+    for name, spec in sleigh._SPECS.items():
+        print(f"  {name:<12} {spec[0]}")
+    ids = sleigh.languages()
+    print(f"\nany of {len(ids)} SLEIGH languages as --arch sleigh:<id> (no calling convention):")
+    print("  " + "\n  ".join(ids))
+
+
 def main(argv=None):
+    if "--list-archs" in (sys.argv[1:] if argv is None else argv):
+        return list_archs()
     p = argparse.ArgumentParser(prog="rdis", description="multi-format disassembler and decompiler")
     p.add_argument("binary")
     p.add_argument("-f", "--func", help="function name, sub_xxx, or 0xADDR")
@@ -62,7 +76,9 @@ def main(argv=None):
     p.add_argument("-l", "--entry", metavar="MEMBER",
                    help="archive member to analyze (APK/IPA/AAR/JAR/ZIP/DMG): full path, or a "
                         "unique part like libfoo.so")
-    p.add_argument("--arch", help="slice to use for a fat Mach-O (x86_64, arm64, ...)")
+    p.add_argument("--arch", help="slice for a fat Mach-O (x86_64, arm64, ...), or the CPU for --loader raw "
+                                  "(ppc, sparc, m68k, avr8, ebpf, ...; see --list-archs)")
+    p.add_argument("--list-archs", action="store_true", help="print every CPU rdis can load, then exit")
     p.add_argument("--loader", help="force a plugin loader (e.g. raw)")
     p.add_argument("--base", help="load address for --loader raw")
     p.add_argument("--allow-legacy-rdb", action="store_true",
