@@ -132,6 +132,9 @@ def main(argv=None):
                    help="import an old sidecar without a content hash (verify the original binary first)")
     p.add_argument("--sig-make", metavar="DB", help="write a signature database from this binary's named functions")
     p.add_argument("--sig", metavar="DB", help="name this binary's unnamed functions from a signature database")
+    p.add_argument("--emulate", metavar="ARGS", help="run -f/--func in the P-code emulator with comma-separated "
+                   "integer arguments (e.g. 7,0x10); stops with an error on anything it cannot model")
+    p.add_argument("--max-steps", type=int, default=1_000_000, help="instruction budget for --emulate")
     p.add_argument("--diff", metavar="OTHER", help="match this binary's functions against another build of it")
     p.add_argument("--transfer", action="store_true",
                    help="with --diff: copy renames and comments onto OTHER for matches at or above --min-confidence")
@@ -195,6 +198,15 @@ def main(argv=None):
     func = prog.function_at(addr) or prog.functions.get(addr)
     if func is None:
         sys.exit(f"no function at {a.func}")
+    if a.emulate is not None:
+        from .emulate import EmulationError, emulate
+        try:
+            res = emulate(prog, func.addr, [int(t, 0) for t in a.emulate.split(",") if t.strip()], max_steps=a.max_steps)
+        except (EmulationError, ValueError) as e:
+            sys.exit(f"rdis: emulation stopped: {e}")
+        print(json.dumps({"function": hex(func.addr), "value": res.value, "hex": hex(res.value), "steps": res.steps})
+              if a.json else f"{res.value} ({hex(res.value)}) after {res.steps} instructions")
+        return
     if a.decompile:
         print(Decompiler(prog, func).c())
     elif a.callgraph:

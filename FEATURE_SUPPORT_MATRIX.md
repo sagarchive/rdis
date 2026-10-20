@@ -55,4 +55,5 @@ bounded behavior a test actually checks. Nothing here is a claim of parity with 
 | Persistent cache and `.rdb` annotations | `rdis/cache.py`, `rdis/analysis.py` | invalidation and replacement regressions | Partial | schema migration; multi-process races |
 | LLDB debugger | `rdis/debug.py` | argument-sanitization regression | Partial | remote targets; mapping a stopped PC to the static CFG |
 | Plugin SDK | `rdis/plugins.py` | plugin loaders and architectures exist | Partial | versioned contract; broken-plugin isolation |
-| Emulation, symbolic execution, taint | none | none | Unsupported | |
+| P-code emulation | `rdis/emulate.py`, `--emulate`, MCP `emulate` | 135 compiled `-O2`/`-O3` scalar and array cases agree with native execution on arm64 and x86-64 (0 mismatches); on auto-vectorized NEON code 9 of 15 agree and 6 stop with an explicit unsupported-intrinsic error, none wrong (`tests/test_emulate.py`) | Verified (bounded) | no vector intrinsics, floating-point returns, system calls or threads; integer arguments only |
+| Symbolic execution, taint | none | none | Unsupported | |
