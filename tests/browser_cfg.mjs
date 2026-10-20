@@ -414,7 +414,27 @@ try {
   assert(fit.graph.top >= fit.viewport.top + 2, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 2, JSON.stringify(fit));
   assert(fit.graph.bottom <= fit.viewport.bottom - 2, JSON.stringify(fit));
+  const fitAllZoom = parseInt(await page.locator("#zval").textContent(), 10);
+  assert(fitAllZoom < 20, "stress fixture should reproduce the expected small fit-all scale: " + fitAllZoom);
   await page.screenshot({ path: `${out}/stress-180-graph-fit.png`, fullPage: false });
+
+  // Fit-all proves the graph can be fully overviewed but makes a tall chain hard to read.
+  // The explicit Entry action must restore the readable starting view without reopening the file.
+  assert.equal(await page.locator("#zentry").isVisible(), true, "CFG should expose a readable Entry action");
+  await page.locator("#zentry").click();
+  await page.waitForTimeout(200);
+  const entryReturnZoom = parseInt(await page.locator("#zval").textContent(), 10);
+  assert(entryReturnZoom >= 50, "Entry should restore readable scale after fit-all: " + entryReturnZoom);
+  const entryNodeBounds = await page.locator("#graph > svg g.node.entry").first().evaluate(el => {
+    const r = el.getBoundingClientRect(), v = document.querySelector("#graph").getBoundingClientRect();
+    return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,
+      viewport:{left:v.left,top:v.top,right:v.right,bottom:v.bottom}};
+  });
+  assert(entryNodeBounds.left >= entryNodeBounds.viewport.left, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.top >= entryNodeBounds.viewport.top, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.right <= entryNodeBounds.viewport.right, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.bottom <= entryNodeBounds.viewport.bottom, JSON.stringify(entryNodeBounds));
+  await page.screenshot({ path: `${out}/stress-180-entry-after-fit.png`, fullPage: false });
 
   // Wide fan-out/join graph with long labels catches horizontal clipping and minimap aspect bugs.
   await page.evaluate(() => go("0x3000", {mode: "cfg"}));
