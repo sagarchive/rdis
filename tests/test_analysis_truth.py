@@ -198,6 +198,37 @@ class IndependentControlFlowTruthTests(unittest.TestCase):
         self.assertNotIn(BASE + 12, program.functions,
                          "the frame-save instruction must not become a false function start")
 
+    def test_arm64_gap_scan_finds_leaf_frame_with_only_stack_spills(self):
+        # RET; NOP padding; SUB SP,SP,#48; STR W0,[SP,#44]; LDR W0,[SP,#44]; RET.
+        # A leaf may allocate a frame without saving FP/LR, so it has no STP x29,x30.
+        code = bytes.fromhex(
+            "c0 03 5f d6 1f 20 03 d5 "
+            "ff c3 00 d1 e0 2f 00 b9 e0 2f 40 b9 c0 03 5f d6"
+        )
+
+        def read(va, size):
+            offset = va - BASE
+            if offset < 0 or offset >= len(code):
+                return b""
+            return code[offset:offset + size]
+
+        image = Image(
+            "<arm64-leaf-stack-spill-prologue>",
+            "raw",
+            make("arm64"),
+            BASE,
+            BASE,
+            [Section(".text", BASE, len(code), 0, True)],
+            {BASE: "truth_entry"},
+            {},
+            read,
+            lambda va: va - BASE if BASE <= va < BASE + len(code) else None,
+        )
+        program = Program(image).analyze(objc=False, swift=False, prologues=True)
+        self.assertEqual(set(program.functions), {BASE, BASE + 8})
+        self.assertNotIn(BASE + 12, program.functions,
+                         "an SP-relative store inside a function must not become a new entry")
+
 
 @unittest.skipUnless(
     platform.system() == "Linux"
@@ -422,10 +453,19 @@ class MachOFunctionDiscoveryPrecisionRecallTests(unittest.TestCase):
                             "section_code": section.code if section else None,
                             "is_code": diagnostic_image.is_code(target),
                             "loader_symbol": diagnostic_image.symbols.get(target),
-                            "allocation_first_prologue_match": (
+                            "allocation_first_frame_save_match": (
                                 Program(diagnostic_image)._arm64_stack_adjust_then_fp_lr_save(
                                     section_bytes, target - section.va
                                 ) if section else False
+                            ),
+                            "allocation_first_leaf_spill_match": (
+                                Program(diagnostic_image)._arm64_stack_adjust_with_stack_access(
+                                    section_bytes, target - section.va
+                                ) if section else False
+                            ),
+                            "preceding_16_hex": (
+                                diagnostic_image.read(target - 16, 16).hex(" ")
+                                if target >= 16 else ""
                             ),
                         }
                     print("FUNCTION_DISCOVERY_METRIC " + json.dumps(report, sort_keys=True))
