@@ -144,3 +144,26 @@ Each artifact includes manifest.json, pip-freeze.txt, run/summary.json, command 
 ### Current evidence boundary
 
 The support matrix was added on the subsequent PR branch revision `4faac5aaf2648e11de79871ef29b7b2096107132` and CI passed on that matrix revision in [run 39267587715](https://github.com/sagarchive/rdis/actions/runs/39267587715). The roadmap/report updates after that matrix revision are being revalidated on the latest PR head; do not infer that a queued run has passed.
+
+## 10. PR #5 proposed corpus v4 — independent CFG edge truth (2026-10-20)
+
+This section records proposed-branch evidence; it does not change the immutable `main` baseline above.
+
+**Permanent record:** [corpus v4 record](benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/record.json), [manifest snapshot](benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/manifest.json), [truth metrics](benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/truth-results.json), and [reproduction guide](benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/README.md). The live manifest is versioned as `rdis-baseline-corpus-v4`; the snapshot SHA-256 is `09ed2a43797cb0f2e97067d079e4af0510efe2850acea899b6c3b81010df9970`. No host-provided executable is committed.
+
+**Validation:** [five-job CI run 39411728249](https://github.com/sagarchive/rdis/actions/runs/39411728249) passed on code/test head `37140677e75e832047186ae0490628f6ac312fc2` and includes Python 3.10/3.12, Chromium, Firefox and macOS baseline/product/maturity/20-visitor stress. The later head `2fde939a8064dec5ddf206d7614302f9a30217ae` removes duplicate regression code; its rerun [39411979082](https://github.com/sagarchive/rdis/actions/runs/39411979082) was still in progress at the time this report was written.
+
+| Truth case | Independent expected facts | RDIS observed | Precision / recall / F1 |
+|---|---|---|---|
+| x86-64 direct switch, `-O0`, compiler jump tables disabled | 48 CFG edges reconstructed from GNU `objdump` direct targets | 48 edges | 1.000 / 1.000 / 1.000 |
+| x86-64 PIE relative jump table, `-O2`, GCC 13.3 | 12 signed little-endian int32 offsets from `.rodata`; 15 reachable blocks and 14 edges | 12 jump targets, 15 blocks and 14 edges | 1.000 / 1.000 / 1.000 |
+| Hand-encoded AArch64 branch fixture | 4 expected edges | 4 edges | 1.000 / 1.000 / 1.000 |
+| Hand-encoded x86-64 loop fixture | 3 expected edges | 3 edges | 1.000 / 1.000 / 1.000 |
+| Compiler-generated function starts | 7 starts per x86-64 build across `-O0`/`-O2` and symbol-rich/stripped; 7/7 in tested ARM64 profiles | 7 starts each | 1.000 / 1.000 / 1.000 |
+
+The optimized jump-table oracle is independent of RDIS's CFG output: it parses GNU `objdump` instruction boundaries, recovers the table base from RIP-relative LEA output, reads signed 32-bit offsets directly from `.rodata`, reconstructs reachable blocks/edges, and only then compares with RDIS. The tested build had table base `0x2004` and dispatch at `0x12dd`. The regression also checks `Program.jump_tables` provenance against the independent target set.
+
+**Interpretation limits:** These F1 values apply only to the enumerated fixtures/toolchain. They do not establish general switch/jump-table accuracy. Absolute 64-bit tables, other compiler/ISA code generation, unknown indirect branches/calls, exception/unwind edges, shared/tail/overlapping blocks, and broader function-discovery precision/recall remain open.
+
+**Promotion policy:** v4 archives source fingerprints, environment/constraint hashes and truth metrics; CI baseline artifacts retain only a time-limited diagnostic window. Next M04/M03 increment is an unresolved-indirect-edge negative control, an absolute 64-bit jump-table fixture and a second compiler/build profile.
+
