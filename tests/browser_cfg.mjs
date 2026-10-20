@@ -425,7 +425,7 @@ try {
   await page.waitForTimeout(200);
   const entryReturnZoom = parseInt(await page.locator("#zval").textContent(), 10);
   assert(entryReturnZoom >= 50, "Entry should restore readable scale after fit-all: " + entryReturnZoom);
-  const entryNodeBounds = await page.locator("#graph > svg g.node.entry").first().evaluate(el => {
+  const entryNodeBounds = await page.locator("#graph > svg g.node").first().evaluate(el => {
     const r = el.getBoundingClientRect(), v = document.querySelector("#graph").getBoundingClientRect();
     return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,
       viewport:{left:v.left,top:v.top,right:v.right,bottom:v.bottom}};
