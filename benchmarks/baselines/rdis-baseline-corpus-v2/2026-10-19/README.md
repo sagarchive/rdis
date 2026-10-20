@@ -1,6 +1,6 @@
 # RDIS corpus-v2 baseline — 2026-10-19
 
-This directory is the **permanent summary record** for the first green run of the expanded baseline corpus. The binary payloads are not redistributed here. The raw CI archives are linked below and expire under repository artifact-retention policy; `record.json` preserves the run identity, hashes, outcome counts, environment/freeze digests, constraints digests, and the one measured smoke benchmark.
+This directory is the **permanent summary record** for the first green run of the expanded baseline corpus. The binary payloads are not redistributed here. The raw CI archives are linked below and expire under repository artifact-retention policy; `record.json` and the frozen `manifest.json` preserve the run identity, hashes, outcome counts, environment/freeze digests, constraints digests, and the one measured smoke benchmark.
 
 ## Exact provenance
 
@@ -21,7 +21,7 @@ The run passed all five CI jobs, including Chromium and Firefox graph tests. The
 - [Chromium CFG screenshots/export](https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12195482502)
 - [Firefox CFG screenshots/export](https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12194244197)
 
-The full manifest.json and pip-freeze.txt for each job are included in the downloadable baseline archives. Their SHA-256 digests and the constraints-file hashes are duplicated in `record.json` so the archive can be verified independently.
+The exact v2 manifest is also frozen as `manifest.json` beside this record; the live corpus has since advanced to v3. The full manifest used per job and `pip-freeze.txt` are included in the downloadable baseline archives. Their SHA-256 digests and the constraints-file hashes are duplicated in `record.json` so the archive can be verified independently.
 
 ## Reproduce the portable baseline
 
