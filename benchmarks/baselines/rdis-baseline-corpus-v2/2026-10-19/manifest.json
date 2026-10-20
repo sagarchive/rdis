@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "corpus_id": "rdis-baseline-corpus-v2",
+  "description": "Expanded, license-aware baseline inputs and deterministic command profiles. Version 2 adds a hand-encoded AArch64 conditional/unconditional branch fixture; platform-local system binaries are fingerprinted in place and never redistributed.",
+  "source_repository_license": "MIT",
+  "entries": [
+    {
+      "id": "cfg-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/cfg_fixture.c",
+      "sha256": "242c4bbcb9ba9641e826f04d5a4fa3d41e4c20e62eba9469bbd2420908023484",
+      "git_blob_sha1": "42ff4fad92beb1c756d9254b47fcf89a409b7a43",
+      "size_bytes": 566,
+      "license": "RDIS repository MIT license",
+      "purpose": "Deterministic C source fixture containing a helper call, conditional branches, a loop, global memory writes, and return paths.",
+      "required": true
+    },
+    {
+      "id": "arm64-branch-fixture",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/arm64_branch_fixture.hex",
+      "sha256": "d3385b3eecfb111332509618159db25e0559e733d525e94de1d535d69678a86e",
+      "git_blob_sha1": "fb92226133e03d9f1458868551e4f0eb0c698c05",
+      "size_bytes": 594,
+      "license": "Hand-authored fixture under the RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual.",
+      "purpose": "Independent AArch64 little-endian byte fixture: CMP, conditional branch to 0x1010, fall-through ADD, unconditional branch to 0x1014, SUB and RET. Regression asserts exact instruction boundaries, flow kinds and PC-relative targets; no compiled cross-toolchain required.",
+      "required": true
+    },
+    {
+      "id": "macos-arm64-system-ls",
+      "kind": "host-system-binary",
+      "path": "/bin/ls",
+      "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+      "size_bytes": 154352,
+      "when": {
+        "system": "Darwin",
+        "machine": "arm64"
+      },
+      "required_when_matched": true,
+      "license": "Provided by the GitHub-hosted macOS runner; analyze in place, do not redistribute.",
+      "purpose": "Platform-specific sample for a reproducible analysis timing baseline. A changed runner image must trigger review rather than silently replacing this fingerprint."
+    }
+  ],
+  "profiles": [
+    {
+      "id": "portable",
+      "when": {},
+      "commands": [
+        {
+          "id": "rdis-cli-help",
+          "argv": [
+            "rdis",
+            "--help"
+          ],
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "rdis-gui-help",
+          "argv": [
+            "rdis-gui",
+            "--help"
+          ],
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "mcp-initialize",
+          "argv": [
+            "rdis-mcp"
+          ],
+          "stdin": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
+          "stdout_contains": "protocolVersion",
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "hardening-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_hardening.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "baseline-capture-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_capture.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "baseline-runner-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_runner.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "typed-ir-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_ir_*.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "architecture-encoding-fixtures",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_architecture_encodings.py",
+            "-v"
+          ],
+          "timeout_seconds": 120,
+          "required": true,
+          "requires_entries": [
+            "arm64-branch-fixture"
+          ]
+        },
+        {
+          "id": "compile-cfg-fixture",
+          "when": {
+            "system": "Linux",
+            "machine": "x86_64"
+          },
+          "requires_entries": [
+            "cfg-fixture-source"
+          ],
+          "argv": [
+            "cc",
+            "-O0",
+            "-g",
+            "-fno-inline",
+            "-fno-pie",
+            "-no-pie",
+            "tests/fixtures/cfg_fixture.c",
+            "-o",
+            "{output_dir}/generated/cfg-fixture"
+          ],
+          "record_outputs": [
+            "{output_dir}/generated/cfg-fixture"
+          ],
+          "timeout_seconds": 60,
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "macos-arm64",
+      "extends": [
+        "portable"
+      ],
+      "when": {
+        "system": "Darwin",
+        "machine": "arm64"
+      },
+      "commands": [
+        {
+          "id": "product-self-check",
+          "argv": [
+            "{python}",
+            "tests/test_rdis.py"
+          ],
+          "timeout_seconds": 600,
+          "required": true
+        },
+        {
+          "id": "execution-checked-maturity",
+          "argv": [
+            "{python}",
+            "tests/maturity.py"
+          ],
+          "timeout_seconds": 900,
+          "required": true
+        },
+        {
+          "id": "macos-arm64-ls-analysis-benchmark",
+          "when": {
+            "system": "Darwin",
+            "machine": "arm64"
+          },
+          "requires_entries": [
+            "macos-arm64-system-ls"
+          ],
+          "argv": [
+            "{python}",
+            "tests/benchmark_analysis.py",
+            "/bin/ls",
+            "--arch",
+            "arm64",
+            "--repeat",
+            "3",
+            "--output",
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
+          "record_outputs": [
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
+          "timeout_seconds": 300,
+          "required": true
+        }
+      ]
+    }
+  ]
+}
