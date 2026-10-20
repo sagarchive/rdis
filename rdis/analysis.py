@@ -729,7 +729,12 @@ class Program:
                 a = s.va + off
                 if a % align or a in covered:
                     continue
-                prev = data[max(off - 4, 0):off]
+                # x86 prologue byte signatures are common enough inside immediate/data bytes to
+                # create false functions. Give their boundary predicate a wider context so it can
+                # verify that the candidate follows a RET/JMP or conventional padding. Other ISAs
+                # have fixed-width/local boundary rules and keep their original four-byte window.
+                window = 16 if self.arch.name.startswith("x86") else 4
+                prev = data[max(off - window, 0):off]
                 if after is not None and off and not after(prev):
                     continue
                 if thumb:
@@ -738,11 +743,39 @@ class Program:
 
     _PACIBSP = b"\x7f\x23\x03\xd5"
 
+    @staticmethod
+    def _x86_after_terminator(prev):
+        """Conservative x86 gap-scan guard to avoid nested prologue-like byte sequences."""
+        if not prev:
+            return True
+        # Padding often lies between functions; inspect the bytes before that padding for the
+        # terminal instruction. Keep the recognized set deliberately narrow and auditable.
+        for pad_len in range(min(len(prev), 8) + 1):
+            prefix = prev[:len(prev) - pad_len] if pad_len else prev
+            padding = prev[len(prev) - pad_len:] if pad_len else b""
+            if any(byte not in (0x90, 0xcc) for byte in padding):
+                continue
+            if not prefix:
+                return True  # a section beginning/padding run
+            if prefix[-1] in (0xc3, 0xcb):  # RET / RETF
+                return True
+            if len(prefix) >= 3 and prefix[-3] in (0xc2, 0xca):  # RET imm16 / RETF imm16
+                return True
+            if len(prefix) >= 2 and prefix[-2] == 0xeb:  # JMP rel8 ending exactly at the boundary
+                return True
+            if len(prefix) >= 5 and prefix[-5] == 0xe9:  # JMP rel32 ending exactly at the boundary
+                return True
+        return False
+
     def _prologue_pattern(self):
         """(byte regex, alignment, previous-bytes check, is_thumb) for function-entry encodings."""
         n, bits = self.arch.name, self.arch.bits
         if n.startswith("x86"):
-            return (rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if bits == 64 else rb"\x55\x89\xe5"), 1, None, False
+            # This signature can also appear inside an instruction stream or embedded bytes.
+            # Require a plausible boundary before accepting a byte-scan candidate: a RET,
+            # relative JMP, or conventional NOP/INT3 padding after a terminating instruction.
+            # Symbol/debug starts still seed analysis independently of this heuristic.
+            return (rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if bits == 64 else rb"\x55\x89\xe5"), 1, self._x86_after_terminator, False
         if n == "arm64":
             # pacibsp, or `stp x29, x30, [sp, #-N]` (pre-index or signed offset, negative imm7);
             # a stp right after a pacibsp belongs to that function, not a new one. Dart AOT keeps
