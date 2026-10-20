@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "corpus_id": "rdis-baseline-corpus-v4",
+  "description": "Version 4 adds optimized x86-64 PIE relative jump-table CFG edge precision/recall against GNU objdump instruction boundaries and independently decoded signed int32 offsets, extending the v3 discovery and direct-edge truth corpus. Host binaries remain fingerprinted in place and are never redistributed.",
+  "source_repository_license": "MIT",
+  "entries": [
+    {
+      "id": "cfg-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/cfg_fixture.c",
+      "sha256": "242c4bbcb9ba9641e826f04d5a4fa3d41e4c20e62eba9469bbd2420908023484",
+      "git_blob_sha1": "42ff4fad92beb1c756d9254b47fcf89a409b7a43",
+      "size_bytes": 566,
+      "license": "RDIS repository MIT license",
+      "purpose": "Deterministic C source fixture containing a helper call, conditional branches, a loop, global memory writes, and return paths.",
+      "required": true
+    },
+    {
+      "id": "arm64-branch-fixture",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/arm64_branch_fixture.hex",
+      "sha256": "d3385b3eecfb111332509618159db25e0559e733d525e94de1d535d69678a86e",
+      "git_blob_sha1": "fb92226133e03d9f1458868551e4f0eb0c698c05",
+      "size_bytes": 594,
+      "license": "Hand-authored fixture under the RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual.",
+      "purpose": "Independent AArch64 little-endian byte fixture: CMP, conditional branch to 0x1010, fall-through ADD, unconditional branch to 0x1014, SUB and RET. Regression asserts exact instruction boundaries, flow kinds and PC-relative targets; no compiled cross-toolchain required.",
+      "required": true
+    },
+    {
+      "id": "x86-64-loop-fixture",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/x86_64_loop_fixture.hex",
+      "sha256": "43d671bb02661e2106e8f8b5cd5edec942880276a4407033e401263cb49c0504",
+      "git_blob_sha1": "8ba1411278fd919302645883a82095568e76e170",
+      "size_bytes": 402,
+      "license": "Hand-authored fixture under the RDIS repository MIT license; instruction semantics are referenced to Intel 64 and IA-32 Architectures Software Developer's Manual, Vol. 2.",
+      "purpose": "Independent x86-64 loop CFG: XOR, INC, CMP, backward JL to 0x1002, and RET at 0x1008. Regression asserts exact basic-block edges, including the back edge and conditional fall-through.",
+      "required": true
+    },
+    {
+      "id": "function-discovery-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/function_discovery_fixture.c",
+      "sha256": "9a8d6a151c6b545453ab75f1f293e613dfbd6338eb8e1334d429b2231d61417f",
+      "git_blob_sha1": "ae5ec9daa1fa396c679963558b8a19ed15eb9739",
+      "size_bytes": 1469,
+      "license": "RDIS repository MIT license",
+      "purpose": "Compiler-produced x86-64 truth corpus with direct calls, tail-call shape, a ten-way switch, an indirect-call target, loop/branch control flow and an explicit entry. Tests query `nm` before stripping, then measure function-start precision/recall at -O0/-O2 after `--strip-all`.",
+      "required": true
+    },
+    {
+      "id": "optimized-relative-jump-table-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/switch_jump_table_fixture.c",
+      "sha256": "41f7b597314498d6de3586e6e0625d37f333a0f366e0143e140d7bb3a1deef84",
+      "git_blob_sha1": "6f0f5ed1e417f7920ec78d92d5f7c07e08b1941a",
+      "size_bytes": 1255,
+      "license": "RDIS repository MIT license",
+      "purpose": "Optimized x86-64 PIE switch dispatch with 12 dense cases that lower to a table of signed int32 offsets relative to a RIP-relative code base. tests/test_analysis_truth.py decodes table targets independently from GNU objdump and .rodata bytes, then checks CFG edge precision/recall/F1 against RDIS.",
+      "required": true
+    },
+    {
+      "id": "macos-arm64-system-ls",
+      "kind": "host-system-binary",
+      "path": "/bin/ls",
+      "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+      "size_bytes": 154352,
+      "when": {
+        "system": "Darwin",
+        "machine": "arm64"
+      },
+      "required_when_matched": true,
+      "license": "Provided by the GitHub-hosted macOS runner; analyze in place, do not redistribute.",
+      "purpose": "Platform-specific sample for a reproducible analysis timing baseline. A changed runner image must trigger review rather than silently replacing this fingerprint."
+    }
+  ],
+  "profiles": [
+    {
+      "id": "portable",
+      "when": {},
+      "commands": [
+        {
+          "id": "rdis-cli-help",
+          "argv": [
+            "rdis",
+            "--help"
+          ],
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "rdis-gui-help",
+          "argv": [
+            "rdis-gui",
+            "--help"
+          ],
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "mcp-initialize",
+          "argv": [
+            "rdis-mcp"
+          ],
+          "stdin": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
+          "stdout_contains": "protocolVersion",
+          "timeout_seconds": 30,
+          "required": true
+        },
+        {
+          "id": "hardening-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_hardening.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "baseline-capture-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_capture.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "baseline-runner-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_baseline_runner.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "typed-ir-regressions",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_ir_*.py",
+            "-v"
+          ],
+          "timeout_seconds": 180,
+          "required": true
+        },
+        {
+          "id": "architecture-encoding-fixtures",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_architecture_encodings.py",
+            "-v"
+          ],
+          "timeout_seconds": 120,
+          "required": true,
+          "requires_entries": [
+            "arm64-branch-fixture"
+          ]
+        },
+        {
+          "id": "function-discovery-truth",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_analysis_truth.py",
+            "-v"
+          ],
+          "timeout_seconds": 300,
+          "required": true,
+          "requires_entries": [
+            "arm64-branch-fixture",
+            "x86-64-loop-fixture",
+            "function-discovery-fixture-source"
+          ]
+        },
+        {
+          "id": "compile-cfg-fixture",
+          "when": {
+            "system": "Linux",
+            "machine": "x86_64"
+          },
+          "requires_entries": [
+            "cfg-fixture-source"
+          ],
+          "argv": [
+            "cc",
+            "-O0",
+            "-g",
+            "-fno-inline",
+            "-fno-pie",
+            "-no-pie",
+            "tests/fixtures/cfg_fixture.c",
+            "-o",
+            "{output_dir}/generated/cfg-fixture"
+          ],
+          "record_outputs": [
+            "{output_dir}/generated/cfg-fixture"
+          ],
+          "timeout_seconds": 60,
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "macos-arm64",
+      "extends": [
+        "portable"
+      ],
+      "when": {
+        "system": "Darwin",
+        "machine": "arm64"
+      },
+      "commands": [
+        {
+          "id": "product-self-check",
+          "argv": [
+            "{python}",
+            "tests/test_rdis.py"
+          ],
+          "timeout_seconds": 600,
+          "required": true
+        },
+        {
+          "id": "execution-checked-maturity",
+          "argv": [
+            "{python}",
+            "tests/maturity.py"
+          ],
+          "timeout_seconds": 900,
+          "required": true
+        },
+        {
+          "id": "macos-arm64-ls-analysis-benchmark",
+          "when": {
+            "system": "Darwin",
+            "machine": "arm64"
+          },
+          "requires_entries": [
+            "macos-arm64-system-ls"
+          ],
+          "argv": [
+            "{python}",
+            "tests/benchmark_analysis.py",
+            "/bin/ls",
+            "--arch",
+            "arm64",
+            "--repeat",
+            "3",
+            "--output",
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
+          "record_outputs": [
+            "{output_dir}/benchmark-arm64-ls.json"
+          ],
+          "timeout_seconds": 300,
+          "required": true
+        }
+      ]
+    }
+  ]
+}
