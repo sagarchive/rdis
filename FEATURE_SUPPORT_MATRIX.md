@@ -1,54 +1,56 @@
-# RDIS Feature / Claim Support Matrix
+# Feature support matrix
 
-**Purpose:** Initial source-linked inventory for M00/M01. This distinguishes an implemented capability from proven correctness. It is not a parity claim against IDA Pro/Hex-Rays, Ghidra, Binary Ninja, Hopper, radare2/Cutter, angr or RetDec.
+What rdis does, how each capability is tested, and where it stops. Loading a file, decoding its
+instructions, finding functions, recovering control-flow edges, lifting to an IR and producing
+equivalent C are separate levels of support, and a capability is only listed as verified for the
+bounded behavior a test actually checks. Nothing here is a claim of parity with another tool.
 
-**Baseline:** `main` remains at `96b931d32c807c5430518be6c280c98fb995ebb2`. PR #5 is the proposed implementation on `feat/callgraph-and-analysis-baselines`. The latest completed five-job run passed on code/test head `37140677e75e832047186ae0490628f6ac312fc2` in [run 39411728249](https://github.com/sagarchive/rdis/actions/runs/39411728249); follow-up head `2fde939a8064dec5ddf206d7614302f9a30217ae` removes duplicate test code and is being revalidated by [run 39411979082](https://github.com/sagarchive/rdis/actions/runs/39411979082). Main baseline facts remain separate from proposed-branch evidence.
+| Status | Meaning |
+|---|---|
+| **Verified (bounded)** | A test with an independent oracle proves the stated behavior on the stated inputs. |
+| **Partial** | Implemented and tested in part; the gaps column says what is not covered. |
+| **Unsupported** | Not implemented. The product reports this rather than guessing. |
 
-## Status definitions
+## Inputs
 
-- **VERIFIED (bounded):** a concrete test proves the stated bounded behavior at the recorded revision; not exhaustive correctness.
-- **PARTIAL:** implementation and/or tests exist, but major acceptance gates remain unmeasured.
-- **UNVERIFIED:** a claim is not yet tied to a reproducible end-to-end test in this matrix.
-- **UNSUPPORTED (explicit):** the product should clearly report this limitation.
-
-## Matrix
-
-| Area / claim | Implementation source | Current executable evidence | Status | Main gaps / next validation |
+| Capability | Source | Evidence | Status | Not covered |
 |---|---|---|---|---|
-| Package build and CLI entry points | pyproject.toml; rdis/__main__.py; rdis/server.py; rdis/mcp_server.py | Python 3.10/3.12 wheel install; rdis --help, rdis-gui --help and MCP initialize in baseline profiles | VERIFIED (bounded) | Optional extras, clean OS matrix beyond current CI, release-install reproducibility |
-| Environment and corpus provenance | tests/capture_environment.py; tests/baseline_corpus.json; tests/run_baseline.py; benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/record.json | Corpus v4, checksummed manifest, constraint/runner fingerprints and permanent truth-results record; [run 39411728249](https://github.com/sagarchive/rdis/actions/runs/39411728249) passed all five jobs on code/test head 37140677 | VERIFIED (bounded record; cleanup-head rerun pending) | Broader licensed corpus and constraint review; CI artifact retention is time-limited |
-| ELF / PE / Mach-O loading | rdis/loader.py (LIEF) | Product self-check; macOS /bin/ls load/analysis benchmark; compiled ELF CFG fixture used by browser CI | PARTIAL | Independent expected segment/offset/symbol fixtures per format; PE/fat Mach-O truth fixtures; malformed-header coverage |
-| ZIP / APK / IPA / AAR / JAR / TAR / compressed input | rdis/containers.py | tests/test_hardening.py extraction, same-path replacement and malformed-input cases | PARTIAL | Nested archive depth, duplicate members, symlinks/path traversal, quota cleanup and more host formats |
-| Raw binary loading | rdis/raw.py; rdis/loader.py; plugin loader | Raw loader/API exists; some product checks exercise raw fixtures | PARTIAL | Base address, endian, ISA mode, file-offset mapping and boundary truth fixtures |
-| x86 / x86-64 decoding and analysis | rdis/arch.py; rdis/analysis.py; rdis/lift.py; rdis/ir_front.py | Maturity suite, real-binary compile-rate corpus, typed-IR tests; fixed NOP/RET byte-boundary tests added in tests/test_architecture_encodings.py | PARTIAL | Decoder-mode/opcode coverage and function-discovery precision/recall; compilation is not semantic equivalence |
-| ARM / Thumb | rdis/arch.py; rdis/loader.py; rdis/analysis.py; rdis/lift.py; rdis/ir_front.py | ARM/Thumb decoder and mapping-symbol handling exist; fixed A32/T16 NOP/BX-LR byte-boundary tests added | PARTIAL | ARM-vs-Thumb interworking/BLX, mapping-symbol fixtures and CFG edge F1 remain open |
-| ARM64 / AArch64 | rdis/arch.py; rdis/loader.py; rdis/analysis.py; rdis/ir_front.py; rdis/ir.py | macOS arm64 /bin/ls benchmark; 124-case execution-checked maturity suite; fixed A64 NOP/RET byte-boundary tests added | PARTIAL | Larger licensed corpus, discovery precision/recall, indirect edges, ABI/type recovery and uncovered semantic cases |
-| MIPS32/64, big/little endian and delay slots | rdis/arch.py; rdis/ir_front.py; rdis/analysis.py | Native IR frontend and delay-slot logic; big/little-endian NOP/JR byte-boundary tests added for MIPS32/64 | PARTIAL | Independent fixtures for o32/n64 ABI, branch-likely and delay-slot side effects remain open |
-| RISC-V32/64 and compressed instructions | rdis/arch.py; rdis/ir_front.py | Capstone mode and native frontend paths exist; 32-bit and 16-bit compressed instruction boundaries are now covered by fixtures | PARTIAL | Floating-point/atomic coverage, ABI and semantic differential tests remain open |
-| WebAssembly parsing and function listings | rdis/wasm.py | Deterministic malformed-WASM mutation tests and bounded parsing regressions | PARTIAL | Spec-suite/version/proposal coverage, typed validation and independent disassembly oracle |
-| WebAssembly CFG / C-like decompilation | rdis/wasm.py; rdis/server.py explicitly report unsupported CFG/pseudo-code | API/UI explicitly surface the limitation | UNSUPPORTED (explicit) | A separate future stack-to-CFG/decompilation milestone; do not infer support from listing support |
-| Function discovery | rdis/analysis.py; loader symbols, function starts and exception metadata | `tests/test_analysis_truth.py`: compiler-generated 7-function fixture reports precision/recall/F1 = 1.0 for x86-64 ELF and ARM64 Mach-O at `-O0`/`-O2`, with symbols and stripped; corpus v4 run 39411728249 also passed Linux truth profiles | PARTIAL (bounded truth fixtures passed) | More compilers/build modes and architectures; unknown indirect-flow recall; exception/unwind/shared/tail/overlapping functions; independently labelled false-positive corpus |
-| CFG analysis and graph rendering | rdis/analysis.py; rdis/render.py; rdis/web/index.html | Real Chromium/Firefox screenshots; independent direct-switch oracle matches 48/48 edges at `-O0`; optimized x86-64 PIE relative jump-table oracle matches 14/14 edges at `-O2` (12 cases); AArch64 branch 4/4 and x86 loop 3/3 edges, all F1 1.0 in corpus-v4 results / [run 39411728249](https://github.com/sagarchive/rdis/actions/runs/39411728249) | VERIFIED (bounded edge truth + rendering) | Absolute table encodings, unresolved indirect branches/calls, exception/unwind paths, broader ISA/compiler truth, screen-reader review and more browser/device versions |
-| Interprocedural call graph | rdis/render.py; rdis/server.py; rdis/web/index.html; rdis/__main__.py; rdis/console.py; rdis/mcp_server.py | Unit, CLI/console/MCP and Chromium/Firefox tests cover callers/callees/both, depth/node limits, recursion, imports, unresolved targets and viewport bounds; current five-job run 39411728249 passed | PARTIAL (bounded workflow verified) | Independent call-graph precision/recall, indirect-call recall, multi-binary navigation and xref callsite provenance |
-| Decompiler / typed IR | rdis/decompile.py; rdis/ir.py; rdis/ir_front.py; rdis/lift.py | 124/124 execution-checked maturity cases on merged product revision; current-head baseline runner runs maturity on macOS | PARTIAL | Broader per-ISA corpus for optimized control flow, exceptions, aliasing, FP/vector and calling conventions; report semantic rate separately from compile rate |
-| Objective-C / Swift / JNI metadata | rdis/objc.py; rdis/swift.py; rdis/jni.py; rdis/typelib.py; rdis/demangle.py | Existing product self-check and metadata fixture paths | PARTIAL | Versioned real binaries, truth-labelled protocol/generic/selector/RegisterNatives fixtures, malformed metadata tests |
-| Cross-references, imports, strings, symbols, bookmarks | rdis/analysis.py; rdis/render.py; rdis/server.py | API routes and existing product tests | PARTIAL | Xref precision/recall, relocation/bind variants, UTF-16 and false-positive-string fixtures |
-| .rdb annotations and persistent analysis cache | rdis/analysis.py; rdis/cache.py; rdis/server.py | Cache invalidation and persistent-state regressions in merged PR #3 | PARTIAL | Multi-process cache races, schema upgrade/recovery, backups and annotation migration across binary revisions |
-| Web sessions and resource safety | rdis/server.py; rdis/containers.py; rdis/mcp_server.py | 20-visitor isolation/determinism stress and resource-related hardening regressions | PARTIAL | Route-by-route threat review, hostile-client stress, full quota lifecycle, remote deployment auth/authorization |
-| MCP server | rdis/mcp_server.py | MCP initialize and structured caller/callee graph operation run through baseline/CI; current-head five-job run passed | PARTIAL (bounded tool workflow verified) | Broader schema/invalid-request corpus, result caps, timeouts/cancellation, same-file invalidation and auditable AI edits |
-| LLDB debugger | rdis/debug.py | Scalar argument sanitization regression and optional debugger path | PARTIAL | Versioned LLDB integration, remote targets, output/time caps and runtime/static address mapping |
-| Plugin SDK | rdis/plugins.py and loader/architecture hooks | Plugin mechanisms and docs exist | PARTIAL | Versioned plugin contract, capability policy/allowlist and conformance tests |
-| Emulation, symbolic execution, taint and vulnerability analysis | No complete product-level implementation established by this baseline matrix | No end-to-end correctness corpus recorded | UNVERIFIED / ROADMAP | Treat as M12; define supported semantics and acceptance oracles before advertising support |
-| Binary diff/version tracking/annotation transfer | No complete end-to-end product workflow established by this baseline matrix | No labelled pairwise binary corpus or transfer scorecard | UNVERIFIED / ROADMAP | M16: function/block match precision/recall, changed-code localization and ambiguity handling |
-| Fuzzing and differential correctness | tests/test_hardening.py; tests/maturity.py; tests/diffcheck.py | Deterministic mutation smoke corpus and runtime-equivalence tests in CI | PARTIAL | Sustained fuzz campaigns, coverage trends, crash minimization and independent-tool adjudication |
-| Performance and memory | tests/benchmark_analysis.py plus macOS server RSS capture | Pinned /bin/ls smoke benchmark and raw artifacts | PARTIAL | Multi-size/multi-ISA corpus, cold/warm timings, p50/p95, peak/steady RSS and regression budgets |
-| Browser accessibility and UX | rdis/web/index.html; tests/browser_cfg.mjs | Chromium/Firefox automation, geometry assertions, theme checks and screenshots | PARTIAL | Keyboard-only analyst tasks, screen reader, zoom/text scaling, touch input and device-size matrix |
-| Competitor parity / comparative quality | DEVELOPMENT_ROADMAP.md primary vendor references and quality scorecard | Research sources define capability benchmarks; no full apples-to-apples scorecard | UNVERIFIED as a comparative result | Same corpora/options/oracles and versioned competitor runs; documentation alone does not prove relative quality |
+| Mach-O (thin and fat), ELF, PE | `rdis/loader.py` | product self-check; compiled ELF used by the browser tests | Partial | independent segment/offset truth per format; fat Mach-O and PE fixtures; malformed headers beyond fuzzing |
+| Mach-O `LC_FUNCTION_STARTS` | `rdis/loader.py` | `/bin/ls` yields all 50 starts (LIEF's own list returns 24) | Verified (bounded) | `__DATA` function pointers |
+| APK, IPA, AAR, JAR, ZIP, TAR, DMG, gzip/xz/bzip2 | `rdis/containers.py` | extraction, replacement and malformed-input tests in `tests/test_hardening.py` | Partial | nested depth, duplicate members, symlink and traversal corpus |
+| Raw firmware blobs | `rdis/raw.py` | raw fixtures for every SLEIGH CPU in `tests/test_sleigh.py` | Partial | endianness/mode autodetection |
+| WebAssembly parsing and function list | `rdis/wasm.py` | malformed-module mutation tests | Partial | spec-suite coverage; CFG and pseudo-code are explicitly unsupported |
 
-## Current baseline evidence
+## CPUs
 
-The latest completed full run on code/test head `37140677e75e832047186ae0490628f6ac312fc2` passed [CI run 39411728249](https://github.com/sagarchive/rdis/actions/runs/39411728249): Python 3.10/3.12 hardening/baseline, Chromium, Firefox, and macOS baseline/product/maturity/concurrency. Its [Chromium CFG artifact](https://github.com/sagarchive/rdis/actions/runs/39411728249/artifacts/12259572656), [Firefox CFG artifact](https://github.com/sagarchive/rdis/actions/runs/39411728249/artifacts/12260450171), [macOS baseline](https://github.com/sagarchive/rdis/actions/runs/39411728249/artifacts/12259750996), [Python 3.10 baseline](https://github.com/sagarchive/rdis/actions/runs/39411728249/artifacts/12259800599) and [Python 3.12 baseline](https://github.com/sagarchive/rdis/actions/runs/39411728249/artifacts/12260255240) are available. Current HEAD `2fde939a8064dec5ddf206d7614302f9a30217ae` removes duplicate regression code; [run 39411979082](https://github.com/sagarchive/rdis/actions/runs/39411979082) is still in progress. Permanent corpus-v4 edge metrics are committed at `benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/truth-results.json`. Green CI is scoped evidence; it does not close the remaining indirect-flow, accessibility or platform gaps.
+| CPU | Source | Evidence | Status | Not covered |
+|---|---|---|---|---|
+| x86, x86-64 | `rdis/arch.py`, `rdis/lift.py` | 124-case execution-checked suite; 95.5% of 973 `/usr/bin` functions recompile; instruction-boundary fixtures | Partial | semantic equivalence beyond the suite; decoder opcode coverage |
+| ARM, Thumb | `rdis/arch.py`, `rdis/lift.py` | boundary fixtures; mapping-symbol handling | Partial | interworking (`blx`) fixtures; fewer verified idioms than arm64 |
+| ARM64 | `rdis/arch.py`, `rdis/lift.py`, `rdis/ir.py` | maturity suite; 97.3% of 1,085 functions recompile; hand-encoded branch CFG (4/4 edges) | Partial | larger licensed corpus; indirect-edge recall |
+| MIPS32/64 (BE/LE), RISC-V 32/64 + RVC | `rdis/arch.py`, `rdis/ir_front.py` | boundary fixtures; busybox decompile run (1,200 functions, 0 failures) | Partial | ABI fixtures; branch-likely semantics; FP and atomics |
+| PowerPC, 68k, AVR, MSP430, SPARC, SuperH, Z80, 6502, Xtensa, eBPF, LoongArch | `rdis/sleigh.py` (optional `pypcode`) | hand-assembled program per CPU, as raw blob and inside a real ELF: functions, call edge, 3-block CFG with delay slots, IR decompile (`tests/test_sleigh.py`) | Partial | no compiler-built corpus; no data cross-references; AVR registers appear as memory; SPARC register windows unmodelled |
+| TriCore and the other endian/word-size variants; any of 194 `sleigh:<id>` languages | `rdis/sleigh.py` | same code path, no fixture of their own; language ids and ABI register names validated against the specs | Partial | no calling convention for `sleigh:<id>`, so parameters and returns are not recovered |
 
-## Next matrix increment
+## Analysis
 
-The new unit suite exercises instruction boundaries for x86/x86-64, ARM/Thumb, AArch64, MIPS32/64 in both endiannesses, and RISC-V32/64 with compressed encodings. It is a decoder smoke gate, not proof of CFG or decompiler correctness; the current-head CI result is required before treating this coverage as verified. Next add an independently checked unresolved-indirect-edge negative control and an absolute 64-bit jump-table fixture, then extend the corpus with licensed or generated ground-truth binaries for each advertised architecture and important format. Each input must record provenance/license, SHA-256, build command, expected function/CFG facts and test coverage. Do not mark a row VERIFIED until its architecture-specific acceptance tests and negative cases pass in CI.
+| Capability | Source | Evidence | Status | Not covered |
+|---|---|---|---|---|
+| Function discovery | `rdis/analysis.py` | compiler-built 7-function fixture, precision/recall/F1 = 1.0 for x86-64 ELF and ARM64 Mach-O at `-O0`/`-O2`, symbols and stripped | Verified (bounded) | other compilers, larger corpora, shared and overlapping tails |
+| Very large binaries | `rdis/analysis.py` | 130 MB stripped Bun executable: 72,891 functions in 716 s at 8 GB peak (previously did not finish) | Verified (bounded) | no competitor timing on the same file; Python per-instruction overhead dominates |
+| CFG edges | `rdis/analysis.py` | direct switch 48/48 edges at `-O0`; optimized x86-64 relative jump table 14/14 at `-O2`; AArch64 4/4; x86 loop 3/3; all F1 = 1.0 | Verified (bounded) | absolute-pointer tables; other compilers and ISAs |
+| Call graph (callers, callees, both) | `rdis/render.py`, GUI, CLI, console, MCP | unit tests; Chromium and Firefox geometry tests | Partial | independent call-graph precision/recall |
+| Decompiler and typed IR | `rdis/decompile.py`, `rdis/ir.py` | 124/124 execution-equivalence cases | Partial | optimized exceptions, aliasing, vectors; address mapping from C back to instructions |
+| Objective-C, Swift, JNI metadata | `rdis/objc.py`, `rdis/swift.py`, `rdis/jni.py` | self-check fixtures | Partial | versioned real binaries; malformed metadata |
+
+## Interfaces
+
+| Capability | Source | Evidence | Status | Not covered |
+|---|---|---|---|---|
+| Web UI, multi-user sessions | `rdis/server.py`, `rdis/web/index.html` | 20-visitor isolation and determinism test; Chromium and Firefox graph tests | Partial | route-by-route threat review; keyboard-only and screen-reader review |
+| MCP server (29 tools) | `rdis/mcp_server.py` | every read-only tool exercised on a real binary and on a PowerPC ELF | Partial | pagination, budgets, cancellation, audit of writes |
+| Persistent cache and `.rdb` annotations | `rdis/cache.py`, `rdis/analysis.py` | invalidation and replacement regressions | Partial | schema migration; multi-process races |
+| LLDB debugger | `rdis/debug.py` | argument-sanitization regression | Partial | remote targets; mapping a stopped PC to the static CFG |
+| Plugin SDK | `rdis/plugins.py` | plugin loaders and architectures exist | Partial | versioned contract; broken-plugin isolation |
+| Emulation, symbolic execution, taint | none | none | Unsupported | |
+| Binary diffing and annotation transfer | none | none | Unsupported | |
