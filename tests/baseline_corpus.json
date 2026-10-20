@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "corpus_id": "rdis-baseline-corpus-v2",
-  "description": "Expanded, license-aware baseline inputs and deterministic command profiles. Version 2 adds a hand-encoded AArch64 conditional/unconditional branch fixture; platform-local system binaries are fingerprinted in place and never redistributed.",
+  "corpus_id": "rdis-baseline-corpus-v3",
+  "description": "Version 3 adds a hand-authored x86-64 function-discovery corpus, symbol-oracle precision/recall at -O0/-O2 on symbol-rich and stripped builds, and an exact raw AArch64 CFG edge oracle. Host binaries remain fingerprinted in place and are never redistributed.",
   "source_repository_license": "MIT",
   "entries": [
     {
@@ -24,6 +24,17 @@
       "size_bytes": 594,
       "license": "Hand-authored fixture under the RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual.",
       "purpose": "Independent AArch64 little-endian byte fixture: CMP, conditional branch to 0x1010, fall-through ADD, unconditional branch to 0x1014, SUB and RET. Regression asserts exact instruction boundaries, flow kinds and PC-relative targets; no compiled cross-toolchain required.",
+      "required": true
+    },
+    {
+      "id": "function-discovery-fixture-source",
+      "kind": "checked-in-source",
+      "path": "tests/fixtures/function_discovery_fixture.c",
+      "sha256": "9a8d6a151c6b545453ab75f1f293e613dfbd6338eb8e1334d429b2231d61417f",
+      "git_blob_sha1": "ae5ec9daa1fa396c679963558b8a19ed15eb9739",
+      "size_bytes": 1469,
+      "license": "RDIS repository MIT license",
+      "purpose": "Compiler-produced x86-64 truth corpus with direct calls, tail-call shape, a ten-way switch, an indirect-call target, loop/branch control flow and an explicit entry. Tests query `nm` before stripping, then measure function-start precision/recall at -O0/-O2 after `--strip-all`.",
       "required": true
     },
     {
@@ -155,6 +166,26 @@
           "required": true,
           "requires_entries": [
             "arm64-branch-fixture"
+          ]
+        },
+        {
+          "id": "function-discovery-truth",
+          "argv": [
+            "{python}",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_analysis_truth.py",
+            "-v"
+          ],
+          "timeout_seconds": 300,
+          "required": true,
+          "requires_entries": [
+            "arm64-branch-fixture",
+            "function-discovery-fixture-source"
           ]
         },
         {
