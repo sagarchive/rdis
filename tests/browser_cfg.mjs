@@ -461,10 +461,12 @@ try {
       return r.left >= host.left + 1 && r.right <= host.right - 1 &&
         r.top >= host.top + 38 && r.bottom <= host.bottom - 42;
     };
-    const entry = nodes.find(n => n.querySelector("title")?.textContent === "entry");
-    const cases = nodes.filter(n => /^case\d+$/.test(n.querySelector("title")?.textContent || ""));
+    const nodeName = node => node.querySelector(":scope > title")?.textContent?.trim() || "";
+    const entry = nodes.find(n => nodeName(n) === "entry");
+    const cases = nodes.filter(n => /^case\d+$/.test(nodeName(n)));
     return { entryVisible: !!entry && fullyVisible(entry),
-      visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length };
+      visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length,
+      titles: nodes.map(nodeName) };
   });
   assert(wideNeighborhood.entryVisible, "horizontal layout must keep the entry inside the unobscured viewport");
   assert(wideNeighborhood.visibleCases >= 10,
