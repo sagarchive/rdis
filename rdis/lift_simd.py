@@ -243,7 +243,8 @@ def _x86(lf, i, regs):
         return None
     if m in ("bts", "btr", "btc") and len(ops) == 2:
         a, b = op(0), op(1)
-        e = {"bts": f"{a} | (1 << {b})", "btr": f"{a} & ~(1 << {b})", "btc": f"{a} ^ (1 << {b})"}[m]
+        bit = lf._shift_by("1", b, "<<")
+        e = {"bts": f"{lf._paren(a)} | {bit}", "btr": f"{lf._paren(a)} & ~{bit}", "btc": f"{lf._paren(a)} ^ {bit}"}[m]
         regs["__cmp__"] = ("bt", [a, b])
         return lf._assign(ops[0], e, i, regs)
     if m == "xchg" and len(ops) == 2:
@@ -309,15 +310,15 @@ def _arm(lf, i, regs):
         return lf._assign(ops[0], f"-({lf._bin(op(1), '*', op(2))})", i, regs)
     if m in ("ubfx", "sbfx") and len(ops) == 4:               # extract `width` bits at `lsb`
         lsb, w = ops[2].imm, ops[3].imm
-        e = f"({op(1)} >> {lsb}) & {hex((1 << w) - 1)}"
+        e = f"{lf._shift_by(op(1), lsb)} & {hex((1 << w) - 1)}"
         return lf._assign(ops[0], e if m == "ubfx" else _cast(lf, "(int64_t)", e), i, regs)
     if m in ("ubfiz", "sbfiz") and len(ops) == 4:             # insert in zero: (x & mask) << lsb
         lsb, w = ops[2].imm, ops[3].imm
-        return lf._assign(ops[0], f"({op(1)} & {hex((1 << w) - 1)}) << {lsb}", i, regs)
+        return lf._assign(ops[0], f"({lf._paren(op(1))} & {hex((1 << w) - 1)}) << {lsb}", i, regs)
     if m in ("bfi", "bfxil") and len(ops) == 4:
         lsb, w = ops[2].imm, ops[3].imm
         mask = (1 << w) - 1
-        src = f"({op(1)} >> {lsb}) & {hex(mask)}" if m == "bfxil" else f"({op(1)} & {hex(mask)}) << {lsb}"
+        src = f"{lf._shift_by(op(1), lsb)} & {hex(mask)}" if m == "bfxil" else f"({lf._paren(op(1))} & {hex(mask)}) << {lsb}"
         keep = hex(~mask & 0xFFFFFFFFFFFFFFFF) if m == "bfxil" else hex(~(mask << lsb) & 0xFFFFFFFFFFFFFFFF)
         return lf._assign(ops[0], f"({op(0)} & {keep}) | ({src})", i, regs)
     if m == "extr" and len(ops) == 4:

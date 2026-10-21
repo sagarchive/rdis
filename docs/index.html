@@ -235,12 +235,15 @@ section { padding-block:clamp(120px,15vw,200px) 0 }
 .code .ln { display:block; min-height:1.78em }
 .stick figcaption { margin-top:14px; font:13px var(--mono); color:var(--mute) }
 @media (max-width:880px){
-  .story { grid-template-columns:minmax(0,1fr); gap:0 }
-  .stick { order:-1; top:calc(env(safe-area-inset-top,0px) + 64px); z-index:2 }
+  .story { grid-template-columns:minmax(0,1fr); gap:28px }
+  .stick { order:-1; position:static; top:auto; z-index:auto }
   .code { font-size:11px; min-height:calc(16 * 1.78em + 32px); padding:16px }
   .stick figcaption { display:none }
-  .step, .step:first-child { min-height:60vh; padding-top:0; justify-content:center; position:relative; z-index:3 }
-  .step > * { background:var(--bg); padding:6px 10px; border-radius:10px; width:fit-content }
+  .steps { gap:28px }
+  .step, .step:first-child { min-height:auto; padding-top:0; justify-content:flex-start; position:static; z-index:auto; border-left:3px solid transparent; padding-left:17px }
+  .step { opacity:.75 }
+  .step.on { opacity:1; border-left-color:var(--amber) }
+  .step h3 { font-size:clamp(22px,6vw,28px) }
 }
 .t-mn{color:var(--mnem)} .t-rg{color:var(--reg)} .t-nm{color:var(--num)} .t-kw{color:var(--kw)} .t-ty{color:var(--ty)} .t-lb{color:var(--lbl)} .t-cm{color:var(--cmt)} .t-ad{color:var(--faint)} .t-st{color:var(--str)} .t-fn{color:var(--fn)}
 .scr { color:var(--faint) }
@@ -342,6 +345,28 @@ section { padding-block:clamp(120px,15vw,200px) 0 }
 .honest b { color:var(--ink); font-weight:600 }
 @media (max-width:640px){ .compare { grid-template-columns:minmax(0,1fr) } }
 
+/* measured: the same-task scorecard, one table and three plain notes */
+.mtab { margin-top:56px; background:var(--tile); border-radius:22px; padding:clamp(20px,2.6vw,30px) }
+.mtab table { width:100%; border-collapse:collapse; font:500 14px/1.4 var(--mono); font-variant-numeric:tabular-nums }
+.mtab caption { caption-side:top; text-align:left; color:var(--mute); font:400 14px/1.5 var(--sans); padding-bottom:18px }
+.mtab th, .mtab td { padding:11px 10px; text-align:left; border-top:1px solid var(--rule2) }
+.mtab thead th { font:600 13px var(--sans); color:var(--mute); border-top:0; white-space:nowrap }
+.mtab tbody th { font:600 14px var(--sans); color:var(--ink); white-space:nowrap }
+.mtab td { color:var(--ink); white-space:nowrap }
+@media (max-width:900px){
+  .mtab table, .mtab tbody, .mtab tr, .mtab th, .mtab td { display:block }
+  .mtab caption { display:block }
+  .mtab thead { display:none }
+  .mtab tbody tr { border-top:1px solid var(--rule2); padding:12px 0 }
+  .mtab tbody th { border:0; padding:0 0 8px; white-space:normal }
+  .mtab td { border:0; padding:5px 0; display:flex; justify-content:space-between; gap:14px; white-space:normal }
+  .mtab td::before { content:attr(data-l); font:600 13px var(--sans); color:var(--mute) }
+}
+.mlist { max-width:780px; margin:32px auto 0; padding:0; list-style:none; display:grid; gap:12px; text-align:left }
+.mlist li { position:relative; padding-left:22px; color:var(--mute); font-size:16px; line-height:1.5 }
+.mlist li::before { content:""; position:absolute; left:0; top:.55em; width:6px; height:6px; border-radius:50%; background:var(--amber) }
+.mlist li b { color:var(--ink); font-weight:600 }
+
 /* start */
 .start { margin:56px auto 0; max-width:900px; background:var(--tile); border-radius:22px; overflow:hidden }
 .start-tabs { display:flex; justify-content:center; padding:20px 20px 0 }
@@ -404,6 +429,7 @@ footer .links { display:flex; gap:20px; flex-wrap:wrap }
       <a href="#proof">Proof</a>
       <a href="#formats">Formats</a>
       <a href="#agents">Agents</a>
+      <a href="#measured">Measured</a>
       <a href="https://github.com/sagarchive/rdis">GitHub</a>
       <a class="pill sm" href="#install">Install</a>
     </nav>
@@ -465,7 +491,7 @@ footer .links { display:flex; gap:20px; flex-wrap:wrap }
       <div class="fig rise"><b>124/124</b><span class="what">optimized, vectorized and struct-heavy functions recompile and compute the same results</span><span class="base">arm64 and x86-64, clang&nbsp;-O1&nbsp;to&nbsp;-O3</span></div>
       <div class="fig rise"><b>96%</b><span class="what">of real arm64 functions decompile to C that compiles</span><span class="base">1,045 of 1,085 from macOS’s own /usr/bin. x86-64: 95%</span></div>
       <div class="fig rise"><b>0.6 s</b><span class="what">to reopen a 9 MB Flutter library</span><span class="base">31 s the first time; the analysis is cached by content</span></div>
-      <div class="fig rise"><b>7</b><span class="what">CPU families</span><span class="base">x86, x86-64, ARM with Thumb, ARM64, MIPS, RISC-V, WebAssembly</span></div>
+      <div class="fig rise"><b>19</b><span class="what">CPU families</span><span class="base">x86, x86-64, ARM with Thumb, ARM64, MIPS, RISC-V, WebAssembly — plus 12 more through Ghidra’s SLEIGH specs</span></div>
     </div>
   </div>
 
@@ -491,13 +517,23 @@ footer .links { display:flex; gap:20px; flex-wrap:wrap }
       </div>
       <div class="tile rise">
         <p class="lbl">MCP tools</p>
-        <p class="big">12</p>
+        <p class="big">35</p>
         <p class="note">Built in, with <strong>no dependencies</strong>. Any agent can call them.</p>
       </div>
       <div class="tile rise">
         <p class="lbl">JNI</p>
         <p class="big">229</p>
         <p class="note">JNIEnv calls named, and <strong>RegisterNatives</strong> tables traced to their Java methods.</p>
+      </div>
+      <div class="tile s2 rise">
+        <p class="lbl">Also inside</p>
+        <p class="mid">Diff, signatures, an emulator, triage, and a plugin SDK.</p>
+        <div class="chips"><span>Binary diff</span><span>Library signatures</span><span>P-code emulator</span><span>Binary triage</span><span>Plugin SDK</span></div>
+      </div>
+      <div class="tile rise">
+        <p class="lbl">SLEIGH CPUs</p>
+        <p class="big">12</p>
+        <p class="note">more CPU families through Ghidra's SLEIGH specs, <strong>19 named variants</strong> and any of 194 language variants as <code>--arch sleigh:&lt;id&gt;</code>.</p>
       </div>
       <div class="tile s2 rise">
         <p class="lbl">Teams</p>
@@ -794,9 +830,9 @@ x19_1-&gt;<span class="t-fn">FindClass</span>(<span class="t-st">"java/io/IOExce
     </div>
     <div class="ag">
       <div class="txt">
-        <h3>12 tools. The same analysis as the UI.</h3>
+        <h3>35 tools. The same analysis as the UI.</h3>
         <p>Renames and comments an agent makes land in the same <code>.rdb</code> file you open in the browser.</p>
-        <p class="tools"><code>info</code>, <code>list_functions</code>, <code>disassemble</code>, <code>decompile</code>, <code>cfg</code>, <code>strings</code>, <code>imports</code>, <code>classes</code>, <code>xrefs</code>, <code>hexdump</code>, <code>rename</code> and <code>comment</code>.</p>
+        <p class="tools">Read the program: <code>info</code>, <code>list_functions</code>, <code>search</code>, <code>lookup</code>, <code>strings</code>, <code>imports</code>, <code>classes</code>, <code>jump_tables</code>, <code>jni_natives</code>, <code>unresolved</code>, <code>triage</code>, <code>capabilities</code>. Read the code: <code>disassemble</code>, <code>decompile</code>, <code>cfg</code>, <code>basic_blocks</code>, <code>stack_frame</code>, <code>hexdump</code>, <code>read_bytes</code>, <code>find_bytes</code>, <code>find_insns</code>. Read the relationships: <code>xrefs</code>, <code>callers</code>, <code>callees</code>, <code>callgraph</code>, <code>diff</code>, <code>signatures</code>. Run it: <code>emulate</code>, a P-code interpreter that never executes host code. Write back: <code>rename</code>, <code>rename_many</code>, <code>comment</code>, <code>define_function</code>, <code>undefine_function</code>, <code>set_type</code>, <code>bookmarks</code>.</p>
       </div>
       <div class="panel rpc rise">
 <pre class="pcode"><span class="dir">→</span> <span class="t-cm">tools/call</span>
@@ -877,8 +913,38 @@ rdis-gui ./MyApp</pre>
         </ul>
       </div>
     </div>
-    <p class="honest">Both products offer decompilation, graph navigation and MCP integration. rdis emphasizes a browser-first, multi-session workspace and one bounded caller/callee graph exposed consistently in the GUI, CLI, console and MCP. Hopper emphasizes a native analyst workflow with editable graph nodes and PDF export. This is a feature-scope comparison, not an accuracy ranking. Graph rendering and navigation are regression-tested in Chromium and Firefox (<a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">CI</a>).</p>
+    <p class="honest">Both products offer decompilation, graph navigation and MCP integration. rdis emphasizes a browser-first, multi-session workspace and one bounded caller/callee graph exposed consistently in the GUI, CLI, console and MCP. Hopper emphasizes a native analyst workflow with editable graph nodes and PDF export. This is a feature-scope comparison, not an accuracy ranking. Graph rendering and navigation are regression-tested in Chromium and Firefox (<a href="https://github.com/sagarchive/rdis/actions/workflows/hardening.yml">CI</a>). Measured function-discovery numbers against Ghidra and radare2 are <a href="#measured">below</a>.</p>
     <p class="honest">Decompiled output types its API calls from a library of 206 system prototypes (libc, POSIX, CoreFoundation and the Objective-C runtime), and Objective-C methods come out as valid Objective-C.</p>
+  </section>
+
+  <section id="measured" class="wrap" aria-labelledby="ms-h">
+    <div class="head">
+      <h2 id="ms-h">Measured against Ghidra and radare2.</h2>
+      <p>Same task, same binaries, same clock: find the functions of the unstripped build in the stripped one. Numbers from the 2026-10-21 run on macOS arm64, rdis <code>git 89ed6f4</code>.</p>
+    </div>
+    <div class="mtab rise">
+      <table>
+        <caption>Function discovery on the builds <strong>without</strong> the linker's function-start table. Each cell is <strong>recall</strong> / extra functions found / wall time. Higher recall and fewer extras are better.</caption>
+        <thead>
+          <tr><th scope="col">Build</th><th scope="col">rdis</th><th scope="col">Ghidra 12.1.4</th><th scope="col">radare2 6.2.4</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">lua-arm64</th><td data-l="rdis"><span><b>0.972</b> / 24 / 0.8 s</span></td><td data-l="Ghidra"><span><b>0.907</b> / 4 / 5.9 s</span></td><td data-l="radare2"><span><b>0.916</b> / 24 / 1.6 s</span></td></tr>
+          <tr><th scope="row">lua-x86_64</th><td data-l="rdis"><span><b>0.979</b> / 16 / 1.0 s</span></td><td data-l="Ghidra"><span><b>0.976</b> / 2 / 6.7 s</span></td><td data-l="radare2"><span><b>0.686</b> / 4 / 0.8 s</span></td></tr>
+          <tr><th scope="row">sqlite-arm64</th><td data-l="rdis"><span><b>0.958</b> / 15 / 4.8 s</span></td><td data-l="Ghidra"><span><b>0.751</b> / 16 / 13.0 s</span></td><td data-l="radare2"><span><b>0.834</b> / 73 / 7.8 s</span></td></tr>
+          <tr><th scope="row">sqlite-x86_64</th><td data-l="rdis"><span><b>0.978</b> / 20 / 6.7 s</span></td><td data-l="Ghidra"><span><b>0.948</b> / 14 / 15.7 s</span></td><td data-l="radare2"><span><b>0.666</b> / 6 / 4.6 s</span></td></tr>
+          <tr><th scope="row">zlib-arm64</th><td data-l="rdis"><span><b>0.855</b> / 3 / 0.4 s</span></td><td data-l="Ghidra"><span><b>0.709</b> / 1 / 4.4 s</span></td><td data-l="radare2"><span><b>0.680</b> / 17 / 0.5 s</span></td></tr>
+          <tr><th scope="row">zlib-x86_64</th><td data-l="rdis"><span><b>0.947</b> / 1 / 0.5 s</span></td><td data-l="Ghidra"><span><b>0.825</b> / 0 / 5.1 s</span></td><td data-l="radare2"><span><b>0.670</b> / 0 / 0.3 s</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="mlist">
+      <li><b>With the function-start table, all three tie.</b> Every tool reaches about 0.99–1.00 recall on those builds, so that case does not separate them.</li>
+      <li><b>rdis uses far more memory than radare2</b> — about 10x on the large binaries — and about the same as Ghidra on sqlite.</li>
+      <li><b>This is a development result, not a held-out one.</b> rdis's discovery heuristics were tuned while looking at misses on these same three programs, so its numbers here are in-sample. Held-out programs, an ELF and PE corpus and more compilers are the next step, and nothing here should be read as "rdis finds more functions than Ghidra" in general.</li>
+      <li><b>Scope is small and stated:</b> this table covers three C programs (SQLite, Lua, zlib), built with clang <code>-O2</code> for arm64 and x86-64 as thin Mach-O only. No ELF or PE, no C++, Rust or Go, one compiler and one optimization level.</li>
+    </ul>
+    <p class="honest">Oracle: <code>nm</code> on the unstripped build, scored only inside <code>__TEXT,__text</code>, so stub entries count for nobody. Commands, tool versions, binary hashes and the raw result file are in <code>benchmarks/scorecard/</code> in the repository; a tool that is not installed is recorded as <code>not_available</code> and nothing here is estimated.</p>
   </section>
 
   <section id="install" class="wrap" aria-labelledby="ins-h">
@@ -1063,21 +1129,52 @@ rdis-gui ./MyApp</pre>
     }
     requestAnimationFrame(frame);
   }
-  function show(mode) {
-    if (mode === current) return;
-    current = mode;
+  function syncLens(mode) {
     document.querySelectorAll("#lift .seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
     document.querySelectorAll(".step").forEach(s => s.classList.toggle("on", s.dataset.mode === mode));
+  }
+  function show(mode) {
+    if (mode === current) { syncLens(mode); return; }
+    current = mode;
+    syncLens(mode);
     if (reduce) { runId++; paint(mode); } else morph(mode);
   }
   document.querySelectorAll("#lift .seg button").forEach(b => b.addEventListener("click", () => show(b.dataset.mode)));
   paint("c");
   document.querySelector('.step[data-mode="c"]').classList.add("on");
 
-  // Scroll drives the lens: whichever step crosses the middle of the viewport wins.
+  // Narrow screens: the reader drives the lens by tapping a step, so the steps act as buttons.
+  const narrow = matchMedia("(max-width:880px)");
+  const lensSteps = Array.from(document.querySelectorAll("#lift .step"));
+  function stepActivate(e) { show(e.currentTarget.dataset.mode); }
+  function stepKeydown(e) {
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); stepActivate(e); }
+  }
+  function applyScreenMode() {
+    lensSteps.forEach(s => {
+      if (narrow.matches) {
+        s.setAttribute("role", "button");
+        s.setAttribute("tabindex", "0");
+        s.addEventListener("click", stepActivate);
+        s.addEventListener("keydown", stepKeydown);
+      } else {
+        s.removeAttribute("role");
+        s.removeAttribute("tabindex");
+        s.removeEventListener("click", stepActivate);
+        s.removeEventListener("keydown", stepKeydown);
+      }
+    });
+  }
+  if (narrow.addEventListener) narrow.addEventListener("change", applyScreenMode);
+  else narrow.addListener(applyScreenMode);
+  applyScreenMode();
+
+  // Scroll drives the lens on wide screens: whichever step crosses the middle of the viewport wins.
   if ("IntersectionObserver" in window) {
-    const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && show(e.target.dataset.mode)),
-      { rootMargin: "-45% 0px -45% 0px" });
+    const io = new IntersectionObserver(es => {
+      if (narrow.matches) return;
+      es.forEach(e => e.isIntersecting && show(e.target.dataset.mode));
+    }, { rootMargin: "-45% 0px -45% 0px" });
     document.querySelectorAll(".step").forEach(s => io.observe(s));
   }
 
@@ -1299,7 +1396,7 @@ rdis-gui ./MyApp</pre>
     $("p-info").hidden = p !== "info"; $("p-agent").hidden = p !== "agent";
   }
   document.querySelectorAll(".ins-tabs button").forEach(b => b.addEventListener("click", () => panel(b.dataset.p)));
-  const IDLE = `<p class="empty">An MCP agent calls the same 12 tools you get from <code>rdis.mcp_server</code>. Press <b>Let an agent take over</b> to watch one work.</p>`;
+  const IDLE = `<p class="empty">An MCP agent calls the same 35 tools you get from <code>rdis.mcp_server</code>. Press <b>Let an agent take over</b> to watch one work.</p>`;
   $("p-agent").innerHTML = IDLE;
 
   function log(cls, html) { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; $("p-agent").appendChild(d); d.scrollIntoView({ block: "nearest" }); }

@@ -44,6 +44,7 @@ Cells are recall / extra functions / wall time / peak RSS. Higher recall and few
 
 Reading it honestly:
 - With the function-start table every tool reaches about 0.99-1.00 recall, so that case does not separate them.
+- These three programs are a **development set**: rdis's heuristics were tuned while inspecting misses on them, so its numbers are in-sample. Held-out programs have not been run yet.
 - Without it, rdis has the highest recall on all six builds. Its extras are comparable to Ghidra's and radare2's on most builds
   (rdis 0-24, Ghidra 0-16, radare2 0-73) and higher than Ghidra's on both lua builds (14-24 against 1-4).
 - rdis is faster than Ghidra on every build and faster than radare2 on the larger ones, slower than radare2 on the smallest.

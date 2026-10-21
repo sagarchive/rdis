@@ -21,3 +21,5 @@ Mach-O, ELF, PE, WebAssembly, raw firmware and supported archives/containers. In
 ## Accuracy and provenance
 
 Do not infer universal instruction coverage, decompiler correctness, or feature parity from marketing copy. Use the execution-checked corpus and release-specific CI as scoped evidence. Treat inferred names, types and structure layouts as hypotheses unless backed by symbols, debug information, metadata or explicit tests.
+
+Function discovery has been measured on the same task with the same binaries against Ghidra 12.1.4 and radare2 6.2.4: three C programs, clang -O2, thin Mach-O only, on builds without the linker's function-start table. Report the measured numbers with that scope; a result for another tool is a fact about that tool on that corpus and configuration only. This is a development result: rdis's heuristics were tuned on these same programs, so the numbers are in-sample and no general claim follows. Raw results, versions and binary hashes are in `benchmarks/scorecard/` in the repository.
