@@ -71,6 +71,10 @@ for _n in range(32):
 _ARM_FP = re.compile(r"[bhsdqv](\d{1,2})")  # every view of SIMD/FP register N (b/h/s/d/q/v) is vN
 
 
+def m_is_cmp(i):
+    return i.mnemonic in ("cmp", "test")
+
+
 class Lifter:
     def __init__(self, prog):
         self.prog, self.arch = prog, prog.arch
@@ -179,6 +183,8 @@ class Lifter:
         self._structs = {}
         args = {self._canon(a): a for a in self._args()}
         argptr, argwidth, localwidth, localptr = {}, {}, {}, set()
+        localfp, localint = {}, set()
+        self._wide32 = set()    # registers given a 32-bit constant >= 2**31: compared as int32_t
         derived = {}  # register -> argument it was computed from (p + i*4, p + 16, ...)
         argfp = {}    # pointer arg -> "float"/"double" when its elements go through FP registers
         fields, arrayish = {}, set()   # struct recovery: arg -> {disp: (width, signed, fp, selfptr)}
@@ -193,6 +199,7 @@ class Lifter:
         fsrc, fret_value, fret_single = None, False, False   # same tracking for the FP return reg
         rread = fread = False    # was the return register read after its last write?
         tail_ptr = None          # pointer type returned through a tail call to a known API
+        tail_int = False         # tail call to a known API that returns an integer
         fret = self.arch.fret
         ipos = rpos = fpos = 0   # program-order position of the last write to each return reg
         int_votes = fp_votes = 0  # per `ret`: which return register was written most recently
@@ -229,6 +236,10 @@ class Lifter:
                             ret_is_value, int_votes = True, int_votes + 1
                             if pr[0].endswith("*"):
                                 tail_ptr = pr[0]
+                    if tail and pr and pr[0] != "void" and not pr[0].endswith("*") and pr[0] not in ("double", "float"):
+                        tail_int = True
+                    if k == CALL and pr and pr[0] not in ("void", "double", "float"):
+                        retsrc, rpos, rread = "value", ipos, False      # a known API's result lands in the return register
                     for n_, pt in enumerate(pr[1] if pr else ()):
                         r_ = self._canon(self.arch.args[n_]) if n_ < len(self.arch.args) else None
                         if pt.endswith("*") and r_ in args and r_ in still_arg:
@@ -246,6 +257,10 @@ class Lifter:
                         fsrc = "value" if self._scalar_fp(i) else "vector"
                         fret_single = self._single(i, self._canon(fret))
                 w = self._acc_width(i)
+                if self.x86 and i.mnemonic == "mov" and len(i.operands) == 2 and i.operands[0].type == reg_t \
+                        and i.operands[1].type == x86.X86_OP_IMM and self._reg_width(i.operands[0], i) == 4 \
+                        and (i.operands[1].imm & 0xffffffff) >= 1 << 31:
+                    self._wide32.add(self._canon(i.reg_name(i.operands[0].reg)))
                 # lea computes an address; multi-byte NOPs and prefetches name memory they never access
                 if not i.mnemonic.startswith(("lea", "nop", "prefetch", "prfm", "prfum", "endbr")):
                     fpdata = self._fp_access(i)
@@ -274,6 +289,10 @@ class Lifter:
                                            fpdata or bool(prev and prev[2]), selfp or bool(prev and prev[3]))
                         elif base in (self.arch.sp, self.arch.fp, "rbp", "rsp", "sp", "x29"):
                             localwidth[disp] = max(localwidth.get(disp, 0), w)
+                            if fpdata and w in (4, 8):
+                                localfp[disp] = "float" if w == 4 else "double"
+                            else:
+                                localint.add(disp)
                 still_arg -= self._rw(i)[1]
                 self._track_derived(i, args, derived, reg_t, mem_t)
                 self._track_spill(i, args, derived, slot_root, reg_t, mem_t)
@@ -320,6 +339,8 @@ class Lifter:
             fret_value, fp_votes, int_votes = True, 1, 0
         elif use == "int" and ret_is_value:
             fp_votes = 0
+        elif use is None and tail_int and not fret_value:
+            ret_is_value, int_votes = True, int_votes + 1      # a bare thunk to an int-returning API, no caller to say otherwise
         elif use == "none":
             # every caller ignores both return registers (checked across the CFG): no result
             ret_is_value = fret_value = False
@@ -333,7 +354,7 @@ class Lifter:
         # stack locals: name + type by width / address-taken
         for disp, w in localwidth.items():
             self._localname[disp] = f"local_{abs(disp):x}"
-            self._localtype[disp] = self._WIDTH_T.get(w, "int64_t")
+            self._localtype[disp] = localfp[disp] if disp in localfp and disp not in localint else self._WIDTH_T.get(w, "int64_t")
         for disp, root in slot_root.items():  # a spill slot of a pointer argument is that pointer
             t = self._argtypes.get(args.get(root, ""), "")
             if t.endswith("*") and disp in self._localname:
@@ -616,12 +637,20 @@ class Lifter:
             return self._last_regs["__cond__"]
         return self._cond_from(b.insns[-1], self._last_regs.get("__cmp__"))
 
+    def _callee(self, target, name):
+        """C name of a called function; Mach-O imports drop the linker's leading underscore (`_strlen` -> `strlen`)."""
+        n = cname(name)
+        img = self.prog.image
+        if img.format == "macho" and target in img.imports and n.startswith("_") and len(n) > 1:
+            return n[1:]
+        return n
+
     def ret(self, b):
         t = self._tail_target(b)
         if t is not None:  # tail call: `jmp f` is `return f(...)`
             regs = self._last_regs
             name = self.prog.display(t) or f"sub_{t:x}"
-            call = self._objc_message(name, regs) or f"{cname(name)}({', '.join(self._call_args(t, regs))})"
+            call = self._objc_message(name, regs) or f"{self._callee(t, name)}({', '.join(self._call_args(t, regs))})"
             return f"{call};\nreturn;" if getattr(self, "_ret_void", False) else f"return {call};"
         if getattr(self, "_ret_void", False):
             return "return;"
@@ -889,11 +918,19 @@ class Lifter:
                                    hex(abs(inc)) if abs(inc) > 9 else str(abs(inc)))   # bytes, not elements
         return res
 
+    def _cmp_operand(self, o, i, regs):
+        v = self._op(o, i, regs)
+        wide = getattr(self, "_wide32", ())
+        if self.x86 and m_is_cmp(i) and o.type == x86.X86_OP_REG and self._reg_width(o, i) == 4 \
+                and self._canon(i.reg_name(o.reg)) in wide and re.fullmatch(r"[A-Za-z_]\w*", v):
+            return f"(int32_t){v}"
+        return v
+
     def _step1(self, i, regs):
         m = i.mnemonic
         k = self.arch.kind(i)
         if m in ("cmp", "test", "cmn", "tst", "cbz", "cbnz"):
-            regs["__cmp__"] = (m, [self._op(o, i, regs) for o in i.operands])
+            regs["__cmp__"] = (m, [self._cmp_operand(o, i, regs) for o in i.operands])
         elif m in _FLAG_ARITH and len(i.operands) == 3:
             # subs/adds/ands set flags from their *sources* (and also write a result, lifted below)
             regs["__cmp__"] = (_FLAG_ARITH[m], [self._op(o, i, regs) for o in i.operands[1:]])
@@ -970,7 +1007,7 @@ class Lifter:
         target = self.prog.call_target(i, regs2) or self.prog.call_target(i, regs)
         if target is not None:
             name = self.prog.display(target) or f"sub_{target:x}"
-            fname = cname(name)
+            fname = self._callee(target, name)
         else:                                    # through a register/memory value: cast and call
             v = self._op(i.operands[-1], i, regs)
             name = fname = f"((code){v if self._atomic(v) else '(' + v + ')'})"
@@ -1183,6 +1220,10 @@ class Lifter:
             a, b = self._int_operand(a), self._int_operand(b)
         if m in ("lsr", "asr", "lsl"):
             a = self._shift_operand(a, m == "lsr", self._reg_width(dst, i))
+        if m == "udiv":                                       # unsigned divide, whatever the operands' declared sign
+            u = self._utype(self._reg_width(dst, i) * 8)
+            ua, ub = (f"({u}){v}" if self._atomic(v) else f"({u})({v})" for v in (a, b))
+            return self._assign(dst, f"{ua} / {ub}", i, regs)
         if m in ("madd", "msub") and len(ops) > 3:            # c +/- a*b
             v = self._bin(self._op(ops[3], i, regs), "+" if m == "madd" else "-", f"({self._bin(a, '*', b)})")
             return self._assign(dst, self._wrap32(v, m, dst, i), i, regs)
@@ -1283,6 +1324,12 @@ class Lifter:
             return a
         return f"{cast}{a}" if self._atomic(a) else f"{cast}({a})"
 
+    def _shift_by(self, v, amount, op=">>"):
+        """`(v op amount)` with the shifted operand parenthesized when it is a compound
+        expression: in C `>>`/`<<` bind tighter than `^`, `|` and `&`, so an unparenthesized
+        `a ^ b >> 2` would shift only `b`."""
+        return f"({self._paren(v)} {op} {amount})"
+
     def _unary(self, i, regs):
         ops = i.mnemonic, i.operands
         m, operands = ops
@@ -1298,7 +1345,18 @@ class Lifter:
                 else ("test", [expr, expr])
         return self._assign(dst, expr, i, regs)
 
-    _NUM = re.compile(r"-?(0x[0-9a-fA-F]+|\d+)")
+    _NUM = re.compile(r"-?(0x[0-9a-fA-F]+|\d+)(U?LL)?")
+
+    @staticmethod
+    def _lit(v):
+        """C literal for an integer; values outside int get a 64-bit suffix so arithmetic is not done in 32 bits."""
+        if v < 0:
+            return f"-{Lifter._lit(-v)}" if -v > 9 else str(v)
+        if v <= 9:
+            return str(v)
+        if v <= 0x7fffffff:
+            return hex(v)
+        return hex(v) + ("LL" if v < 1 << 63 else "ULL")
     _FOLD = {"+": lambda x, y: x + y, "-": lambda x, y: x - y, "*": lambda x, y: x * y,
              "&": lambda x, y: x & y, "|": lambda x, y: x | y, "^": lambda x, y: x ^ y,
              "<<": lambda x, y: x << y if 0 <= y < 64 else None, ">>": lambda x, y: x >> y if 0 <= y < 64 else None}
@@ -1309,7 +1367,7 @@ class Lifter:
         if not cls._NUM.fullmatch(s):
             return None
         try:
-            return int(s, 0)
+            return int(s.rstrip("LU") if s.endswith("LL") else s, 0)
         except ValueError:  # e.g. "08"
             return None
 
@@ -1338,7 +1396,7 @@ class Lifter:
         if x is not None and y is not None and op in cls._FOLD:
             v = cls._FOLD[op](x, y)
             if v is not None and abs(v) < (1 << 64):
-                return (hex(v) if v > 9 else str(v)) if v >= 0 else (f"-{hex(-v)}" if -v > 9 else str(v))
+                return cls._lit(v)
         if y == 0 and op in ("+", "-", "|", "^", "<<", ">>"):
             return a
         if x == 0 and op in ("+", "|", "^"):
@@ -1459,7 +1517,9 @@ class Lifter:
         if v is not None:
             full = (1 << (8 * self._reg_width(dst, i))) - 1
             k = ((v & full) & ~mask) | imm
-            return self._assign(dst, hex(k) if k > 9 else str(k), i, regs)
+            if self._reg_width(dst, i) == 4 and k >= 1 << 31:
+                k -= 1 << 32
+            return self._assign(dst, self._lit(k), i, regs)
         return self._assign(dst, f"({self._paren(old)} & {hex(~mask & ((1 << 64) - 1))}) | {hex(imm)}", i, regs)
 
     _RODATA = ("const", "literal", "rodata", "cstring", "text", "rdata")
@@ -1616,7 +1676,7 @@ class Lifter:
             if s is not None and r == v:
                 return cstr_lit(s, 40)
         name = self.prog.display(v)
-        return cname(name) if name else (hex(v) if abs(v) > 9 else str(v))
+        return cname(name) if name else (self._lit(v) if abs(v) > 9 or v < 0 else str(v))
 
     def _mem(self, op, i, regs):
         m = op.mem
@@ -1853,7 +1913,8 @@ class Lifter:
             # against the block's final register state rather than an earlier compare)
             v = self._op(i.operands[0], i, self._last_regs)
             if m in ("tbz", "tbnz") and len(i.operands) > 1:
-                v = f"(({self._int_operand(v)} >> {i.operands[1].imm}) & 1)"   # a bit of a pointer too
+                # the shifted operand may be a compound expression (`>>` binds tighter than `^`)
+                v = f"({self._shift_by(self._int_operand(v), i.operands[1].imm)} & 1)"   # a bit of a pointer too
             return f"{v} == 0" if m in ("cbz", "tbz") else f"{v} != 0"
         suffix = m[1:] if self.x86 and m.startswith("j") else \
             (m.split(".")[-1] if "." in m else m[1:] if m.startswith("b") else "")

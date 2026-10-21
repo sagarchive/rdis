@@ -41,6 +41,7 @@ PRELUDE = """#include <stdint.h>
 #endif
 typedef void *id;
 typedef void *SEL;
+typedef int64_t (*code)();
 """
 
 
@@ -66,7 +67,7 @@ def decompiled(prog, name, newname):
     return "\n".join(lines)
 
 
-def run(src, arch, cases, opt="-O1", support="", vectorize=False):
+def run(src, arch, cases, opt="-O1", support="", vectorize=False, tool="rdis"):
     tmp = tempfile.mkdtemp(prefix="rdis_diff_")
     cfile = os.path.join(tmp, "orig.c")
     open(cfile, "w").write(src + ("\nint main(void){return 0;}\n" if "main(" not in src else ""))
@@ -80,12 +81,26 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
     runner = _runner(arch)
     if runner is None:
         return []  # cannot execute this architecture here
-    prog = Program(open_image(binary)).analyze()
+    prog = Program(open_image(binary)).analyze() if tool == "rdis" else None
+    ghidra = None
+    if tool == "ghidra":
+        import ghidra_decomp
+        try:
+            ghidra = ghidra_decomp.decompile_all(binary)
+        except Exception as e:
+            return [f"ghidra failed: {e}"]
     body = re.sub(r"int main\s*\([^)]*\)\s*\{.*", "", src, flags=re.S)  # original functions only
     decs, calls = [], []
     for fn, rtype, argsets in cases:
         try:
-            decs.append(decompiled(prog, "_" + fn, "dec_" + fn))
+            if ghidra is not None:
+                text = ghidra.get(fn) or ghidra.get("_" + fn)
+                if text is None:
+                    return [f"{fn}: ghidra produced no decompilation"]
+                decs.append(ghidra_decomp.renamed(text, fn, "dec_" + fn))
+            else:
+                decs.append(decompiled(prog, "_" + fn, "dec_" + fn))
+                decs[-1] = re.sub(rf"\b_{re.escape(fn)}\b(?=\s*\()", "dec_" + fn, decs[-1])
         except Exception as e:
             return [f"{fn}: decompiler raised {type(e).__name__}: {e}"]
         for args in argsets:
@@ -99,7 +114,7 @@ def run(src, arch, cases, opt="-O1", support="", vectorize=False):
                 calls.append(f'{{ long long o = ({rtype}){fn}({a}), d = ({rtype})dec_{fn}({a});'
                              f' if (o != d) printf("MISMATCH {fn}({shown}) orig=%lld dec=%lld\\n", o, d); }}')
     # support (test data) goes after the original source so it can use the source's own types
-    harness = PRELUDE + body + "\n" + support + "\n" + "\n\n".join(decs) + \
+    harness = PRELUDE + (ghidra_decomp.PRELUDE if ghidra is not None else "") + body + "\n" + support + "\n" + "\n\n".join(decs) + \
         "\n\nint main(void) {\n" + "\n".join("    " + c for c in calls) + '\n    printf("DONE\\n");\n    return 0;\n}\n'
     hfile = os.path.join(tmp, "harness.c")
     open(hfile, "w").write(harness)

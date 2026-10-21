@@ -646,8 +646,8 @@ def test_hostile_inputs():
     try:
         containers.extract(zp, "lib/x86/bad.so", os.path.join(d, "c"))
         raise AssertionError("bad CRC accepted")
-    except zipfile.BadZipFile:
-        pass
+    except ValueError as e:
+        assert "malformed archive" in str(e) and "CRC" in str(e), e
     assert set(os.listdir(os.path.join(d, "c"))) == before, "temp file leaked on failed extract"
     # analysis cache: a truncated or non-object cache file falls back to a fresh analysis
     old = os.environ.get("RDIS_CACHE_DIR"), cache.MIN_SECONDS
@@ -746,6 +746,21 @@ def test_mcp_malformed():
     print("ok  mcp: malformed lines answered with errors, server keeps running")
 
 
+def test_mcp_tools():
+    """Every read-only MCP tool answers on a real binary (an agent sees errors as tool failures)."""
+    from rdis.mcp_server import _handle, TOOLS
+    vals ={"func": "entry", "addr": "entry", "query": "entry", "pattern": "?? ??", "regex": "ret",
+            "limit": 2, "size": 8, "depth": 1}
+    read_only = ["list_functions", "disassemble", "decompile", "cfg", "imports", "xrefs", "hexdump", "info",
+                 "search", "lookup", "callees", "callers", "callgraph", "basic_blocks", "stack_frame",
+                 "read_bytes", "find_bytes", "find_insns", "jump_tables", "jni_natives"]
+    for name in read_only:
+        args = {k: v for k, v in vals.items() if k in TOOLS[name][2]}   # only the tool's own params
+        r = _handle({"method": "tools/call", "params": {"name": name, "arguments": {"path": "/bin/ls", **args}}})
+        assert not r.get("isError"), (name, r["content"][0]["text"][:300])
+    print(f"ok  mcp: {len(read_only)} read-only tools answer on /bin/ls")
+
+
 if __name__ == "__main__":
     test_type_decoder()
     test_formats()
@@ -770,4 +785,5 @@ if __name__ == "__main__":
     test_hostile_inputs()
     test_server_guards()
     test_mcp_malformed()
+    test_mcp_tools()
     print("\nall checks passed")

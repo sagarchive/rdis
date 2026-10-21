@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "baseline_id": "rdis-baseline-corpus-v2/2026-10-19",
+  "promoted_at_utc": "2026-10-19T14:43:56Z",
+  "purpose": "Permanent, license-safe summary of the first successful expanded baseline run. This is a small, explicit smoke baseline, not a full correctness or performance scorecard.",
+  "source": {
+    "repository": "https://github.com/sagarchive/rdis",
+    "pull_request": 4,
+    "pr_head_sha": "59f739dba0f938f5c4c371b32eee56cc94f15e70",
+    "base_main_sha": "96b931d32c807c5430518be6c280c98fb995ebb2",
+    "tested_merge_checkout_sha": "f64c2b696e2b9d8596726614958693ae2adc7150",
+    "commit_scope": "Versioned corpus v2, hand-encoded AArch64 branch fixture and exact flow-target assertions, and platform/Python baseline constraint overlays."
+  },
+  "corpus": {
+    "id": "rdis-baseline-corpus-v2",
+    "schema_version": 1,
+    "manifest_path": "benchmarks/baselines/rdis-baseline-corpus-v2/2026-10-19/manifest.json",
+    "manifest_sha256": "47c5a2724f96158b5be429e7776ed2e3b5e42245abdd30e3433421a20493ab90",
+    "fixture_set": [
+      {
+        "id": "cfg-fixture-source",
+        "path": "tests/fixtures/cfg_fixture.c",
+        "license": "RDIS repository MIT license",
+        "sha256": "242c4bbcb9ba9641e826f04d5a4fa3d41e4c20e62eba9469bbd2420908023484",
+        "size_bytes": 566
+      },
+      {
+        "id": "arm64-branch-fixture",
+        "path": "tests/fixtures/arm64_branch_fixture.hex",
+        "license": "Hand-authored under RDIS MIT license; encodings referenced to Arm A-profile architecture manual",
+        "sha256": "d3385b3eecfb111332509618159db25e0559e733d525e94de1d535d69678a86e",
+        "size_bytes": 594
+      },
+      {
+        "id": "macos-arm64-system-ls",
+        "path": "/bin/ls",
+        "license": "Host-provided system executable, analyzed in place and not redistributed",
+        "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+        "size_bytes": 154352,
+        "platform": "macOS arm64"
+      }
+    ]
+  },
+  "constraints": {
+    "policy": "Consumer package ranges remain in pyproject.toml. Baseline CI installs use a shared constrained toolchain and explicit OS/Python overlays; every run also emits a redacted pip-freeze and its SHA-256.",
+    "files": [
+      {
+        "path": "constraints/baseline-ci.txt",
+        "sha256": "a7d98d79192afdd4fd22a8d4b5f7183c3bdfb293a953d5d1896f700959871051",
+        "size_bytes": 717
+      },
+      {
+        "path": "constraints/baseline-linux-py310.txt",
+        "sha256": "1ac0d66e6593d74d9894bc0ceaec9e91df27806cb4a2c62057ef1360c2719fb2",
+        "size_bytes": 326
+      },
+      {
+        "path": "constraints/baseline-linux-py312.txt",
+        "sha256": "c6c961d4249432a30fec9e53c5b45804c245280a17ce91aaebf3e5d802c87dc1",
+        "size_bytes": 298
+      },
+      {
+        "path": "constraints/baseline-macos-arm64-py312.txt",
+        "sha256": "a13e3f5965054d56490e09233f0836d1ba40090189fcd44a2843f77e1e660e85",
+        "size_bytes": 327
+      }
+    ]
+  },
+  "ci": {
+    "workflow_run_id": 39271318107,
+    "workflow_url": "https://github.com/sagarchive/rdis/actions/runs/39271318107",
+    "conclusion": "success",
+    "summary_semantics": "passed/skipped/failed counts are baseline corpus entries and runner commands, not test assertion counts.",
+    "profiles": [
+      {
+        "id": "portable-python-3.10",
+        "runner": "Linux x86_64 / CPython 3.10.22",
+        "status": "passed",
+        "counts": {
+          "passed": 11,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "6adaea66e5d3b489514109e482348a06103fd0692f75254b731e96ce44553009",
+        "pip_freeze_sha256": "136c3408476b3629c9f8180c37a82a34978817add980e7406054d99bc22bd937",
+        "artifact": {
+          "id": 12195432559,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12195432559"
+        }
+      },
+      {
+        "id": "portable-python-3.12",
+        "runner": "Linux x86_64 / CPython 3.12.15",
+        "status": "passed",
+        "counts": {
+          "passed": 11,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "63d23d82d58a1ba1e5834cc2e07e492adf2a1e7f0c1667b0f86d923eb126b46e",
+        "pip_freeze_sha256": "4c17f2c4e4fc6303c5f30e2d89cb7976f7e0df2178a393ea4e41d0b1d3e35730",
+        "artifact": {
+          "id": 12194853180,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12194853180"
+        }
+      },
+      {
+        "id": "macos-arm64-python-3.12",
+        "runner": "macOS 14.8.9 arm64 / CPython 3.12.10",
+        "status": "passed",
+        "counts": {
+          "passed": 14,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "dac9550177699e1807d83fcadde660b4288db76ac4c7f515a2e908cb20db4925",
+        "pip_freeze_sha256": "a1f57556f2a52dbf7a76d7431b08b7529a83dce611e4566cb59498005e2b8de2",
+        "artifact": {
+          "id": 12195103536,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12195103536"
+        }
+      }
+    ],
+    "browser_evidence": [
+      {
+        "browser": "Chromium",
+        "artifact_id": 12195482502,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12195482502"
+      },
+      {
+        "browser": "Firefox",
+        "artifact_id": 12194244197,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39271318107/artifacts/12194244197"
+      }
+    ]
+  },
+  "benchmark": {
+    "status": "measured smoke baseline; no pass/fail performance threshold",
+    "input": "macOS /bin/ls",
+    "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+    "size_bytes": 154352,
+    "arch": "arm64",
+    "repeats": 3,
+    "analysis_seconds": [
+      0.107589,
+      0.080348,
+      0.096471
+    ],
+    "min_seconds": 0.080348,
+    "median_seconds": 0.096471,
+    "max_seconds": 0.107589,
+    "functions": 42,
+    "basic_blocks": 918,
+    "sections": 11,
+    "strings": 99,
+    "peak_rss_bytes": 117882880,
+    "caveat": "Each repetition creates a fresh Program but OS page cache may be warm. This single executable is not a representative performance corpus and has no regression threshold."
+  },
+  "permanence": {
+    "raw_ci_artifacts": "Diagnostic artifacts have 30-day retention for baseline bundles; screenshots use 14 days. The JSON record is committed permanently; original full logs/manifests remain linked as run artifacts.",
+    "redistributable_binaries_committed": false,
+    "next_expansion": "Add independently truth-labelled ELF/PE/Mach-O/ARM64 real binaries and function/CFG ground truth under documented licenses; track function precision/recall and CFG edge F1 separately."
+  }
+}

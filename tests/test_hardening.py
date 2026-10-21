@@ -12,14 +12,16 @@ import unittest
 import zipfile
 import warnings
 from types import SimpleNamespace
+from contextlib import redirect_stdout
 from unittest import mock
 
 from rdis import containers, server as rdis_server
 from rdis.analysis import Program, _LayerXrefs
 from rdis.loader import Image, Section
 from rdis.wasm import WasmModule, _name, _uleb
-from rdis.render import _dot_label
-from rdis import mcp_server
+from rdis.render import _dot_label, callgraph
+from rdis.arch import CALL
+from rdis import mcp_server, console, render, __main__ as rdis_cli
 
 
 class ExportImportIdentityTests(unittest.TestCase):
@@ -730,8 +732,28 @@ class BrowserCFGSourceTests(unittest.TestCase):
         self.assertIn('Shift+wheel to pan', html)
         self.assertIn('new XMLSerializer().serializeToString(copy)', html)
         self.assertIn('const resolve = s => s.replace(/var\\(', html)
-        self.assertIn('aria-label="Fit graph to view"', html)
-        self.assertIn('role="region" aria-label="Control-flow graph.', html)
+        self.assertIn('aria-label="Fit all graph nodes to view"', html)
+        self.assertIn('id="zentry"', html)
+        self.assertIn('$("#zentry").onclick = () => showCFG(addr, detail, graphKind, {...graphOptions, layout: undefined})', html)
+        self.assertIn('const tailNames = [...new Set(edges', html)
+        self.assertIn('const context = [root, ...targets, ...sharedSuccessors, ...tailNodes]', html)
+        self.assertIn('Control-flow graph. Drag to pan', html)
+        self.assertIn('Call graph. Select a function', html)
+        self.assertIn('data-mode="callgraph"', html)
+        self.assertIn('async function showCallGraph(addr, options = {})', html)
+        self.assertIn('api("callgraph"', html)
+        self.assertIn('Math.max(0, ...fanout.values()) >= 7 ? "LR" : "TB"', html)
+        self.assertIn('id="glayout"', html)
+        self.assertIn('layout: layout === "LR" ? "TB" : "LR"', html)
+        self.assertIn('const tailNames = [...new Set(edges', html)
+        self.assertIn('const context = [root, ...targets, ...sharedSuccessors, ...tailNodes]', html)
+        self.assertIn('if (layout === "LR" && rootRect', html)
+
+        pages = (Path(__file__).resolve().parents[1] / "docs" / "index.html").read_text()
+        self.assertIn("<strong>Entry</strong>", pages)
+        self.assertIn("<strong>LR/TB</strong>", pages)
+        self.assertNotIn("use **Entry**", pages, "GitHub Pages is HTML; Markdown emphasis would display literal asterisks")
+        self.assertNotIn("use **LR/TB**", pages, "GitHub Pages is HTML; use strong tags for emphasis")
         self.assertIn('n.setAttribute("tabindex", "0")', html)
         self.assertIn('n.setAttribute("role", "button")', html)
         self.assertIn('.node:focus polygon, .node:focus path', html)
@@ -750,6 +772,237 @@ class RenderingSafetyTests(unittest.TestCase):
         self.assertIn("\\n", label)
         self.assertIn('\\"quoted\\"', label)
         self.assertIn("\\\\", label)
+
+
+
+class CallGraphTests(unittest.TestCase):
+    class FakeImage:
+        def __init__(self, functions):
+            self.imports = {0x9000: "puts"}
+            self.symbols = {}
+            self._functions = functions
+
+        def is_code(self, addr):
+            return addr in self._functions
+
+    class FakeArch:
+        def kind(self, insn):
+            return insn.kind
+
+        def target(self, insn):
+            return insn.target
+
+        def data_refs(self, insn, state):
+            return []
+
+    class FakeProgram:
+        def __init__(self, function_specs, xrefs, site_owners, names=None):
+            self.functions = {}
+            self.names = names or {}
+            self.xrefs = xrefs
+            self.site_owners = site_owners
+            self.arch = CallGraphTests.FakeArch()
+            self.image = None
+            for addr, spec in function_specs.items():
+                blocks = {}
+                for site, target, kind in spec.get("insns", []):
+                    insn = SimpleNamespace(address=site, target=target, kind=kind,
+                                           mnemonic="call", op_str=hex(target))
+                    blocks.setdefault(site, SimpleNamespace(addr=site, end=site + 1, insns=[])).insns.append(insn)
+                    self.site_owners[site] = addr
+                self.functions[addr] = SimpleNamespace(addr=addr, calls=set(spec.get("calls", ())), blocks=blocks)
+            self.image = CallGraphTests.FakeImage(self.functions)
+
+        def display(self, addr):
+            return self.names.get(addr, "")
+
+        def resolve(self, value):
+            if isinstance(value, int):
+                if value in self.functions or value in self.image.imports:
+                    return value
+                raise KeyError(f"unknown address: {value:#x}")
+            text = str(value)
+            try:
+                addr = int(text, 0)
+                if addr in self.functions or addr in self.image.imports:
+                    return addr
+            except ValueError:
+                pass
+            for addr, name in self.names.items():
+                if name == text:
+                    return addr
+            raise KeyError(f"unknown symbol: {text}")
+
+        def xrefs_to(self, addr):
+            return sorted(self.xrefs.get(addr, ()))
+
+        def function_at(self, addr):
+            owner = self.site_owners.get(addr)
+            return self.functions.get(owner)
+
+        def call_target(self, insn, regs=None):
+            return insn.target
+
+    @classmethod
+    def make_program(cls):
+        specs = {
+            0x1000: {"calls": {0x1000, 0x2000}, "insns": [
+                (0x1004, 0x2000, CALL), (0x1008, 0x1000, CALL), (0x100C, 0x9000, CALL)
+            ]},
+            0x2000: {"calls": set(), "insns": [(0x2004, 0x9000, CALL)]},
+            0x3000: {"calls": {0x1000}, "insns": [(0x3010, 0x1000, CALL)]},
+            0x4000: {"calls": {0x3000}, "insns": [(0x4010, 0x3000, CALL)]},
+        }
+        xrefs = {
+            0x1000: [(0x1008, "call"), (0x3010, "call")],
+            0x2000: [(0x1004, "call")],
+            0x3000: [(0x4010, "call")],
+            0x9000: [(0x100C, "call"), (0x2004, "call")],
+        }
+        return cls.FakeProgram(specs, xrefs, {})
+
+    def test_callgraph_has_addressed_callers_callees_imports_and_recursion(self):
+        prog = self.make_program()
+        result = callgraph(prog, prog.functions[0x1000], direction="both", depth=1)
+        self.assertEqual(result["addr"], "0x1000")
+        self.assertFalse(result["truncated"])
+        self.assertIn('digraph "callgraph"', result["dot"])
+        self.assertIn('"0x3000" -> "0x1000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x2000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x9000"', result["dot"])
+        self.assertIn('"0x1000" -> "0x1000"', result["dot"], "recursive edge should be preserved")
+        self.assertIn('class="cg-import"', result["dot"])
+        self.assertEqual(result["nodes"], 4)
+
+    def test_callgraph_depth_and_direction_limit_neighborhood(self):
+        prog = self.make_program()
+        callers = callgraph(prog, prog.functions[0x1000], direction="callers", depth=1)
+        self.assertIn('"0x3000" -> "0x1000"', callers["dot"])
+        self.assertNotIn('"0x1000" -> "0x2000"', callers["dot"])
+        self.assertNotIn('"0x1000" -> "0x9000"', callers["dot"])
+        self.assertNotIn('"0x4000" -> "0x3000"', callers["dot"])
+
+        deeper = callgraph(prog, prog.functions[0x1000], direction="callers", depth=2)
+        self.assertIn('"0x4000" -> "0x3000"', deeper["dot"])
+        self.assertEqual(deeper["depth"], 2)
+
+        callees = callgraph(prog, prog.functions[0x1000], direction="callees", depth=1)
+        self.assertIn('"0x1000" -> "0x2000"', callees["dot"])
+        self.assertNotIn('"0x3000" -> "0x1000"', callees["dot"])
+
+    def test_callgraph_bounds_large_neighborhood_and_reports_truncation(self):
+        specs = {0x1000: {"calls": set(range(0x2000, 0x2082)), "insns": []}}
+        for addr in range(0x2000, 0x2082):
+            specs[addr] = {"calls": set(), "insns": []}
+        prog = self.FakeProgram(specs, {}, {})
+        result = callgraph(prog, prog.functions[0x1000], direction="callees", depth=1)
+        self.assertEqual(result["nodes"], result["node_limit"])
+        self.assertLessEqual(result["edges"], result["edge_limit"])
+        self.assertTrue(result["truncated"])
+        self.assertLessEqual(result["nodes"], 120)
+
+    def test_callgraph_dot_escapes_untrusted_names_and_rejects_bad_controls(self):
+        prog = self.make_program()
+        prog.names[0x1000] = 'evil"\\n"; injected [shape=plaintext]'
+        result = callgraph(prog, prog.functions[0x1000])
+        self.assertIn('id="cg_function_1000"', result["dot"])
+        self.assertNotIn('evil"\\n"; injected [shape=plaintext]', result["dot"])
+        self.assertIn(chr(92) + '"', result["dot"])
+
+    def test_callgraph_api_validates_direction_and_depth(self):
+        from rdis.server import _api_doc
+
+        prog = self.make_program()
+        query = {"func": ["0x1000"], "direction": ["callees"], "depth": ["2"]}
+        arg = lambda key, default=None: query.get(key, [default])[0]
+        with mock.patch("rdis.server._func", return_value=prog.functions[0x1000]) as lookup:
+            result = _api_doc("callgraph", query, arg, prog)
+            self.assertEqual(result["direction"], "callees")
+            self.assertEqual(result["depth"], 2)
+            lookup.assert_called_once()
+
+        # Bad arguments must be rejected before function resolution. This prevents an invalid
+        # function id or other lookup error from masking the request-validation response.
+        for bad in ({"func": ["0x1000"], "direction": ["up"]},
+                    {"func": ["0x1000"], "depth": ["9"]},
+                    {"func": ["0x1000"], "depth": ["not-a-number"]},
+                    {"direction": ["up"]}):
+            bad_arg = lambda key, default=None, q=bad: q.get(key, [default])[0]
+            with self.subTest(query=bad), mock.patch(
+                "rdis.server._func", side_effect=AssertionError("lookup should not happen before validation")
+            ), self.assertRaises(ValueError):
+                _api_doc("callgraph", bad, bad_arg, prog)
+
+
+class CallGraphSurfaceTests(unittest.TestCase):
+    def setUp(self):
+        self.prog = CallGraphTests.make_program()
+
+    def test_console_callgraph_returns_dot_and_summary(self):
+        result = console.run(self.prog, "callgraph 0x1000 callers 2")
+        self.assertIn('digraph "callgraph"', result["output"])
+        self.assertEqual(result["goto"], "0x1000")
+        self.assertEqual(result["nodes"], 3)
+        self.assertEqual(result["summary"], "callers, depth 2: 3 nodes, 3 edges")
+        self.assertTrue(result["output"].endswith("}"))
+
+    def test_console_callgraph_rejects_bad_direction_depth_and_extra_args(self):
+        for line, expected in (
+            ("callgraph 0x1000 upward", "direction must be one of"),
+            ("callgraph 0x1000 both 0", "depth must be from 1 to 4"),
+            ("callgraph 0x1000 both nope", "depth must be an integer"),
+            ("callgraph 0x1000 both 1 extra", "usage: callgraph"),
+        ):
+            with self.subTest(line=line):
+                self.assertIn(expected, console.run(self.prog, line)["output"])
+
+    def test_cli_callgraph_outputs_dot_and_json_metadata(self):
+        with mock.patch.object(rdis_cli.containers, "slices", return_value=[]), \
+             mock.patch.object(rdis_cli, "build", return_value=self.prog):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rdis_cli.main(["fixture.bin", "-f", "0x1000", "--callgraph",
+                               "--callgraph-direction", "callees", "--callgraph-depth", "2"])
+            self.assertIn('digraph "callgraph"', output.getvalue())
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rdis_cli.main(["fixture.bin", "-f", "0x1000", "--callgraph", "--json"])
+            data = json.loads(output.getvalue())
+            self.assertEqual(data["direction"], "both")
+            self.assertEqual(data["depth"], 1)
+            self.assertIn('digraph "callgraph"', data["dot"])
+            self.assertIn("node_limit", data)
+
+    def test_mcp_callgraph_returns_bounded_structured_graph(self):
+        with mock.patch.object(mcp_server, "_prog", return_value=self.prog) as load:
+            result = mcp_server.t_callgraph("fixture.bin", "0x1000", direction="callers", depth=2)
+        load.assert_called_once_with("fixture.bin", None)
+        self.assertIn('digraph "callgraph"', result["dot"])
+        self.assertEqual(result["direction"], "callers")
+        self.assertEqual(result["depth"], 2)
+        self.assertEqual(result["node_limit"], render.CALLGRAPH_MAX_NODES)
+        self.assertIn("callgraph", mcp_server.TOOLS)
+        listed = mcp_server._handle({"method": "tools/list", "params": {}})
+        tool = next(t for t in listed["tools"] if t["name"] == "callgraph")
+        self.assertEqual(tool["inputSchema"]["properties"]["direction"]["type"], "string")
+        self.assertEqual(tool["inputSchema"]["properties"]["depth"]["type"], "integer")
+        with mock.patch.object(mcp_server, "_prog", return_value=self.prog):
+            response = mcp_server._handle({"method": "tools/call", "params": {
+                "name": "callgraph", "arguments": {
+                    "path": "fixture.bin", "func": "0x1000", "direction": "callees", "depth": 2
+                }
+            }})
+        rpc_result = json.loads(response["content"][0]["text"])
+        self.assertIn('digraph "callgraph"', rpc_result["dot"])
+        self.assertEqual(rpc_result["direction"], "callees")
+
+    def test_mcp_callgraph_rejects_bad_arguments_before_loading_binary(self):
+        for args in ({"direction": "up"}, {"depth": 0}, {"depth": 5}, {"depth": "bad"}, {"depth": True}):
+            with self.subTest(args=args), mock.patch.object(
+                mcp_server, "_prog", side_effect=AssertionError("binary must not be loaded")
+            ), self.assertRaises(ValueError):
+                mcp_server.t_callgraph("missing.bin", "0x1000", **args)
 
 
 if __name__ == "__main__":

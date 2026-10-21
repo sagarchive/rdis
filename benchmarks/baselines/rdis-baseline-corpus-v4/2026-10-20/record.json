@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "baseline_id": "rdis-baseline-corpus-v4/2026-10-20",
+  "promoted_at_utc": "2026-10-20T10:55:01Z",
+  "purpose": "Permanent, license-safe baseline record for the v4 corpus. The new v4 truth slice independently checks a 12-case optimized x86-64 PIE relative-offset jump table against decoded GNU objdump instructions and signed .rodata offsets. This is a small correctness baseline, not an exhaustive architecture or performance scorecard.",
+  "source": {
+    "repository": "https://github.com/sagarchive/rdis",
+    "pull_request": 5,
+    "pr_head_sha": "987ad310f7784826ad198d238fc9ea2682865fa6",
+    "base_main_sha": "96b931d32c807c5430518be6c280c98fb995ebb2",
+    "tested_merge_checkout_sha": "29fdc234129abccfa95aeeef8f99eb6e07d8e554",
+    "commit_scope": "Version baseline corpus v4, add an optimized relative-offset x86-64 PIE switch fixture and independent jump-table CFG oracle, record exact precision/recall/F1 results, and retain the checked-in corpus and current CI environment evidence."
+  },
+  "corpus": {
+    "id": "rdis-baseline-corpus-v4",
+    "schema_version": 1,
+    "manifest_path": "benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/manifest.json",
+    "manifest_sha256": "09ed2a43797cb0f2e97067d079e4af0510efe2850acea899b6c3b81010df9970",
+    "truth_results_path": "benchmarks/baselines/rdis-baseline-corpus-v4/2026-10-20/truth-results.json",
+    "fixture_set": [
+      {
+        "id": "cfg-fixture-source",
+        "path": "tests/fixtures/cfg_fixture.c",
+        "license": "RDIS repository MIT license",
+        "sha256": "242c4bbcb9ba9641e826f04d5a4fa3d41e4c20e62eba9469bbd2420908023484",
+        "size_bytes": 566
+      },
+      {
+        "id": "arm64-branch-fixture",
+        "path": "tests/fixtures/arm64_branch_fixture.hex",
+        "license": "Hand-authored fixture under RDIS repository MIT license; instruction encoding references the Arm A-profile Architecture Reference Manual",
+        "sha256": "d3385b3eecfb111332509618159db25e0559e733d525e94de1d535d69678a86e",
+        "size_bytes": 594
+      },
+      {
+        "id": "x86-64-loop-fixture",
+        "path": "tests/fixtures/x86_64_loop_fixture.hex",
+        "license": "Hand-authored fixture under RDIS repository MIT license",
+        "sha256": "43d671bb02661e2106e8f8b5cd5edec942880276a4407033e401263cb49c0504",
+        "size_bytes": 402
+      },
+      {
+        "id": "function-discovery-fixture-source",
+        "path": "tests/fixtures/function_discovery_fixture.c",
+        "license": "RDIS repository MIT license",
+        "sha256": "9a8d6a151c6b545453ab75f1f293e613dfbd6338eb8e1334d429b2231d61417f",
+        "size_bytes": 1469
+      },
+      {
+        "id": "optimized-relative-jump-table-fixture-source",
+        "path": "tests/fixtures/switch_jump_table_fixture.c",
+        "license": "RDIS repository MIT license",
+        "sha256": "41f7b597314498d6de3586e6e0625d37f333a0f366e0143e140d7bb3a1deef84",
+        "size_bytes": 1255
+      },
+      {
+        "id": "macos-arm64-system-ls",
+        "path": "/bin/ls",
+        "license": "GitHub-hosted macOS runner binary; analyzed in place, never redistributed",
+        "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+        "size_bytes": 154352,
+        "platform": "macOS arm64"
+      }
+    ]
+  },
+  "constraints": {
+    "policy": "Consumer package ranges remain in pyproject.toml. Reproducible baseline jobs use reviewed shared and OS/Python-specific constraints. Each CI job emits a redacted environment manifest and pip-freeze SHA-256.",
+    "files": [
+      {
+        "path": "constraints/baseline-ci.txt",
+        "sha256": "a7d98d79192afdd4fd22a8d4b5f7183c3bdfb293a953d5d1896f700959871051",
+        "size_bytes": 717
+      },
+      {
+        "path": "constraints/baseline-linux-py310.txt",
+        "sha256": "1ac0d66e6593d74d9894bc0ceaec9e91df27806cb4a2c62057ef1360c2719fb2",
+        "size_bytes": 326
+      },
+      {
+        "path": "constraints/baseline-linux-py312.txt",
+        "sha256": "c6c961d4249432a30fec9e53c5b45804c245280a17ce91aaebf3e5d802c87dc1",
+        "size_bytes": 298
+      },
+      {
+        "path": "constraints/baseline-macos-arm64-py312.txt",
+        "sha256": "a13e3f5965054d56490e09233f0836d1ba40090189fcd44a2843f77e1e660e85",
+        "size_bytes": 327
+      }
+    ]
+  },
+  "ci": {
+    "workflow_run_id": 39411079671,
+    "workflow_url": "https://github.com/sagarchive/rdis/actions/runs/39411079671",
+    "conclusion": "success",
+    "tested_head_sha": "987ad310f7784826ad198d238fc9ea2682865fa6",
+    "tested_merge_checkout_sha": "29fdc234129abccfa95aeeef8f99eb6e07d8e554",
+    "summary_semantics": "Passed/skipped/failed counts below are baseline corpus entries and runner commands, not total test assertions.",
+    "profiles": [
+      {
+        "id": "portable-python-3.10",
+        "runner": "Linux x86_64 / CPython 3.10.22",
+        "status": "passed",
+        "counts": {
+          "passed": 15,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "35b34c7c6a342408100775cdbf7569baa83403629a7d0672fad1ef015ab7036b",
+        "pip_freeze_sha256": "2bacb6482dfb5121d5bd34d748b9b6da245bd5262c1d89ce57925c694dd859eb",
+        "artifact": {
+          "id": 12258983927,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258983927"
+        }
+      },
+      {
+        "id": "portable-python-3.12",
+        "runner": "Linux x86_64 / CPython 3.12.15",
+        "status": "passed",
+        "counts": {
+          "passed": 15,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "73f4d9446dbd008c42e847cb45ccf078f0d7623da5a2114910ab3c156313c74f",
+        "pip_freeze_sha256": "1b417f297af69418bc1f39f9771988ff62cf7730a3963c7e695cb74f7d24a2d5",
+        "artifact": {
+          "id": 12258424366,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258424366"
+        }
+      },
+      {
+        "id": "macos-arm64-python-3.12",
+        "runner": "macOS 14.8.9 arm64 / CPython 3.12.10",
+        "status": "passed",
+        "counts": {
+          "passed": 18,
+          "skipped": 1,
+          "failed": 0
+        },
+        "environment_manifest_sha256": "21d3079f66a2bd7da4b834ca1a06f6fbd3e278c61a80e0be8bfe727e9ffc1e0b",
+        "pip_freeze_sha256": "391a8566f2c48307c14e753c69251baccf5b66b66f70d656984a77ea623d658e",
+        "artifact": {
+          "id": 12259232225,
+          "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12259232225"
+        }
+      }
+    ],
+    "browser_evidence": [
+      {
+        "browser": "Chromium",
+        "artifact_id": 12259366799,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12259366799"
+      },
+      {
+        "browser": "Firefox",
+        "artifact_id": 12258899242,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258899242"
+      }
+    ],
+    "graph_screenshots": [
+      {
+        "browser": "Chromium",
+        "artifact_id": 12259162184,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12259162184"
+      },
+      {
+        "browser": "Firefox",
+        "artifact_id": 12258569410,
+        "url": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258569410"
+      }
+    ]
+  },
+  "benchmark": {
+    "status": "measured smoke baseline; no pass/fail performance threshold",
+    "input": "macOS /bin/ls",
+    "sha256": "5a83882945a6d212134c6f417b2af54e90dfdb53e589e99c5bc2deae5c68673b",
+    "size_bytes": 154352,
+    "arch": "arm64",
+    "repeats": 3,
+    "analysis_seconds": [
+      0.066331,
+      0.070434,
+      0.093471
+    ],
+    "min_seconds": 0.066331,
+    "median_seconds": 0.070434,
+    "max_seconds": 0.093471,
+    "functions": 42,
+    "basic_blocks": 918,
+    "sections": 11,
+    "strings": 99,
+    "peak_rss_bytes": 112017408,
+    "caveat": "Each repetition creates a fresh Program but OS page cache may be warm. This is one small executable and has no performance regression threshold; do not treat it as a representative speedup claim."
+  },
+  "permanence": {
+    "raw_ci_artifacts": "Baseline bundles retain diagnostic artifacts for 30 days; browser screenshots use 14-day retention. This record, the corpus manifest snapshot, and truth-results.json are committed permanently.",
+    "redistributable_binaries_committed": false,
+    "next_expansion": "Add independent unresolved indirect-flow controls, a second jump-table encoding/architecture, and broader labeled ELF/PE/Mach-O fixtures. Keep function discovery precision/recall and CFG edge F1 separate."
+  }
+}

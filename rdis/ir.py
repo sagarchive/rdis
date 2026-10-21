@@ -141,6 +141,10 @@ def mk(op, a, b, size):
         if op in ("INT_ADD", "INT_SUB") and a[0] == "op" and a[1] in ("+", "-") and a[3][0] == "c":
             k = _signed(a[3][1], a[3][2]) * (1 if a[1] == "+" else -1) + (bv if op == "INT_ADD" else -bv)
             return mk("INT_ADD", a[2], ("c", _mask(k, size), size), size)
+        if op == "INT_AND" and bv == 1 and a[0] == "op" and a[1] in (">>", "|"):    # one bit of a flag word
+            bit = _bit(a[2], a[3][1]) if a[1] == ">>" and a[3][0] == "c" else _bit(a, 0) if a[1] == "|" else None
+            if bit is not None and bit[0] != "c":
+                return bit
         if op in ("INT_EQUAL", "INT_NOTEQUAL") and bv == 0:
             if a[0] == "op" and a[1] == "-":              # (x - y) == 0  ->  x == y
                 return ("op", "==" if op == "INT_EQUAL" else "!=", a[2], a[3], 1)
@@ -160,6 +164,28 @@ def mk(op, a, b, size):
     if op in ("BOOL_AND", "BOOL_OR") and a[0] == "c":
         return b if (a[1] != 0) == (op == "BOOL_AND") else a
     return ("op", c, a, b, 1 if c in _CMP or c in ("&&", "||") else size)
+
+
+def _bit(e, k):
+    """Bit `k` of `e` when `e` is a condition-code word: an OR of booleans, each shifted to its own
+    bit (`(a<0)<<3 | (a==0)<<1 | so&1`, how PowerPC CR fields and MSP430's SR are written). Returns the
+    boolean expression, ("c", 0, 1) for a bit nothing sets, or None when `e` is anything else, so
+    arithmetic that merely looks similar is never rewritten."""
+    while e[0] == "cast" and _size(e[2]) >= 1:
+        e = e[2]
+    if e[0] == "op" and e[1] == "|":
+        lo, hi = _bit(e[2], k), _bit(e[3], k)
+        if lo is None or hi is None:
+            return None
+        zero = lambda x: x[0] == "c" and x[1] == 0
+        return hi if zero(lo) else lo if zero(hi) else None      # two terms on one bit: not a flag word
+    if e[0] == "op" and e[1] == "<<" and e[3][0] == "c" and (_is_cmp(e[2]) or _size(e[2]) == 1):
+        return e[2] if e[3][1] == k else ("c", 0, 1)
+    if e[0] == "op" and e[1] == "&" and e[3][0] == "c" and e[3][1] == 1:
+        return e if k == 0 else ("c", 0, 1)
+    if _is_cmp(e):
+        return e if k == 0 else ("c", 0, 1)
+    return None
 
 
 def mkcast(ctype, a, size):
@@ -249,6 +275,8 @@ class IRLifter:
 
     def __init__(self, prog):
         self.prog, self.arch = prog, prog.arch
+        sp = getattr(self.arch, "lang", None) and self.arch.sp      # only SleighArch carries `lang`
+        self._sp_alias = sp.lower() if sp and sp.lower() != "sp" else None
         self.front = ir_front.frontend(self.arch)
         self.w = self.arch.bits // 8
         self._pcode = {}            # (addr, thumb) -> (ops, covered)
@@ -295,7 +323,8 @@ class IRLifter:
         return self._pcode[key]
 
     def _canon(self, r):
-        return r.lower().lstrip("$")
+        r = r.lower().lstrip("$")
+        return "sp" if r == self._sp_alias else r      # SLEIGH CPUs name the stack pointer r1, a7, R10...
 
     def _rw(self, i):
         rd, wr = set(), set()
@@ -398,6 +427,8 @@ class IRLifter:
 
     def _variadic(self, f):
         """A variadic prologue spills the last argument register into the va save area."""
+        if not self.arch.args:                          # stack-only ABI (m68k): nothing to spill
+            return False
         last = self._canon(self.arch.args[-1])
         from .arch import mem_operand
         for i in f.blocks[f.addr].insns:
@@ -569,6 +600,9 @@ class IRLifter:
             return ("c", self.func.addr, self.w)   # o32/n64 PIC: $t9 holds the callee's own address
         if r == "sp":
             return ("sp", self._cur_sp)
+        pinned = getattr(self.arch, "tracked", None)    # the spec pins some registers for the decompiler
+        if pinned and r in pinned:
+            return ("c", pinned[r], size)
         name = (self.entry_names or {}).get(self._cur, {}).get(r, r)
         return ("v", name, size)
 

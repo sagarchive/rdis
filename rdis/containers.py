@@ -4,10 +4,17 @@ Shared by the loader dialogs (server) and the CLI (`rdis app.apk`, `rdis app.apk
 `slices(path)` is the loader-choice list; every archive/DMG row carries an `entry` naming the
 member. `_extract` pulls one member into a content-addressed cache file.
 """
+import errno
+import functools
 import hashlib
+import lzma
 import os
 import shutil
+import struct
+import tarfile
 import threading
+import zipfile
+import zlib
 
 import lief
 
@@ -223,6 +230,27 @@ def _tar_extract(path, entry, cache_dir, max_mb, max_total_mb=None):
     return out
 
 
+_FORMAT_ERRORS = (zipfile.BadZipFile, tarfile.TarError, zlib.error, lzma.LZMAError, EOFError, UnicodeError,
+                  struct.error, NotImplementedError)
+
+
+def _malformed(fn):
+    """Report a corrupt archive as ValueError. Real I/O failures (missing file, permissions) keep their type;
+    gzip and bz2 signal corrupt data with an OSError that carries no errno."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except _FORMAT_ERRORS as e:
+            raise ValueError(f"malformed archive: {e}") from e
+        except OSError as e:
+            if e.errno in (None, errno.EINVAL):
+                raise ValueError(f"malformed archive: {e}") from e
+            raise
+    return wrapper
+
+
+@_malformed
 def slices(path):
     """Loader choices for a file. For a native binary: its slices. For an archive
     (APK/AAR/JAR/IPA/ZIP): the native libraries it contains, each openable on its own."""
@@ -373,9 +401,11 @@ def _arch_of(b):
     try:
         return _arch_name(b)
     except KeyError:
-        return b.header.cpu_type.__name__.lower()
+        cpu = b.header.cpu_type
+        return getattr(cpu, "__name__", f"cpu{int(cpu)}").lower()
 
 
+@_malformed
 def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=None):
     """Extract one archive member to a content-addressed cache file; return its path. Guards against
     zip-slip and zip bombs (size cap). Handles both ZIP-family archives and DMG disk images."""
@@ -423,6 +453,7 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=Non
     return out
 
 
+@_malformed
 def find_entry(path, want):
     """Resolve a user-typed `-l` selector to an archive entry: exact match, else a unique
     substring/suffix match (`-l libfoo.so` finds `lib/arm64-v8a/libfoo.so`)."""

@@ -189,6 +189,7 @@ button:focus-visible,.tab .x:focus-visible{outline:2px solid var(--accent);outli
 #ghud{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:1px;background:var(--panel);
   border:1px solid var(--line);border-radius:8px;padding:2px;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:5}
 #ghud .z{font:600 11px var(--mono);color:var(--dim);min-width:44px;text-align:center;user-select:none}
+#ghud select{height:26px;padding:3px 5px;max-width:108px;font-size:11px;border-radius:5px}
 #glegend{position:absolute;bottom:10px;right:12px;display:flex;gap:12px;background:var(--panel);
   border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:10.5px var(--mono);color:var(--dim);z-index:4}
 #glegend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
@@ -375,6 +376,7 @@ table.keys td:first-child{width:130px;color:var(--dim)}
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h9M2 6.5h9M2 10h6"/></svg>Asm</button>
       <button data-mode="cfg" title="Control-flow graph — 2 · Space">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="1" width="5" height="3" rx=".8"/><rect x="1" y="9" width="4.5" height="3" rx=".8"/><rect x="7.5" y="9" width="4.5" height="3" rx=".8"/><path d="M6.5 4v2.5M3.2 9V6.5h6.6V9"/></svg>Graph</button>
+      <button data-mode="callgraph" title="Interprocedural caller/callee graph — 5">Calls</button>
       <button data-mode="pseudo" title="Pseudo-code — 3">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4.5 3 2 6.5l2.5 3.5M8.5 3 11 6.5 8.5 10"/></svg>Pseudo</button>
       <button data-mode="hex" title="Hex — 4">
@@ -497,7 +499,7 @@ const human = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ?
 const S = { info: null, tab: "labels", mode: "listing", lists: {}, counts: {}, cur: null, sel: null, hist: [], hpos: -1,
             procByName: new Map(), procs: new Set(), hexOffsets: store.get("hexoff", false), bytes: store.get("bytes", false),
             cmdHist: [], cmdPos: 0, viz: null, fn: null };
-const MODE_LABEL = {listing: "ASM", cfg: "GRAPH", pseudo: "PSEUDO", hex: "HEX"};
+const MODE_LABEL = {listing: "ASM", cfg: "GRAPH", callgraph: "CALLS", pseudo: "PSEUDO", hex: "HEX"};
 
 /* ─────────────── console ─────────────── */
 function log(msg, cls) {
@@ -687,7 +689,19 @@ function loaderDialog(src) {
   };
 }
 function closeOverlay() { $("#overlay").classList.remove("show"); }
-function busy(on, text) { if (text) $("#busytext").textContent = text; $("#busy").classList.toggle("show", on); }
+let busyPoll = null;
+function busy(on, text) {
+  if (text) $("#busytext").textContent = text;
+  $("#busy").classList.toggle("show", on);
+  clearInterval(busyPoll); busyPoll = null;
+  if (!on || !/^Analyzing|^Loading/.test(text || "")) return;
+  // a big binary takes minutes: show what the analysis is doing rather than a bare spinner
+  busyPoll = setInterval(async () => {
+    try { const r = (await api("progress")).running[0]; if (!r || !busyPoll) return;
+          $("#busytext").textContent = `${text.replace(/…$/, "")} — ${r.phase}, ` +
+            `${r.functions.toLocaleString()} functions, ${r.percent}% of code`; } catch {}
+  }, 1000);
+}
 
 /* drag & drop anywhere */
 let dragDepth = 0;
@@ -761,6 +775,7 @@ async function show() {
     if (S.mode === "hex") await showHex(S.sel);
     else if (S.mode === "pseudo") await showPseudo(S.sel);
     else if (S.mode === "cfg") await showCFG(S.sel);
+    else if (S.mode === "callgraph") await showCallGraph(S.sel);
     else await showListing(S.sel);
   } catch (e) {
     let err = e;
@@ -891,42 +906,71 @@ async function showPseudo(addr) {
 function showDecl(it) { pseudoView(it.decl, it.name, ""); $("#crMode").textContent = "TYPE"; empty(false); }
 
 /* ─────────────── CFG (graph view) ─────────────── */
-async function showCFG(addr, detail = false) {
-  const d = await api("cfg", {func: addr, detail: detail ? "1" : "0"});
+async function showCFG(addr, detail = false, graphKind = "cfg", graphOptions = {}) {
+  const d = graphKind === "callgraph"
+    ? await api("callgraph", {func: addr, direction: graphOptions.direction || "both", depth: String(graphOptions.depth || 1)})
+    : await api("cfg", {func: addr, detail: detail ? "1" : "0"});
+  // Very broad switch/fan-out CFGs read better left-to-right: the destinations form a vertical
+  // column instead of an extremely wide row whose ends must be clipped at readable zoom. Keep a
+  // visible orientation toggle so this is a reversible layout choice, not a hidden transformation.
+  const fanout = new Map();
+  for (const line of (d.dot || "").split(/\r?\n/)) {
+    const edge = line.match(/^\s*"?([^"\s]+)"?\s*->\s*"?([^"\s]+)"?/);
+    if (edge) fanout.set(edge[1], (fanout.get(edge[1]) || 0) + 1);
+  }
+  const inferredLayout = graphKind === "callgraph" ? "LR" :
+    Math.max(0, ...fanout.values()) >= 7 ? "LR" : "TB";
+  const layout = graphOptions.layout === "TB" || graphOptions.layout === "LR"
+    ? graphOptions.layout : inferredLayout;
+  const renderedDot = d.dot
+    ? d.dot.replace(/(graph\s*\[[^\]]*?\brankdir\s*=\s*)(TB|LR)/i, (_match, prefix) => prefix + layout)
+    : d.dot;
   const v = $("#view");
-  v.innerHTML = `<div id="graph" role="region" aria-label="Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."><div id="ghud">
+  v.innerHTML = `<div id="graph" role="region" aria-label="${graphKind === "callgraph" ? "Call graph. Select a function, double-click to open it, and use direction/depth controls to explore callers and callees." : "Control-flow graph. Drag to pan, scroll to zoom, and use keyboard focus to inspect blocks."}"><div id="ghud">
       <button class="ib" id="zin" aria-label="Zoom in" title="Zoom in">＋</button>
       <button class="ib" id="zout" aria-label="Zoom out" title="Zoom out">－</button>
       <span class="z" id="zval">100%</span>
-      <button class="ib" id="zfit" aria-label="Fit graph to view" title="Zoom to fit">⤢</button>
+      <button class="ib" id="zfit" aria-label="Fit all graph nodes to view" title="Fit all nodes; labels on very large graphs may become small">⤢</button>
+      ${graphKind === "callgraph" ? "" : '<button class="lbtn" id="zentry" aria-label="Readable entry view" title="Return to a readable entry-focused view on very large graphs">Entry</button>'}
+      <button class="lbtn" id="glayout" data-layout="${layout}" aria-pressed="${layout === "LR"}" aria-label="Switch graph layout direction" title="Switch to ${layout === "LR" ? "top-down" : "left-to-right"} layout">${layout === "LR" ? "LR ↔" : "TB ↕"}</button>
       <button class="ib" id="z100" aria-label="Reset zoom to 100 percent" title="Reset to 100%">1:1</button>
-      <button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>
+      ${graphKind === "callgraph"
+        ? `<select id="cgDirection" aria-label="Call graph direction" title="Explore callers, callees, or both"><option value="both">Both</option><option value="callers">Callers</option><option value="callees">Callees</option></select><select id="cgDepth" aria-label="Call graph depth" title="Neighborhood depth"><option value="1">Depth 1</option><option value="2">Depth 2</option><option value="3">Depth 3</option><option value="4">Depth 4</option></select>`
+        : `<button class="ib" id="gdetail" title="Toggle instruction detail in graph">Detail</button>`}
       <button class="ib" id="zsvg" aria-label="Download graph as SVG" title="Download SVG">⤓</button>
     </div>
-    <div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>
+    ${graphKind === "callgraph"
+      ? `<div id="glegend"><span><i style="background:var(--accent)"></i>selected function</span><span><i style="background:var(--g-flow)"></i>function call</span><span><i style="background:var(--warn)"></i>import / external</span></div>`
+      : `<div id="glegend"><span><i style="background:var(--ok)"></i>T taken</span><span><i style="background:var(--err)"></i>F not taken</span><span><i style="background:var(--g-flow)"></i>flow</span><span><i style="background:var(--g-edge)"></i>unresolved</span></div>`}
     <div id="gminimap" role="region" aria-label="Graph minimap. Click to recenter the main graph." title="Minimap — click to recenter" style="display:none"></div>
   </div>`;
   const g = $("#graph");
-  if (!d.dot) {  // WebAssembly: no CFG yet
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">// WebAssembly is a stack machine — pseudo-code and CFG are not available.<br>// Use the Assembly view for the disassembled module.</div>`);
+  if (!d.dot) {
+    const note = d.note || "This graph is not available for the current binary or analysis mode.";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">// ${esc(note)}</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
   if (typeof Viz === "undefined") {
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">CFG renderer could not load (offline?) — use <b>cfg&nbsp;NAME</b> in the console or the MCP server for DOT output.</div>`);
+    const command = graphKind === "callgraph" ? "callgraph NAME" : "cfg NAME";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Graph renderer could not load (offline?) — use <b>${command}</b> in the console or the MCP server for DOT output.</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
-  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing</div>`);
+  const graphHint = graphKind === "callgraph"
+    ? `caller/callee graph · ${d.nodes} nodes · ${d.edges} edges · double-click a function to open listing${d.truncated ? " · resource cap reached; narrow direction/depth" : ""}`
+    : "drag to pan · wheel to zoom · Shift+wheel to pan · double-click a node for listing";
+  g.insertAdjacentHTML("beforeend", `<div style="position:absolute;left:14px;top:12px;color:var(--faint);font:11px var(--mono);cursor:default">${esc(graphHint)}</div>`);
   let svg;
   try {
     S.viz = S.viz || await Viz.instance();
-    svg = S.viz.renderSVGElement(d.dot);
+    svg = S.viz.renderSVGElement(renderedDot);
     themeGraph(svg);
   } catch (err) {
     // render failures must surface here, not fall through to show()'s hex fallback (which made the
     // CFG look "broken" by silently showing bytes). Keep the user in graph mode with a real message.
-    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Could not render this graph: ${esc(err.message || err)}.<br>The DOT is still available via <b>cfg&nbsp;NAME</b> in the console or the MCP server.</div>`);
+    const command = graphKind === "callgraph" ? "callgraph NAME" : "cfg NAME";
+    g.insertAdjacentHTML("beforeend", `<div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font:12.5px var(--mono);padding:40px;text-align:center;cursor:default">Could not render this graph: ${esc(err.message || err)}.<br>The DOT is still available via <b>${command}</b> in the console or the MCP server.</div>`);
     crumbs(d.name, d.addr, "");
     return;
   }
@@ -960,7 +1004,9 @@ async function showCFG(addr, detail = false) {
       }
     });
   });
-  crumbs(d.name, d.addr, "drag to pan · wheel to zoom");
+  crumbs(d.name, d.addr, graphKind === "callgraph"
+    ? `${d.direction} · depth ${d.depth}${d.truncated ? " · truncated" : ""} · ${layout}`
+    : `drag to pan · wheel to zoom · ${layout}`);
 
   let scale = 1, tx = 0, ty = 0;
   const miniHost = $("#gminimap");
@@ -1092,16 +1138,21 @@ async function showCFG(addr, detail = false) {
       if (retry) requestAnimationFrame(() => fit(false));
       return;
     }
-    const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
+    // The graph toolbar overlays the top of the canvas and the edge legend overlays the bottom.
+    // Reserve both areas during fitting; otherwise a valid bounding box can still hide the entry
+    // block behind controls even though the graph fits the outer viewport dimensions.
+    const topPad = 58, bottomPad = 48;
+    const availW = Math.max(80, g.clientWidth - 64);
+    const availH = Math.max(80, g.clientHeight - topPad - bottomPad);
     scale = Math.max(0.005, Math.min(availW / rect.width, availH / rect.height, 1.25));
     tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
-    ty = (g.clientHeight - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
+    ty = topPad + (availH - rect.height * scale) / 2 - (rect.top - viewport.top) * scale;
     apply();
   };
   const fitInitial = (retry = true) => {
-    // A fit-all overview is useful for short functions, but makes long linear/chain-like CFGs
-    // unreadable (e.g. a 50-block function becomes a thin strip). Start those at a readable scale
-    // near the entry block; the minimap navigates the rest and the explicit Fit control still fits all.
+    // Fit-all is useful for short functions but makes long chains unreadable. For horizontal
+    // layouts, keep the root and a useful first-level neighborhood in view; the minimap navigates
+    // the rest and explicit Fit shows the entire graph.
     svg.style.transform = "none";
     let rect, viewport;
     try { rect = graphTarget.getBoundingClientRect(); viewport = g.getBoundingClientRect(); } catch { rect = viewport = null; }
@@ -1112,15 +1163,101 @@ async function showCFG(addr, detail = false) {
     const availW = Math.max(80, g.clientWidth - 64), availH = Math.max(80, g.clientHeight - 76);
     const tallAndNarrow = rect.height > availH * 1.15 && rect.width < availW * 0.8;
     const tooWide = rect.width > availW * 1.15;
+
+    // Small caller/callee neighborhoods should open as complete diagrams. Centering only the root
+    // is useful when traversing a large interprocedural graph, but on a four-node graph it can put
+    // the outgoing targets beyond the viewport and make the graph look broken. Fit the whole
+    // neighborhood up to a bounded node count; retain focus-first navigation for larger graphs.
+    const callGraphNodeCount = svg.querySelectorAll("g.node").length;
+    if (graphKind === "callgraph" && callGraphNodeCount <= 12) return fit();
+
+    const root = svg.querySelector(graphKind === "callgraph" ? "g.node.cg-root" : "g.node.entry") ||
+      [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === String(addr)) ||
+      svg.querySelector("g.node");
+    const rootRect = root?.getBoundingClientRect();
+    if (layout === "LR" && rootRect && rootRect.width && rootRect.height) {
+      if (graphKind === "callgraph") {
+        // Center the selected function so incoming and outgoing call edges can be explored on
+        // either side, instead of forcing a caller/callee graph to begin at the far-left edge.
+        scale = Math.min(1, availW / Math.max(rootRect.width + 120, 1));
+        tx = (g.clientWidth - rootRect.width * scale) / 2 -
+          (rootRect.left - viewport.left) * scale;
+        ty = (g.clientHeight - rootRect.height * scale) / 2 -
+          (rootRect.top - viewport.top) * scale;
+      } else {
+        // Fit the entry and its first-level destinations, not the entire graph. That is exactly the
+        // visible neighborhood that was getting clipped by the old wide top-down switch layout.
+        const rootTitle = root.querySelector(":scope > title")?.textContent?.trim() ||
+          root.querySelector("title")?.textContent?.trim() || "";
+        const edges = [];
+        for (const line of (renderedDot || "").split(/\r?\n/)) {
+          const edge = line.match(/^\s*"?([^"\s]+)"?\s*->\s*"?([^"\s]+)"?/);
+          if (edge) edges.push([edge[1], edge[2]]);
+        }
+        const targetNames = edges.filter(([source]) => source.toLowerCase() === rootTitle.toLowerCase())
+          .map(([, target]) => target);
+        const allNodes = [...svg.querySelectorAll("g.node")];
+        const nodeTitle = node => node.querySelector(":scope > title")?.textContent?.trim() ||
+          node.querySelector("title")?.textContent?.trim() || "";
+        const findNode = name => allNodes.find(node => nodeTitle(node).toLowerCase() === name.toLowerCase());
+        const targets = [...new Set(targetNames)].slice(0, 14).map(findNode).filter(Boolean);
+
+        // Include common next-hop destinations (usually a switch/jump-table join and sometimes the
+        // function exit). Otherwise the entry and all cases fit, but the join is clipped at the
+        // right edge and the graph looks broken. Frequency favors shared joins over unrelated leaves.
+        const targetSet = new Set([...new Set(targetNames)].map(name => name.toLowerCase()));
+        const successorFrequency = new Map();
+        for (const [source, target] of edges) {
+          if (!targetSet.has(source.toLowerCase()) || target.toLowerCase() === rootTitle.toLowerCase() ||
+              targetSet.has(target.toLowerCase())) continue;
+          successorFrequency.set(target, (successorFrequency.get(target) || 0) + 1);
+        }
+        const sharedSuccessorNames = [...successorFrequency.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .filter(([, count]) => count >= 2)
+          .slice(0, 2)
+          .map(([name]) => name);
+        const sharedSuccessors = sharedSuccessorNames.map(findNode).filter(Boolean);
+        // Include a small number of outgoing targets from the shared join (often a return block).
+        // This keeps the entire branch -> join -> exit story visible without trying to fit the
+        // entire function or unrelated branches into the initial readable viewport.
+        const sharedSet = new Set(sharedSuccessorNames.map(name => name.toLowerCase()));
+        const tailNames = [...new Set(edges
+          .filter(([source, target]) => sharedSet.has(source.toLowerCase()) &&
+            !targetSet.has(target.toLowerCase()) && !sharedSet.has(target.toLowerCase()))
+          .map(([, target]) => target))].slice(0, 2);
+        const tailNodes = tailNames.map(findNode).filter(Boolean);
+        const context = [root, ...targets, ...sharedSuccessors, ...tailNodes];
+        const boxes = context.map(node => node.getBoundingClientRect()).filter(r => r.width && r.height);
+        const left = boxes.length ? Math.min(...boxes.map(r => r.left)) : rootRect.left;
+        const right = boxes.length ? Math.max(...boxes.map(r => r.right)) : rootRect.right;
+        const top = boxes.length ? Math.min(...boxes.map(r => r.top)) : rootRect.top;
+        const bottom = boxes.length ? Math.max(...boxes.map(r => r.bottom)) : rootRect.bottom;
+        const contextWidth = Math.max(1, right - left);
+        const contextHeight = Math.max(1, bottom - top);
+
+        // Leave room for floating graph controls above, the edge legend below, and an unobscured
+        // margin on both sides. The horizontal constraint is as important as height for fan-out CFGs.
+        const safeWidth = Math.max(80, g.clientWidth - 112);
+        const safeHeight = Math.max(80, g.clientHeight - 150);
+        scale = Math.min(1, safeWidth / contextWidth, safeHeight / contextHeight);
+        tx = 36 - (left - viewport.left) * scale;
+        ty = 64 - (top - viewport.top) * scale;
+      }
+      apply();
+      return;
+    }
     if (!tallAndNarrow && !tooWide) return fit();
-    // A full fit of a wide fan-out can be as unreadable as a tall chain. For wide graphs,
-    // reduce the initial scale enough to expose more of the entry's immediate fan-out while
-    // preserving readable labels; the minimap exposes distant branches and Fit shows all nodes.
-    scale = tallAndNarrow
-      ? Math.min(1, availW / rect.width)
-      : Math.max(0.6, Math.min(0.75, availW / (rect.width * 0.9)));
+    // A broad fan-out in TB layout becomes horizontally enormous. Do not apply the readable-entry
+    // minimum zoom and then clip half its destinations: use a whole-graph fit for that orientation.
+    // In LR layout the entry + direct-successor neighborhood is handled above, with the minimap for
+    // distant destinations; top-down manual layout prioritizes complete topology.
+    if (tooWide && layout === "TB") return fit();
+    // For top-down chains, start at readable entry scale. Tall chains remain readable even when
+    // the entire graph cannot fit; the minimap navigates the remaining blocks.
+    scale = Math.min(1, availW / rect.width);
     tx = (g.clientWidth - rect.width * scale) / 2 - (rect.left - viewport.left) * scale;
-    ty = 44 - (rect.top - viewport.top) * scale;
+    ty = 58 - (rect.top - viewport.top) * scale;
     apply();
   };
   const zoomAt = (factor, cx, cy) => {   // cx, cy: graph-element coordinates
@@ -1150,10 +1287,26 @@ async function showCFG(addr, detail = false) {
   $("#zin").onclick = () => zoomAt(1.25, g.clientWidth / 2, g.clientHeight / 2);
   $("#zout").onclick = () => zoomAt(0.8, g.clientWidth / 2, g.clientHeight / 2);
   $("#zfit").onclick = fit;
+  if (graphKind !== "callgraph") $("#zentry").onclick = () => showCFG(addr, detail, graphKind, {...graphOptions, layout: undefined});
+  $("#glayout").onclick = () => showCFG(addr, detail, graphKind, {
+    ...graphOptions, layout: layout === "LR" ? "TB" : "LR"
+  });
   $("#z100").onclick = () => { scale = 1; tx = 20; ty = 20; apply(); };
-  $("#gdetail").onclick = () => showCFG(addr, !detail);
-  $("#gdetail").classList.toggle("on", detail);
-  $("#gdetail").setAttribute("aria-pressed", String(detail));
+  if (graphKind === "callgraph") {
+    $("#cgDirection").value = graphOptions.direction || "both";
+    $("#cgDepth").value = String(graphOptions.depth || 1);
+    const updateCallGraph = () => showCallGraph(addr, {
+      direction: $("#cgDirection").value,
+      depth: Number($("#cgDepth").value),
+      layout
+    });
+    $("#cgDirection").onchange = updateCallGraph;
+    $("#cgDepth").onchange = updateCallGraph;
+  } else {
+    $("#gdetail").onclick = () => showCFG(addr, !detail, graphKind, {...graphOptions, layout});
+    $("#gdetail").classList.toggle("on", detail);
+    $("#gdetail").setAttribute("aria-pressed", String(detail));
+  }
   $("#zsvg").onclick = () => {
     // Resolve theme variables in a cloned SVG; CSS custom properties are not defined in an
     // external viewer, so the download must be self-contained and retain readable contrast.
@@ -1198,7 +1351,7 @@ async function showCFG(addr, detail = false) {
     copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     const blob = new Blob([new XMLSerializer().serializeToString(copy)], {type: "image/svg+xml;charset=utf-8"});
     const url = URL.createObjectURL(blob), a = document.createElement("a");
-    a.href = url; a.download = (d.name || "cfg").replace(/[^a-zA-Z0-9._-]+/g, "_") + ".svg"; a.click();
+    a.href = url; a.download = (d.name || (graphKind === "callgraph" ? "callgraph" : "cfg")).replace(/[^a-zA-Z0-9._-]+/g, "_") + (graphKind === "callgraph" ? "-callgraph.svg" : ".svg"); a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   // node interactions
@@ -1207,22 +1360,40 @@ async function showCFG(addr, detail = false) {
     const title = n.querySelector("title");
     n.setAttribute("tabindex", "0");
     n.setAttribute("role", "button");
-    n.setAttribute("aria-label", "Basic block " + (title?.textContent || ""));
+    const nodeType = graphKind === "callgraph"
+      ? n.classList.contains("cg-import") ? "import" : n.classList.contains("cg-unresolved") ? "unresolved target" : "function"
+      : "basic block";
+    const nodeName = n.querySelector("text")?.textContent || title?.textContent || "";
+    n.setAttribute("aria-label", graphKind === "callgraph"
+      ? `${nodeType} ${nodeName} at ${title?.textContent || ""}`
+      : "Basic block " + (title?.textContent || ""));
     n.onclick = () => { const t = n.querySelector("title"); if (!t) return;
       svg.querySelectorAll(".node.cur").forEach(x => markNode(x, false));
       markNode(n, true);
       S.sel = t.textContent; inspectAddr(S.sel); statusCursor(S.sel); };
     n.onkeydown = e => {
-      if (e.key === "Enter" && e.shiftKey && title) { e.preventDefault(); go(title.textContent, {mode: "listing"}); }
+      const targetMode = graphKind === "callgraph" && !n.classList.contains("cg-function") ? "hex" : "listing";
+      if (e.key === "Enter" && e.shiftKey && title) { e.preventDefault(); go(title.textContent, {mode: targetMode}); }
       else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true})); }
     };
-    n.ondblclick = () => { const t = n.querySelector("title"); if (t) go(t.textContent, {mode: "listing"}); };
+    n.ondblclick = () => {
+      const t = n.querySelector("title");
+      if (t) go(t.textContent, {mode: graphKind === "callgraph" && !n.classList.contains("cg-function") ? "hex" : "listing"});
+    };
     n.oncontextmenu = e => { e.preventDefault(); const t = n.querySelector("title"); if (t) { S.sel = t.textContent; navMenu(e, S.sel, ""); } };
   });
   const here = [...svg.querySelectorAll("g.node")].find(n => n.querySelector("title")?.textContent === S.sel);
   if (here) markNode(here, true);
   fitInitial();
 }
+async function showCallGraph(addr, options = {}) {
+  return showCFG(addr, false, "callgraph", {
+    direction: options.direction || "both",
+    depth: Number(options.depth || 1),
+    layout: options.layout
+  });
+}
+
 function themeGraph(svg) {
   // strip the white page background polygon; restyle nodes/edges/text to the active theme
   const bg = svg.querySelector("g.graph > polygon");
@@ -1238,7 +1409,9 @@ function themeGraph(svg) {
     .edge polygon { stroke: none; }
     .node { cursor: pointer; }
     .node:hover polygon, .node:hover path, .node:focus polygon, .node:focus path { stroke: var(--accent); stroke-width: 2.4; }
-    .node.entry polygon, .node.entry path { stroke: var(--accent); stroke-width: 2; }
+    .node.entry polygon, .node.entry path, .node.cg-root polygon, .node.cg-root path { stroke: var(--accent); stroke-width: 2; }
+    .node.cg-import polygon, .node.cg-import path { fill: var(--elev) !important; stroke: var(--warn) !important; stroke-dasharray: 4 2; }
+    .node.cg-unresolved polygon, .node.cg-unresolved path { fill: var(--pane) !important; stroke: var(--faint) !important; stroke-dasharray: 3 2; }
     .node.cur polygon, .node.cur path { stroke: var(--accent); stroke-width: 2.6; }
     .edge path[stroke="green"], .edge [stroke="green"] { stroke: var(--ok) !important; }
     .edge polygon[fill="green"] { fill: var(--ok) !important; }
@@ -1539,7 +1712,7 @@ addEventListener("keydown", e => {
   // single-key shortcuts must not fire behind an open dialog/sheet or the busy veil
   if (typing || mod || !S.info || $("#overlay").classList.contains("show") || $("#busy").classList.contains("show")) return;
   const k = e.key;
-  if (k === "1") { S.mode = "listing"; } else if (k === "2") { S.mode = "cfg"; } else if (k === "3") { S.mode = "pseudo"; } else if (k === "4") { S.mode = "hex"; }
+  if (k === "1") { S.mode = "listing"; } else if (k === "2") { S.mode = "cfg"; } else if (k === "3") { S.mode = "pseudo"; } else if (k === "4") { S.mode = "hex"; } else if (k === "5") { S.mode = "callgraph"; }
   else if (k === " ") { e.preventDefault(); S.mode = S.mode === "cfg" ? "listing" : "cfg"; }
   else if (k.toLowerCase() === "g") { e.preventDefault(); $("#cmd").value = "goto "; $("#cmd").focus(); return; }
   else if (k.toLowerCase() === "n") return S.sel && renameDialog(S.sel, "");

@@ -10,7 +10,7 @@ User edits (renames, comments, ...) are not here; they live in the per-binary `.
 """
 import gzip, hashlib, json, os, threading, time
 
-from .analysis import Function, Program
+from .analysis import Function, LazyBlock, Program
 from .demangle import demangle_all
 from .objc import ObjC
 from .swift import Swift
@@ -45,42 +45,9 @@ def _dir():
     return os.environ.get("RDIS_CACHE_DIR", os.path.join(os.getcwd(), ".rdis_cache"))
 
 
-class LazyBlock:
-    """A restored basic block. Same interface as analysis.Block; instructions decode on first use."""
-    __slots__ = ("addr", "succs", "_end", "_dslot", "_thumb", "_prog", "_insns")
-
-    def __init__(self, prog, addr, end, succs, dslot, thumb):
-        self.addr, self._end, self.succs, self._dslot = addr, end, succs, dslot
-        self._thumb, self._prog, self._insns = thumb, prog, None
-
-    @property
-    def insns(self):
-        if self._insns is None:
-            out, a, stop = [], self.addr, self._dslot or self._end
-            while a < stop:
-                i = self._prog.insn(a, self._thumb)
-                if i is None:
-                    break
-                out.append(i)
-                a += i.size
-            self._insns = out
-        return self._insns
-
-    @property
-    def delay(self):
-        return self._prog.insn(self._dslot, self._thumb) if self._dslot else None
-
-    @property
-    def end(self):
-        return self._end
-
-    @property
-    def shown(self):
-        d = self.delay
-        return self.insns + [d] if d else self.insns
-
-
 def _thumb_of(prog, b):
+    if isinstance(b, LazyBlock):
+        return b._thumb
     if prog.arch.name != "arm" or not b.insns:
         return False
     return prog._insns.get((b.addr, True)) is b.insns[0]

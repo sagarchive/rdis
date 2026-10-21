@@ -1,5 +1,6 @@
 """Binary loading: Mach-O (thin/fat), ELF and PE through LIEF, plus plugin loaders."""
 import bisect
+import warnings
 from dataclasses import dataclass
 import lief
 
@@ -87,26 +88,56 @@ def _str(n):
     return n.decode("utf-8", "replace") if isinstance(n, (bytes, bytearray)) else (n or "")
 
 
+def _enum_name(value, what):
+    """LIEF returns a plain int, not an enum member, for a value it does not recognise."""
+    name = getattr(value, "__name__", None)
+    if name is None:
+        raise KeyError(f"{what} {int(value)}")
+    return name
+
+
 def _arch_name(b):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)     # LIEF warns on every unrecognised CPU number
+        return _arch_name_unfiltered(b)
+
+
+def _arch_name_unfiltered(b):
     if isinstance(b, lief.MachO.Binary):
-        return {"X86_64": "x86_64", "X86": "x86", "ARM64": "arm64", "ARM": "arm"}[b.header.cpu_type.__name__]
+        return {"X86_64": "x86_64", "X86": "x86", "ARM64": "arm64", "ARM": "arm",
+                "POWERPC": "ppc", "POWERPC64": "ppc64"}[_enum_name(b.header.cpu_type, "Mach-O CPU type")]
     if isinstance(b, lief.ELF.Binary):
-        m = b.header.machine_type.__name__
+        m = _enum_name(b.header.machine_type, "ELF machine type")
         wide = b.header.identity_class == lief.ELF.Header.CLASS.ELF64
         if m in ("MIPS", "MIPS_RS3_LE"):
             le = b.header.identity_data == lief.ELF.Header.ELF_DATA.LSB
             return ("mips64" if wide else "mips") + ("el" if le else "")
         if m == "RISCV":
             return "riscv64" if wide else "riscv32"
+        le = b.header.identity_data == lief.ELF.Header.ELF_DATA.LSB
+        if m in ("PPC", "PPC64"):                   # CPUs only a SLEIGH spec decodes (rdis/sleigh.py)
+            return ("ppc64" if wide else "ppc") + ("le" if le else "")
+        if m in ("SPARC", "SPARC32PLUS", "SPARCV9"):
+            return "sparc64" if wide else "sparc"
+        if m == "SH":
+            return "sh4le" if le else "sh4"
+        if m == "XTENSA":
+            return "xtensa" if le else "xtensabe"
+        if m == "BPF":
+            return "ebpf" if le else "ebpfbe"
+        sleigh = {"M68K": "m68k", "AVR": "avr8", "MSP430": "msp430", "LOONGARCH": "loongarch64", "TRICORE": "tricore"}
+        if m in sleigh:
+            return sleigh[m]
         return {"X86_64": "x86_64", "I386": "x86", "AARCH64": "arm64", "ARM": "arm"}[m]
-    return {"AMD64": "x86_64", "I386": "x86", "ARM64": "arm64", "ARMNT": "arm"}[b.header.machine.__name__]
+    return {"AMD64": "x86_64", "I386": "x86", "ARM64": "arm64", "ARMNT": "arm"}[_enum_name(b.header.machine, "PE machine type")]
 
 
 def _macho_imports(b, ptr):
     """Stubs and GOT slots map to names via the indirect symbol table (reserved1 = start index)."""
-    out, indirect = {}, list(b.dynamic_symbol_command.indirect_symbols)
+    dysymtab = b.dynamic_symbol_command
+    out, indirect = {}, list(dysymtab.indirect_symbols) if dysymtab else []
     for s in b.sections:
-        t = s.type.__name__
+        t = getattr(s.type, "__name__", "")
         if t == "SYMBOL_STUBS":
             step = s.reserved2
         elif t in ("NON_LAZY_SYMBOL_POINTERS", "LAZY_SYMBOL_POINTERS"):
@@ -207,6 +238,11 @@ def _symbols(b):
         for e in b.exported_functions:
             out[base + e.address] = _str(e.name)
         return out
+    # LIEF's `functions` misses most LC_FUNCTION_STARTS entries (24 of /bin/ls's 50, 1 of a Bun
+    # binary's 72,876), and that table survives `strip`: read it directly, offsets from __TEXT.
+    if isinstance(b, lief.MachO.Binary) and b.has_function_starts:
+        for off in b.function_starts.functions:
+            out.setdefault(base + off, "")
     for s in b.symbols:
         if s.value and s.name:
             out[s.value] = out.get(s.value) or _str(s.name)
@@ -234,6 +270,13 @@ def _arm_thumb(b, raw):
     return clean, thumb
 
 
+def _slice_arch(b):
+    try:
+        return _arch_name(b)
+    except KeyError:
+        return None
+
+
 def open_image(path, arch=None, **opts):
     """Open `path`. `arch` picks a fat Mach-O slice; plugin loaders get `opts` (e.g. base=)."""
     custom = plugins.find_loader(path, opts)
@@ -245,7 +288,7 @@ def open_image(path, arch=None, **opts):
         slices = list(owner) if owner is not None else []
         if not slices:
             raise ValueError(f"malformed Mach-O (no parseable slice): {path}")
-        b = next((s for s in slices if arch and _arch_name(s) == archmod.make(arch).name), slices[0])
+        b = next((s for s in slices if arch and _slice_arch(s) == archmod.make(arch).name), slices[0])
     else:
         b = lief.parse(path)
     if b is None:

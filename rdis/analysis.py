@@ -19,6 +19,20 @@ from .objc import ObjC
 from .swift import Swift
 
 MAX_INSNS = 50_000  # Safety cap against runaway descent into data.
+# Decoded instructions kept at once. A Capstone instruction with detail is ~2-4 KB, so an unbounded
+# cache made a 60 MB __text (a Bun/Electron runtime) need tens of GB. Blocks re-decode on demand.
+INSN_CACHE = 400_000
+# an indexed memory operand (`[x8, x9, lsl #2]`, `[rcx + rax*4]`): a value-table load candidate
+_INDEXED = re.compile(r"\[[^\]]*(?:, |\+ )[a-z]")
+# Instructions after which nothing executes, and callees that never return. Decoding past either runs
+# into the next function: one missed `exit` merged most of a 40 KB binary into a single "function".
+TRAPS = frozenset({"udf", "brk", "ud2", "ud1", "hlt", "bkpt", "break"})
+NORETURN = frozenset({
+    "exit", "Exit", "abort", "assert_fail", "assert_rtn", "assert", "stack_chk_fail", "stack_chk_fail_local",
+    "chk_fail", "fortify_fail", "libc_fatal", "longjmp", "siglongjmp", "quick_exit", "pthread_exit", "cxa_throw",
+    "cxa_rethrow", "cxa_bad_cast", "cxa_bad_typeid", "cxa_pure_virtual", "cxa_throw_bad_array_new_length",
+    "terminate", "err", "errx", "verr", "verrx", "abort_message", "halt"})
+ANALYZING = set()   # Programs mid-analyze(), polled by the server's progress route
 
 
 def _canonical_binary_path(path):
@@ -52,15 +66,72 @@ class Block:
         return self.insns + [self.delay] if self.delay else self.insns
 
 
+def _covers(blocks):
+    """`a -> bool`: is `a` inside any of these blocks? Sorted spans + bisect, not a per-call scan."""
+    import bisect
+    starts, ends, hi = [], [], 0
+    for lo, end in sorted((b.addr, b.end) for b in blocks):
+        hi = max(hi, end)                  # running max end: overlapping blocks stay covered
+        starts.append(lo)
+        ends.append(hi)
+    def covered(a):
+        k = bisect.bisect_right(starts, a) - 1
+        return k >= 0 and a < ends[k]
+    return covered
+
+
+class LazyBlock:
+    """A basic block that keeps only its bounds. Same interface as Block; instructions come from the
+    program's bounded decode cache and are re-decoded after an eviction."""
+    __slots__ = ("addr", "succs", "_end", "_dslot", "_thumb", "_prog", "_insns")
+
+    def __init__(self, prog, addr, end, succs, dslot, thumb):
+        self.addr, self._end, self.succs, self._dslot = addr, end, succs, dslot
+        self._thumb, self._prog, self._insns = thumb, prog, None
+
+    @property
+    def insns(self):
+        if self._insns is not None:
+            return self._insns
+        out, a, stop = [], self.addr, self._dslot or self._end
+        while a < stop:
+            i = self._prog.insn(a, self._thumb)
+            if i is None:
+                break
+            out.append(i)
+            a += i.size
+        # keep the list only while the program's cache has never evicted (it fits in memory); once
+        # it has, a kept list would pin instructions the cache dropped, so every block of a huge
+        # binary would end up holding its own
+        if not self._prog._insn_gen[0]:
+            self._insns = out
+        return out
+
+    @property
+    def delay(self):
+        return self._prog.insn(self._dslot, self._thumb) if self._dslot else None
+
+    @property
+    def end(self):
+        return self._end
+
+    @property
+    def shown(self):
+        d = self.delay
+        return self.insns + [d] if d else self.insns
+
+
 @dataclass
 class Function:
     addr: int
     blocks: dict  # addr -> Block, in address order
     calls: set    # callee code addresses
+    tables: bool = True  # may hold a jump/value table (an indirect jump or an indexed load)
+    stops: frozenset = frozenset()  # instructions after which control never continues (traps, noreturn calls)
 
     @property
     def end(self):
-        return max(b.end for b in self.blocks.values())
+        return max((b.end for b in self.blocks.values()), default=self.addr)
 
 
 class _CowXrefSet(MutableSet):
@@ -132,6 +203,8 @@ class Program:
         self.functions = {}
         self.xrefs = defaultdict(set)  # target -> {(from_addr, kind)}
         self._insns = {}
+        self.noreturn_addrs = set()    # functions inferred never to return, beside the NORETURN names
+        self._insn_gen = [0]           # bumped on each cache eviction; shared with session overlays
         self._strings = None
         self.pretty, self.objc, self.swift = {}, None, None
         # decompile caches, shared by reference across session overlays (filled from the image,
@@ -176,6 +249,11 @@ class Program:
             thumb = self._is_thumb(a)
         key = (a, thumb)
         if key not in self._insns:
+            # ponytail: evict everything at the cap (simple, bounded); an LRU if re-decode shows up hot.
+            # ARM32 is exempt: its Thumb test compares instruction identity against this cache.
+            if len(self._insns) >= INSN_CACHE and self.arch.name != "arm":
+                self._insns.clear()
+                self._insn_gen[0] += 1
             # decode a short linear run, not one instruction: the per-call Capstone overhead dominated
             # analysis, and a decode at an address is the same however it is reached, so caching the
             # neighbours is always valid (the walker usually asks for exactly those next).
@@ -207,6 +285,21 @@ class Program:
     # -- analysis -----------------------------------------------------------
     def analyze(self, objc=True, swift=True, prologues=True):
         """Full analysis. Flags mirror a loader dialog: skip ObjC/Swift parsing or the gap scan."""
+        ANALYZING.add(self)
+        try:
+            return self._analyze(objc, swift, prologues)
+        finally:
+            ANALYZING.discard(self)
+
+    def progress(self):
+        """What a running analysis is doing, for the UI: phase, functions found, code covered."""
+        total = sum(s.size for s in self.image.sections if s.code) or 1
+        done = getattr(self, "_covered", 0)
+        return {"phase": getattr(self, "phase", "loading"), "functions": len(self.functions),
+                "percent": min(99, round(100 * done / total))}
+
+    def _analyze(self, objc, swift, prologues):
+        self.phase = "metadata"
         self._name_plt_stubs()
         self.objc = ObjC(self.image) if objc else ObjC.empty(self.image)
         self.swift = Swift(self.image) if swift else Swift.empty(self.image)
@@ -218,10 +311,22 @@ class Program:
         if self.image.is_code(self.image.entry):
             seeds.append(self.image.entry)
             self.auto_name(self.image.entry, "entry")
+        self.phase = "following calls"
         self._discover(seeds)
         if prologues:
+            self.phase = "scanning for unreferenced functions"
             self._discover(list(self._prologue_scan()))
+        self.phase = "inferring non-returning functions"
+        self._infer_noreturn()
+        self.phase = "recovering jump tables"
         self._recover_tables()
+        if prologues:
+            self.phase = "following address-taken code"
+            before = len(self.functions)
+            self._discover_standalone(list(self._address_taken()) + list(self._pointer_scan()))
+            if len(self.functions) != before:
+                self._infer_noreturn()
+                self._recover_tables()
         self.pretty = demangle_all(self.names.values())
         # NOTE: the sidecar .rdb is NOT auto-loaded here. A shared analysis must stay free of any
         # one user's edits; callers that own a single workspace (the CLI, a single-user server)
@@ -445,9 +550,32 @@ class Program:
             if a in self.functions or a in self.removed_procs or not self.image.is_code(a) \
                     or a in self.image.imports:
                 continue
-            f = self.functions[a] = self._build(a)
+            f = self._build(a)
+            if not f.blocks:                # nothing decodes here, so it is not a function
+                continue
+            self.functions[a] = f
+            self._covered = getattr(self, "_covered", 0) + sum(b.end - b.addr for b in f.blocks.values())
             self.names.setdefault(a, f"sub_{a:x}")
             work.extend(f.calls)
+
+    def _discover_standalone(self, seeds):
+        """Seeds from data and address references: kept only when their code does not run into another function's."""
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        for a in seeds:
+            if a in self.functions or not self.image.is_code(a) or self._inside_function_extent(a):
+                continue
+            f = self._build(a)
+            if f.blocks and not any(covered(b.addr) for b in f.blocks.values()):
+                self._discover([a])
+
+    def _inside_function_extent(self, a):
+        import bisect
+        key = (len(self.functions), id(self.functions))
+        if getattr(self, "_ext_key", None) != key:
+            self._ext_starts = sorted(self.functions)
+            self._ext_key = key
+        i = bisect.bisect_left(self._ext_starts, a) - 1
+        return i >= 0 and a < self.functions[self._ext_starts[i]].end
 
     def _build(self, start, seeds=()):
         insns, calls, seen = {}, set(), set()
@@ -455,18 +583,27 @@ class Program:
         self._tmode.setdefault(start, thumb)
         work = [(start, thumb), *((s, thumb) for s in seeds)]
         known = self.image.symbols
-        delays = set()
+        delays, tables, stops = set(), False, set()
+        barriers = self._function_starts()
         while work and len(insns) < MAX_INSNS:
             (a, tm), regs = work.pop(), {}
             while a not in seen and self.image.is_code(a):
+                if a != start and a in barriers:
+                    break                      # falling into the next function: the linker says one ends here
                 seen.add(a)
                 i = self.insn(a, tm)
                 if i is None:
                     break
                 insns[a] = i
+                if i.mnemonic in TRAPS:
+                    stops.add(a)
+                    break
                 k = self.arch.kind(i)
                 step = i.size
-                if self.arch.delay_slot and k in (JMP, CJMP, IJMP, RET):
+                if not tables and (k == IJMP or i.mnemonic.startswith(("ldr", "mov", "ldur"))
+                                   and _INDEXED.search(i.op_str)):
+                    tables = True
+                if self.arch.slot(i, k):
                     d = self.insn(a + i.size)          # executes before the branch takes effect
                     if d is not None:
                         insns[d.address] = d
@@ -488,6 +625,9 @@ class Program:
                         if self.image.is_code(t):
                             self._tmode.setdefault(t, tt)
                             calls.add(t)
+                        if self._noreturn(t):
+                            stops.add(a)
+                            break
                 elif k in (JMP, CJMP) and t is not None:
                     tail = t != start and (t in known or t in self.image.imports or not self.image.is_code(t))
                     self.xrefs[t].add((a, "tail" if tail else "jmp"))
@@ -508,7 +648,48 @@ class Program:
                 elif k == RET:
                     break
                 a += step
-        return Function(start, self._split(start, insns, delays), calls)
+        return Function(start, self._lazy(self._split(start, insns, delays, stops)), calls, tables, frozenset(stops))
+
+    def _function_starts(self):
+        """Addresses the file itself declares as function starts (symbols, LC_FUNCTION_STARTS, unwind data),
+        without ARM mapping symbols or local labels."""
+        if getattr(self, "_starts", None) is None:
+            self._starts = frozenset(a for a, n in self.image.symbols.items()
+                                     if self.image.is_code(a) and not n.startswith(("$", ".L", "ltmp")))
+        return self._starts
+
+    def _noreturn(self, target):
+        if target in self.noreturn_addrs:
+            return True
+        name = self.names.get(target) or self.image.imports.get(target) or self.image.symbols.get(target)
+        return bool(name) and name.split("@")[0].split("$")[0].lstrip("_") in NORETURN
+
+    def _infer_noreturn(self):
+        """A function whose every exit is a trap or a call to a non-returning function never returns either.
+        Callers built before that was known are rebuilt; a few rounds reach the practical fixed point."""
+        for _ in range(4):
+            found = {a for a, f in self.functions.items() if a not in self.noreturn_addrs and self._never_returns(f)}
+            if not found:
+                return
+            self.noreturn_addrs |= found
+            for a, f in list(self.functions.items()):
+                if f.calls & found:
+                    rebuilt = self._build(a)
+                    if rebuilt.blocks:
+                        self.functions[a] = rebuilt
+
+    def _never_returns(self, f):
+        if not f.stops:
+            return False
+        exits = [b for b in f.blocks.values() if not any(s in f.blocks for s in b.succs)]
+        return bool(exits) and all(b.shown[-1].address in f.stops for b in exits)
+
+    def _lazy(self, blocks):
+        """Drop the decoded instructions a finished function would otherwise pin for good."""
+        if self.arch.name == "arm":         # never evicted (see insn), so nothing to release
+            return blocks
+        return {a: LazyBlock(self, a, b.end, b.succs, b.delay.address if b.delay else 0, False)
+                for a, b in blocks.items()}
 
     def _recover_tables(self):
         """Recover lookup/jump tables so optimized switches decompile and computed gotos resolve.
@@ -521,10 +702,13 @@ class Program:
         Jump-table case bodies are added to the owning function (rebuilt with them as extra seeds).
         """
         self.value_tables, self.jump_tables = {}, {}
+        self._fstarts_n = None              # function starts re-sorted for this pass (_func_end)
         if not self.arch.name.startswith(("x86", "arm")):
             return   # Table-pattern matching currently covers x86/ARM operand shapes; other ISAs retain indirect-goto output.
         for fa in list(self.functions):
             func = self.functions[fa]
+            if not func.tables:             # re-decoding every function here dominated big binaries
+                continue
             jt_targets = self._scan_tables(func)
             if jt_targets:  # rebuild the function so the case bodies become blocks, then re-link
                 self.functions[fa] = func = self._build(fa, jt_targets)
@@ -543,12 +727,7 @@ class Program:
         set of registers holding constant addresses, so a table load sees a bound set a block
         earlier. State is reset at a join (a block with >1 predecessor) and after calls."""
         preds = Counter(s for b in func.blocks.values() for s in b.succs)
-        starts = sorted(self.functions)
-        # the next function start *outside* this function's own blocks: optimized code shares and
-        # overlaps tails, so a start nested inside our body is not where our cases end
-        inside = lambda a: any(b.addr <= a < b.end for b in func.blocks.values())
-        func_end = next((a for a in starts if a > func.addr and not inside(a)), None)
-        bound, base, jt_targets = None, {}, []
+        bound, base, jt_targets, end = None, {}, [], []   # end: _func_end, once per function
         for addr in sorted(func.blocks):
             b = func.blocks[addr]
             if preds[addr] > 1:                     # a merge point invalidates carried state
@@ -564,10 +743,22 @@ class Program:
                     if i.operands and i.operands[0].type == self._REG:
                         base[self._canon_reg(i.reg_name(i.operands[0].reg))] = r
                 if k == IJMP:
-                    self._jump_table(func, func_end, b, i, base, bound, jt_targets)
+                    end = end or [self._func_end(func)]   # an interpreter has thousands of ijmps
+                    self._jump_table(func, end[0], b, i, base, bound, jt_targets)
                 else:
                     self._value_table(i, base, bound)
         return jt_targets
+
+    def _func_end(self, func):
+        """The next function start *outside* this function's own blocks: optimized code shares and
+        overlaps tails, so a start nested inside our body is not where our cases end."""
+        import bisect
+        if getattr(self, "_fstarts_n", None) != len(self.functions):   # sort once, not per function
+            self._fstarts, self._fstarts_n = sorted(self.functions), len(self.functions)
+        starts = self._fstarts
+        inside = _covers(func.blocks.values())
+        return next((starts[k] for k in range(bisect.bisect_right(starts, func.addr), len(starts))
+                     if not inside(starts[k])), None)
 
     def _canon_reg(self, name):
         if name and name[0] == "w" and name[1:].isdigit():
@@ -657,7 +848,7 @@ class Program:
             jt_targets.extend(cases.values())
             return
 
-    def _split(self, start, insns, delays=()):
+    def _split(self, start, insns, delays=(), stops=frozenset()):
         leaders = {start}
         for a, i in insns.items():
             if a in delays:
@@ -666,7 +857,7 @@ class Program:
             t = self.arch.target(i)
             if k in (JMP, CJMP) and t in insns:
                 leaders.add(t)
-            if k in (JMP, CJMP, RET, IJMP):
+            if k in (JMP, CJMP, RET, IJMP) or a in stops:
                 nxt = a + i.size
                 if nxt in delays:
                     nxt += insns[nxt].size
@@ -681,14 +872,14 @@ class Program:
                 cur = blocks[a] = Block(a, [])
             cur.insns.append(insns[a])
             last = cur
-            if self.arch.kind(insns[a]) in (JMP, CJMP, RET, IJMP):
+            if self.arch.kind(insns[a]) in (JMP, CJMP, RET, IJMP) or a in stops:
                 cur = None
         for b in blocks.values():
             last = b.insns[-1]
             k, t = self.arch.kind(last), self.arch.target(last)
             if k in (JMP, CJMP) and t in blocks:
                 b.succs.append(t)
-            if k not in (JMP, RET, IJMP) and b.end in blocks and b.end not in b.succs:
+            if k not in (JMP, RET, IJMP) and last.address not in stops and b.end in blocks and b.end not in b.succs:
                 b.succs.append(b.end)
         return blocks
 
@@ -712,10 +903,8 @@ class Program:
 
     def _prologue_scan(self):
         """Find functions with no symbol and no direct caller by their prologue, in uncovered code."""
-        covered = set()
-        for f in self.functions.values():
-            for b in f.blocks.values():
-                covered.update(range(b.addr, b.end))
+        # block ranges, not a set of every covered byte (that was GBs for a 60 MB __text)
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
         pat, align, after, thumb = self._prologue_pattern()
         if pat is None:
             return
@@ -723,26 +912,202 @@ class Program:
             if not s.code or "plt" in s.name or "stub" in s.name:
                 continue
             data = self.image.read(s.va, s.size)
-            # match encodings, not decoded text: decoding every word dominated analysis time
-            for m in re.finditer(b"(?=(?:" + pat + b"))", data, re.S):   # overlapping
-                off = m.start()
+            # Match encodings, not decoded text: decoding every word dominated analysis time.
+            # Add the valid AArch64 allocation-first frame shape separately. Keep the existing
+            # regex specific to frame-save-first prologues so an interior STP is not a new function.
+            offsets = {m.start() for m in re.finditer(b"(?=(?:" + pat + b"))", data, re.S)}
+            if self.arch.name == "arm64":
+                offsets.update(
+                    off for off in range(0, max(0, len(data) - 3), 4)
+                    if self._arm64_stack_adjust_then_fp_lr_save(data, off)
+                    or self._arm64_stack_adjust_with_stack_access(data, off)
+                    or self._arm64_pair_push_then_fp_lr_save(data, off)
+                )
+            for off in sorted(offsets):
                 a = s.va + off
-                if a % align or a in covered:
+                if a % align or covered(a):
                     continue
-                prev = data[max(off - 4, 0):off]
+                # x86 prologue byte signatures are common enough inside immediate/data bytes to
+                # create false functions. Give their boundary predicate a wider context so it can
+                # verify that the candidate follows a RET/JMP or conventional padding. Other ISAs
+                # have fixed-width/local boundary rules and keep their original four-byte window.
+                window = 40 if self.arch.name.startswith("x86") else 4
+                prev = data[max(off - window, 0):off]
                 if after is not None and off and not after(prev):
                     continue
                 if thumb:
                     self._tmode.setdefault(a, True)
                 yield a
 
+    def _address_taken(self):
+        """Uncovered, aligned code whose address a function materialises: function-pointer targets with no caller."""
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        align = self._prologue_pattern()[1]
+        for t, refs in list(self.xrefs.items()):
+            if t is not None and t % align == 0 and self.image.is_code(t) and t not in self.functions \
+                    and not covered(t) and any(k == "data" and not getattr(self.function_at(src), "tables", False)
+                                               for src, k in refs):
+                yield t
+
+    def _pointer_scan(self):
+        """Code addresses stored in data (function-pointer tables, vtables), including Mach-O chained-fixup pointers."""
+        width = 8 if self.arch.bits == 64 else 4
+        align = self._prologue_pattern()[1]
+        covered = _covers(b for f in self.functions.values() for b in f.blocks.values())
+        chained = self.image.format == "macho" and width == 8
+        seen = set()
+        for sec in self.image.sections:
+            if sec.code or sec.size < width or "cstring" in sec.name:
+                continue
+            data = self.image.read(sec.va, sec.size)
+            for off in range(0, len(data) - width + 1, width):
+                v = int.from_bytes(data[off:off + width], "little")
+                t = (v & 0xFFFFFFFFF) + self.image.base if chained and v >> 36 and not v >> 63 and not self.image.is_code(v) else v
+                if t in seen or t % align or not self.image.is_code(t) or t in self.functions or covered(t):
+                    continue
+                seen.add(t)
+                yield t
+
     _PACIBSP = b"\x7f\x23\x03\xd5"
+
+    @staticmethod
+    def _arm64_terminator_before(data, offset):
+        """Require a real code boundary (or section start) before a gap-scan candidate."""
+        if offset <= 0:
+            return True
+        # Permit a short run of AArch64 NOP alignment after a terminating instruction.
+        pos = offset - 4
+        for _ in range(4):
+            if pos < 0:
+                return True
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if word == 0xD503201F:  # NOP padding
+                pos -= 4
+                continue
+            if (word & 0xFFFFFC1F) == 0xD65F0000:  # RET Xn (including RET X30)
+                return True
+            if (word & 0xFC000000) == 0x14000000:  # unconditional B, not BL
+                return True
+            if (word & 0xFFFFFC1F) == 0xD61F0000:  # BR Xn tail branch
+                return True
+            return False
+        return False
+
+    @staticmethod
+    def _arm64_stack_adjust_with_stack_access(data, offset):
+        """Find leaf AArch64 frames that allocate SP and spill locals without saving FP/LR.
+
+        Leaf functions often do not save x29/x30 at all. Their first instruction can be
+        SUB SP,SP,#N followed by STR/LDR through SP; the old STP-based pattern misses these.
+        Requiring both a terminating preceding instruction and a nearby SP-based memory access
+        avoids treating arbitrary SUB instructions in a live basic block as function starts.
+        """
+        if offset < 0 or offset + 4 > len(data) or offset % 4:
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        # SUB SP, SP, #imm12{, LSL #12}. Mask the immediate and shift bit, then require
+        # a real nonzero allocation (zero imm12 with LSL #12 is also a valid 4 KiB frame).
+        if (first & 0xFF0003FF) != 0xD10003FF:
+            return False
+        imm12 = (first >> 10) & 0xFFF
+        shift12 = (first >> 22) & 1
+        if imm12 == 0 and not shift12:
+            return False
+        if not Program._arm64_terminator_before(data, offset):
+            return False
+
+        stack_memory_ops = {
+            0xB8000000, 0xB8400000, 0xB9000000, 0xB9400000,
+            0xF8000000, 0xF8400000, 0xF9000000, 0xF9400000,
+            0xA8800000, 0xA8C00000, 0xA9000000, 0xA9400000,
+        }
+        # Search the start of the prologue, not the entire function, for an SP-based access.
+        for pos in range(offset + 4, min(len(data) - 3, offset + 24), 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if (word & 0xFFC00000) in stack_memory_ops and ((word >> 5) & 0x1F) == 31:
+                return True
+            # A branch or return before any stack access means this is not a frame prologue.
+            if ((word & 0xFFFFFC1F) == 0xD65F0000
+                    or (word & 0xFC000000) in (0x14000000, 0x94000000)
+                    or (word & 0xFFFFFC1F) in (0xD61F0000, 0xD63F0000)):
+                return False
+        return False
+
+    @staticmethod
+    def _arm64_pair_push_then_fp_lr_save(data, offset):
+        """STP Xa, Xb, [sp, #-N]! opening a frame, with the x29/x30 save within the next four instructions."""
+        if offset + 4 > len(data) or offset % 4:
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        if (first & 0xFFC003E0) != 0xA98003E0 or not Program._arm64_terminator_before(data, offset):
+            return False
+        for pos in range(offset + 4, min(len(data) - 3, offset + 20), 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            if (word >> 24) in (0xA8, 0xA9) and (word & 0x7FFF) == 0x7BFD:
+                return True
+        return False
+
+    @staticmethod
+    def _arm64_stack_adjust_then_fp_lr_save(data, offset):
+        """Recognize an AArch64 frame whose first instruction allocates the stack.
+
+        Clang commonly emits SUB SP, SP, #frame_size before saving x29/x30 at a
+        positive offset inside that frame. The older gap scan only recognized a paired
+        frame save as the first instruction, so stripped Mach-O functions with larger
+        stack frames could be missed despite having a conventional prologue.
+
+        Require a non-zero immediate stack allocation followed within four instructions
+        by an STP x29,x30 whose base is SP. The scan runs only on uncovered, aligned code.
+        """
+        if offset < 0 or offset + 4 > len(data):
+            return False
+        first = int.from_bytes(data[offset:offset + 4], "little")
+        # SUB (immediate), 64-bit, flags not set, Rd=SP and Rn=SP. Mask out imm12
+        # and its optional shift bit; reject SUB SP,SP,#0.
+        if (first & 0xFF0003FF) != 0xD10003FF or (((first >> 10) & 0xFFF) == 0 and ((first >> 22) & 1) == 0):
+            return False
+
+        stop = min(len(data) - 3, offset + 20)
+        for pos in range(offset + 4, stop, 4):
+            word = int.from_bytes(data[pos:pos + 4], "little")
+            # STP x29,x30,[sp,#imm], including offset/pre-index/post-index address modes.
+            # Rt=x29, Rn=sp, Rt2=x30; A8/A9 are 64-bit integer pair-store encodings.
+            if (word >> 24) in (0xA8, 0xA9) and (word & 0x7FFF) == 0x7BFD:
+                return True
+        return False
+
+    _X86_PAD = re.compile(rb"(?:\x66)*(?:\x2e)?(?:\x0f\x1f(?:\x00|\x40.|\x44\x00.|\x80.{4}|\x84\x00.{4})|\x90)|\xcc", re.S)
+
+    @staticmethod
+    def _x86_after_terminator(prev):
+        """Conservative x86 gap-scan guard: the bytes before a candidate must be padding after a terminator."""
+        if not prev:
+            return True
+        end = len(prev)
+        while end:
+            for n in range(min(end, 15), 0, -1):
+                if Program._X86_PAD.fullmatch(prev, end - n, end):
+                    end -= n
+                    break
+            else:
+                break
+        prefix, padded = prev[:end], end < len(prev)
+        if not prefix:
+            return True
+        return ((padded and len(prefix) >= 5 and prefix[-5] == 0xe8) or prefix[-2:] == b"\x0f\x0b" or prefix[-1] in (0xc3, 0xcb) or (len(prefix) >= 3 and prefix[-3] in (0xc2, 0xca))
+                or (len(prefix) >= 2 and prefix[-2] == 0xeb) or (len(prefix) >= 5 and prefix[-5] == 0xe9)
+                or (len(prefix) >= 2 and prefix[-2] == 0xff and 0xe0 <= prefix[-1] <= 0xe7)
+                or (len(prefix) >= 6 and prefix[-6:-4] == b"\xff\x25"))
 
     def _prologue_pattern(self):
         """(byte regex, alignment, previous-bytes check, is_thumb) for function-entry encodings."""
         n, bits = self.arch.name, self.arch.bits
         if n.startswith("x86"):
-            return (rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if bits == 64 else rb"\x55\x89\xe5"), 1, None, False
+            # This signature can also appear inside an instruction stream or embedded bytes.
+            # Require a plausible boundary before accepting a byte-scan candidate: a RET,
+            # relative JMP, or conventional NOP/INT3 padding after a terminating instruction.
+            # Symbol/debug starts still seed analysis independently of this heuristic.
+            return (rb"\x55\x48\x89\xe5|\xf3\x0f\x1e\xfa\x55" if bits == 64 else rb"\x55\x89\xe5"), 1, self._x86_after_terminator, False
         if n == "arm64":
             # pacibsp, or `stp x29, x30, [sp, #-N]` (pre-index or signed offset, negative imm7);
             # a stp right after a pacibsp belongs to that function, not a new one. Dart AOT keeps
@@ -822,3 +1187,22 @@ class Program:
 
     def xrefs_to(self, a):
         return sorted(self.xrefs.get(a, ()))
+
+    def unresolved(self, funcs=None):
+        """Indirect jumps and calls whose target rdis could not establish, as dicts sorted by address.
+
+        An unresolved transfer is reported, never given a guessed edge: a jump table needs a proven
+        bound, a call needs a constant target."""
+        funcs = list(self.functions.values()) if funcs is None else list(funcs)
+        resolved = {src for _, refs in self.xrefs.items() for src, k in refs if k in ("call", "tail", "jmp")}
+        out = []
+        for f in funcs:
+            for b in f.blocks.values():
+                for i in b.shown:
+                    k = self.arch.kind(i)
+                    if i.address in resolved or (k == IJMP and i.address in self.jump_tables):
+                        continue
+                    if k in (IJMP, CALL):
+                        out.append({"addr": i.address, "kind": "jump" if k == IJMP else "call",
+                                    "function": f.addr, "insn": f"{i.mnemonic} {i.op_str}".strip()})
+        return sorted(out, key=lambda r: r["addr"])

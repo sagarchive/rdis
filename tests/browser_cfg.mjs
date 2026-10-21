@@ -40,13 +40,59 @@ function dotGraph(count, detail = false) {
   return lines.join("\n");
 }
 
+function dotCallGraph(rootAddress = 0x1000, rootName = "branch_loop_fixture", direction = "both", depth = 1) {
+  const callerAddress = rootAddress + 0x3000;
+  const grandcallerAddress = rootAddress + 0x4000;
+  const calleeAddress = rootAddress + 0x1000;
+  const importAddress = rootAddress + 0x8000;
+  const unresolvedAddress = rootAddress + 0x9000;
+  const nodes = new Map([[rootAddress, {name: rootName, kind: "function", root: true}]]);
+  const edges = [];
+  const add = (addr, name, kind = "function") => nodes.set(addr, {name, kind, root: false});
+  if (direction !== "callees") {
+    add(callerAddress, "caller_fixture");
+    edges.push([callerAddress, rootAddress, "caller"]);
+    if (depth >= 2) {
+      add(grandcallerAddress, "grandcaller_fixture");
+      edges.push([grandcallerAddress, callerAddress, "call"]);
+    }
+  }
+  if (direction !== "callers") {
+    add(calleeAddress, "callee_fixture");
+    edges.push([rootAddress, calleeAddress, "call"]);
+    if (depth >= 2) {
+      add(importAddress, "puts", "import");
+      add(unresolvedAddress, "unresolved_external", "unresolved");
+      edges.push([calleeAddress, importAddress, "call"], [calleeAddress, unresolvedAddress, "unresolved"]);
+    }
+  }
+  const lines = [
+    'digraph "callgraph" {',
+    'graph [rankdir=LR, bgcolor="transparent", nodesep=0.45, ranksep=0.72, pad=0.24];',
+    'node [shape=box, style="rounded,filled", fillcolor="#222834", color="#4b5566", fontcolor="#e4eaf2", fontname="monospace", fontsize=10, margin="0.16,0.10"];',
+    'edge [color="blue", arrowsize=0.72, fontname="monospace", fontsize=9];'
+  ];
+  for (const [addr, node] of nodes) {
+    const classes = "cg-" + node.kind + (node.root ? " cg-root" : "");
+    const styles = node.root ? ', color="#d9974f", penwidth=2.2' :
+      node.kind === "import" ? ', shape=component, style="rounded,dashed,filled"' :
+      node.kind === "unresolved" ? ', style="rounded,dashed,filled"' : "";
+    const label = node.name + "\\l0x" + addr.toString(16) + " · " + node.kind + "\\l";
+    lines.push('"0x' + addr.toString(16) + '" [label="' + label + '", id="cg_' + node.kind + '_' + addr.toString(16) + '", class="' + classes + '"' + styles + "];");
+  }
+  for (const [source, target, kind] of edges) {
+    lines.push('"0x' + source.toString(16) + '" -> "0x' + target.toString(16) + '" [color="' + (kind === "unresolved" ? "gray" : "blue") + '", label="' + kind + '"];');
+  }
+  lines.push("}");
+  return lines.join("\n");
+}
 function dotWideGraph() {
   const lines = [
     "digraph wide_cfg {",
     'graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.18", ranksep="0.52", splines=true];',
     'node [shape=box, style="rounded,filled", fillcolor="#222834", color="#4b5566", fontcolor="#e4eaf2", fontname="monospace", fontsize=10, margin="0.12,0.08"];',
     'edge [color="blue", arrowsize=0.65, fontname="monospace", fontsize=9];',
-    'entry [label="0x3000\\lentry: validate packet length and metadata\\l", color="#d9974f", penwidth=2.2];',
+    'entry [label="0x3000\\lentry: validate packet length and metadata\\l", class="entry", color="#d9974f", penwidth=2.2];',
     'join [label="0x3100\\ljoin: normalize status and cleanup\\l"];',
     'exit [label="0x3110\\lreturn status\\l"];'
   ];
@@ -77,6 +123,7 @@ try {
   // The browser CI job has network access; no alternate renderer is substituted.
   let opened = false;
   const apiPosts = [];
+  const callgraphQueries = [];
   const fixtureInfo = {
     id: "doc-1", name: "fixture.bin", path: "fixture.bin", format: "elf", arch: "x86_64",
     entry: "0x1000", base: "0x0", counts: {functions: 1, strings: 1, imports: 1, classes: 0},
@@ -129,6 +176,19 @@ try {
       rows: [{addr: "0x1000", hex: "90 c3", ascii: ".."}]};
     else if (endpoint === "export") body = {version: 1, name: "fixture.bin", annotations: []};
     else if (endpoint === "mark") body = {output: "marked " + (payload?.kind || "")};
+    else if (endpoint === "callgraph") {
+      const addr = url.searchParams.get("func") || "0x1000";
+      const direction = url.searchParams.get("direction") || "both";
+      const depth = Number(url.searchParams.get("depth") || "1");
+      callgraphQueries.push({addr, direction, depth});
+      const addrNum = Number(BigInt(addr));
+      const rootName = addr.toLowerCase() === "0x1000" ? "branch_loop_fixture" : "selected_function";
+      const dot = dotCallGraph(addrNum, rootName, direction, depth);
+      body = {name: rootName, addr, dot, direction, depth,
+        nodes: dot.split("\n").filter(line => line.includes("[label=")).length,
+        edges: (dot.match(/ -> /g) || []).length,
+        truncated: false, node_limit: 64, edge_limit: 128};
+    }
     else if (endpoint === "cfg") {
       const addr = url.searchParams.get("func") || "0x1000";
       const count = addr === "0x2100" ? 180 : addr === "0x2000" ? 48 : 7;
@@ -229,9 +289,9 @@ try {
   assert.equal(darkTextStyle.fill, "rgb(228, 234, 242)", JSON.stringify(darkTextStyle));
   assert.equal(darkTextStyle.stroke, "none", "node text must not inherit the graph's edge stroke");
   assert(fit.graph.left >= fit.viewport.left + 3, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 3, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 3, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 3, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
   await page.screenshot({ path: `${out}/branch-loop-dark.png`, fullPage: false });
 
   // Keyboard access must select a block and visibly expose focus.
@@ -276,9 +336,9 @@ try {
   assert.equal(await page.locator("#gminimap").isVisible(), true, "large graphs should show the minimap");
   assert.equal(await page.locator("#gminimap .minimap-viewport").count(), 1, "minimap should show the current viewport");
   assert(fit.graph.left >= fit.viewport.left + 2, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 2, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 2, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 2, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
   await page.screenshot({ path: `${out}/large-graph-fit.png`, fullPage: false });
 
   // Minimap clicks should recenter the viewport without starting a background drag.
@@ -351,17 +411,39 @@ try {
     "minimap should preserve block silhouettes rather than collapsing into a text line");
   assert(await page.locator("#graph > svg g.node text").count() > 0, "main graph must retain its full labels");
   assert(fit.graph.left >= fit.viewport.left + 2, JSON.stringify(fit));
-  assert(fit.graph.top >= fit.viewport.top + 2, JSON.stringify(fit));
+  assert(fit.graph.top >= fit.viewport.top + 50, JSON.stringify(fit));
   assert(fit.graph.right <= fit.viewport.right - 2, JSON.stringify(fit));
-  assert(fit.graph.bottom <= fit.viewport.bottom - 2, JSON.stringify(fit));
+  assert(fit.graph.bottom <= fit.viewport.bottom - 40, JSON.stringify(fit));
+  const fitAllZoom = parseInt(await page.locator("#zval").textContent(), 10);
+  assert(fitAllZoom < 20, "stress fixture should reproduce the expected small fit-all scale: " + fitAllZoom);
   await page.screenshot({ path: `${out}/stress-180-graph-fit.png`, fullPage: false });
+
+  // Fit-all proves the graph can be fully overviewed but makes a tall chain hard to read.
+  // The explicit Entry action must restore the readable starting view without reopening the file.
+  assert.equal(await page.locator("#zentry").isVisible(), true, "CFG should expose a readable Entry action");
+  await page.locator("#zentry").click();
+  await page.waitForTimeout(200);
+  const entryReturnZoom = parseInt(await page.locator("#zval").textContent(), 10);
+  assert(entryReturnZoom >= 50, "Entry should restore readable scale after fit-all: " + entryReturnZoom);
+  const entryNodeBounds = await page.locator("#graph > svg g.node").first().evaluate(el => {
+    const r = el.getBoundingClientRect(), v = document.querySelector("#graph").getBoundingClientRect();
+    return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,
+      viewport:{left:v.left,top:v.top,right:v.right,bottom:v.bottom}};
+  });
+  assert(entryNodeBounds.left >= entryNodeBounds.viewport.left, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.top >= entryNodeBounds.viewport.top + 50, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.right <= entryNodeBounds.viewport.right, JSON.stringify(entryNodeBounds));
+  assert(entryNodeBounds.bottom <= entryNodeBounds.viewport.bottom, JSON.stringify(entryNodeBounds));
+  await page.screenshot({ path: `${out}/stress-180-entry-after-fit.png`, fullPage: false });
 
   // Wide fan-out/join graph with long labels catches horizontal clipping and minimap aspect bugs.
   await page.evaluate(() => go("0x3000", {mode: "cfg"}));
   await page.locator("#graph > svg g.graph").waitFor();
+  assert.equal(await page.locator("#glayout").getAttribute("data-layout"), "LR",
+    "a switch-style high-fanout CFG should auto-select a vertical fan-out layout");
   const wideEntryZoom = parseInt(await page.locator("#zval").textContent(), 10);
-  assert(wideEntryZoom >= 60 && wideEntryZoom <= 75,
-    "wide CFG should expose multiple branch destinations while preserving readable labels, got " + wideEntryZoom + "%");
+  assert(wideEntryZoom >= 60 && wideEntryZoom <= 85,
+    "wide CFG entry layout should fit the branch neighborhood and shared join, got " + wideEntryZoom + "%");
   const visibleWideNodes = await page.evaluate(() => {
     const host = document.querySelector("#graph").getBoundingClientRect();
     return [...document.querySelectorAll("#graph > svg g.node")].filter(node => {
@@ -371,6 +453,31 @@ try {
   });
   assert(visibleWideNodes >= 6,
     "wide CFG entry view should expose multiple branch destinations, not just the entry node: " + visibleWideNodes);
+  const wideNeighborhood = await page.evaluate(() => {
+    const host = document.querySelector("#graph").getBoundingClientRect();
+    const nodes = [...document.querySelectorAll("#graph > svg g.node")];
+    const fullyVisible = node => {
+      const r = node.getBoundingClientRect();
+      return r.left >= host.left + 1 && r.right <= host.right - 1 &&
+        r.top >= host.top + 50 && r.bottom <= host.bottom - 42;
+    };
+    const nodeName = node => node.querySelector(":scope > title")?.textContent?.trim() || "";
+    const entry = nodes.find(n => nodeName(n) === "entry");
+    const cases = nodes.filter(n => /^case\d+$/.test(nodeName(n)));
+    const join = nodes.find(n => nodeName(n) === "join");
+    const exit = nodes.find(n => nodeName(n) === "exit");
+    return { entryVisible: !!entry && fullyVisible(entry),
+      joinVisible: !!join && fullyVisible(join),
+      exitVisible: !!exit && fullyVisible(exit),
+      visibleCases: cases.filter(fullyVisible).length, totalCases: cases.length,
+      titles: nodes.map(nodeName) };
+  });
+  assert(wideNeighborhood.entryVisible, "horizontal layout must keep the entry inside the unobscured viewport");
+  assert(wideNeighborhood.joinVisible, "horizontal entry view must include the shared join instead of clipping it at the right edge: " + JSON.stringify(wideNeighborhood));
+  assert(wideNeighborhood.exitVisible, "horizontal entry view should include the return/exit successor when its join is visible: " + JSON.stringify(wideNeighborhood));
+  assert(wideNeighborhood.visibleCases >= 10,
+    "wide CFG should fit nearly all 12 direct branch targets in the readable initial view: " +
+    JSON.stringify(wideNeighborhood));
   const labelOverflow = await page.evaluate(() => {
     const problems = [];
     document.querySelectorAll("#graph > svg g.node").forEach(node => {
@@ -388,6 +495,29 @@ try {
   });
   assert.deepEqual(labelOverflow, [], "CFG text must fit inside its rendered node shape: " + JSON.stringify(labelOverflow));
   await page.screenshot({ path: out + "/wide-graph-entry-view.png", fullPage: false });
+
+  // The user can switch layout direction explicitly; the graph must re-render in the chosen
+  // orientation, preserve all nodes, and return to the fan-out-friendly automatic layout.
+  await page.locator("#glayout").click();
+  await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "TB");
+  await page.locator("#graph > svg g.graph").waitFor();
+  await page.waitForTimeout(180);
+  assert.equal(await page.locator("#graph > svg g.node").count(), 15);
+  const topDownFit = await fitCheck();
+  assert(topDownFit.graph.left >= topDownFit.viewport.left + 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.top >= topDownFit.viewport.top + 50, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.right <= topDownFit.viewport.right - 2, JSON.stringify(topDownFit));
+  assert(topDownFit.graph.bottom <= topDownFit.viewport.bottom - 40, JSON.stringify(topDownFit));
+  await page.screenshot({ path: out + "/wide-graph-top-down-layout.png", fullPage: false });
+  // Entry is a semantic reset, not another Fit-all: return to the automatic fan-out-friendly
+  // orientation and readable root/cases/join/exit context after the user tries top-down layout.
+  await page.locator("#zentry").click();
+  await page.waitForFunction(() => document.querySelector("#glayout")?.getAttribute("data-layout") === "LR");
+  await page.locator("#graph > svg g.graph").waitFor();
+  await page.waitForTimeout(120);
+  assert(parseInt(await page.locator("#zval").textContent(), 10) >= 60,
+    "Entry should restore readable fan-out view after top-down fit");
+
   await page.locator("#zfit").click();
   await page.waitForTimeout(150);
   const wideFit = await fitCheck();
@@ -440,6 +570,72 @@ try {
   expectedViewBox.forEach((value, i) => assert(Math.abs(viewBox[i] - value) < 2,
     "export viewBox must use transformed root-SVG bounds; expected " + expectedViewBox + " got " + viewBox));
 
+  // The interprocedural Calls view should preserve node kinds, direction/depth controls, and SVG export.
+  await page.locator('#modes button[data-mode="callgraph"]').click();
+  await page.locator("#graph > svg g.graph").waitFor();
+  const initialCallgraphRequest = callgraphQueries.at(-1);
+  const initialCallgraphRoot = await page.locator("#graph > svg g.node.cg-root > title").first().textContent();
+  assert.equal(initialCallgraphRoot, initialCallgraphRequest.addr,
+    "the selected function's address must be the root of the rendered call graph");
+  assert.equal(await page.locator("#cgDirection").inputValue(), "both");
+  assert.equal(await page.locator("#cgDepth").inputValue(), "1");
+  assert(await page.locator("#graph > svg g.node.cg-function").count() >= 2);
+  assert.equal(await page.locator("#graph > svg g.node.cg-import").count(), 0);
+  let callFit = await fitCheck();
+  assert(callFit.graph.left >= callFit.viewport.left + 3, "small call graph clipped on left: " + JSON.stringify(callFit));
+  assert(callFit.graph.top >= callFit.viewport.top + 50, "small call graph overlaps toolbar: " + JSON.stringify(callFit));
+  assert(callFit.graph.right <= callFit.viewport.right - 3, "small call graph clipped on right: " + JSON.stringify(callFit));
+  assert(callFit.graph.bottom <= callFit.viewport.bottom - 36, "small call graph overlaps legend: " + JSON.stringify(callFit));
+  await page.screenshot({path: out + "/callgraph-both-depth1.png", fullPage: false});
+
+  await page.locator("#cgDirection").selectOption("callers");
+  await page.locator("#cgDepth").selectOption("2");
+  await page.waitForFunction(() => document.querySelectorAll("#graph > svg g.node.cg-function").length === 3);
+  assert(callgraphQueries.some(q => q.direction === "callers" && q.depth === 2),
+    "changing call graph direction/depth should issue an API request");
+  assert.equal(await page.locator("#graph > svg g.node.cg-import").count(), 0);
+  assert.equal(await page.locator("#graph > svg g.node.cg-unresolved").count(), 0);
+  await page.screenshot({path: out + "/callgraph-callers-depth2.png", fullPage: false});
+
+  await page.locator("#cgDirection").selectOption("callees");
+  await page.locator("#cgDepth").selectOption("2");
+  await page.waitForFunction(() => document.querySelectorAll("#graph > svg g.node.cg-import").length === 1);
+  assert.equal(await page.locator("#graph > svg g.node.cg-unresolved").count(), 1);
+  assert(callgraphQueries.some(q => q.direction === "callees" && q.depth === 2));
+  callFit = await fitCheck();
+  assert.equal(callFit.nodes, 4, "callee depth-2 fixture should include function, callee, import and unresolved nodes");
+  assert(callFit.graph.left >= callFit.viewport.left + 3, "callee depth-2 graph clipped on left: " + JSON.stringify(callFit));
+  assert(callFit.graph.top >= callFit.viewport.top + 50, "callee depth-2 graph overlaps toolbar: " + JSON.stringify(callFit));
+  assert(callFit.graph.right <= callFit.viewport.right - 3, "callee depth-2 graph clipped on right: " + JSON.stringify(callFit));
+  assert(callFit.graph.bottom <= callFit.viewport.bottom - 36, "callee depth-2 graph overlaps legend: " + JSON.stringify(callFit));
+  await page.screenshot({path: out + "/callgraph-callees-depth2.png", fullPage: false});
+  const callsSvgPromise = page.waitForEvent("download");
+  await page.locator("#zsvg").click();
+  const callsSvg = await callsSvgPromise;
+  assert(callsSvg.suggestedFilename().endsWith("-callgraph.svg"));
+
+  // Inspect the public GitHub Pages section that documents the shipped call-graph workflow.
+  const pagesPage = await browser.newPage({viewport: {width: 1440, height: 1000}, deviceScaleFactor: 1});
+  pagesPage.on("pageerror", e => { throw e; });
+  // Disable scroll-timeline entrance animations in screenshot CI so the artifact depicts settled
+  // product content instead of a transient, partially transparent frame.
+  await pagesPage.emulateMedia({reducedMotion: "reduce"});
+  await pagesPage.goto("http://127.0.0.1:8765/docs/index.html", {waitUntil: "domcontentloaded"});
+  await pagesPage.locator("#deep-h").waitFor();
+  await pagesPage.locator("#deep-h").scrollIntoViewIfNeeded();
+  assert(await pagesPage.getByText("See the shape of a function.", {exact: true}).isVisible());
+  const cfgHelp = await pagesPage.locator("section[aria-labelledby='deep-h'] .duo").first().innerText();
+  assert(cfgHelp.includes("Entry") && cfgHelp.includes("LR/TB"), "Pages CFG help must explain Entry and layout switching");
+  assert(!cfgHelp.includes("**Entry**") && !cfgHelp.includes("**LR/TB**"), "HTML help must not show literal Markdown asterisks");
+  await pagesPage.waitForTimeout(150);
+  await pagesPage.screenshot({path: out + "/github-pages-cfg-feature.png", fullPage: false});
+
+  await pagesPage.locator("#calls-h").scrollIntoViewIfNeeded();
+  assert(await pagesPage.getByText("Follow a function through the program.", {exact: true}).isVisible());
+  assert.equal(await pagesPage.locator('svg[aria-label*="Call graph with a selected parse_packet function"]').count(), 1);
+  await pagesPage.waitForTimeout(150);
+  await pagesPage.screenshot({path: out + "/github-pages-callgraph-feature.png", fullPage: false});
+
   // End-to-end smoke: real compiled ELF -> RDIS server/analysis/render -> real Chromium CFG.
   // This complements the synthetic large-graph fixtures above, which isolate layout behavior.
   assert(fs.existsSync("/tmp/rdis-cfg-fixture"), "compiled real-binary fixture is missing");
@@ -481,9 +677,9 @@ try {
   assert(realMetrics.nodes >= 4, "real RDIS CFG should contain multiple basic blocks: " + JSON.stringify(realMetrics));
   assert(realMetrics.edges >= 3, "real RDIS CFG should contain control-flow edges: " + JSON.stringify(realMetrics));
   assert(realMetrics.graph.left >= realMetrics.viewport.left + 2, JSON.stringify(realMetrics));
-  assert(realMetrics.graph.top >= realMetrics.viewport.top + 2, JSON.stringify(realMetrics));
+  assert(realMetrics.graph.top >= realMetrics.viewport.top + 50, JSON.stringify(realMetrics));
   assert(realMetrics.graph.right <= realMetrics.viewport.right - 2, JSON.stringify(realMetrics));
-  assert(realMetrics.graph.bottom <= realMetrics.viewport.bottom - 2, JSON.stringify(realMetrics));
+  assert(realMetrics.graph.bottom <= realMetrics.viewport.bottom - 40, JSON.stringify(realMetrics));
   await realPage.screenshot({ path: `${out}/real-binary-cfg.png`, fullPage: false });
   await browser.close();
   console.log("CFG browser tests passed in " + browserName + "; screenshots and SVG are in " + out + "/");

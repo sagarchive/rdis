@@ -2,7 +2,8 @@
 
     goto main            rename 0x1000 init     comment main entry point
     xrefs _printf        find usage             findhex 55 48 89 e5 ??
-    decompile main       procs net              strings http
+    decompile main       callgraph main [both|callers|callees] [depth]
+    procs net              strings http
     mark P 0x1000        bookmark main          info
 
 `py <expr>` evaluates Python against the open document only when the server was started with
@@ -87,6 +88,31 @@ def _dispatch(prog, cmd, args):
         if f is None:
             raise ValueError(f"no procedure at {a:#x}")
         return {"output": Decompiler(prog, f).c()}
+    if cmd in ("callgraph", "cg"):
+        if getattr(prog, "wasm", False):
+            raise ValueError("WebAssembly call-graph edges are not yet reconstructed from validated module call indices")
+        if len(args) > 3:
+            raise ValueError("usage: callgraph NAME [both|callers|callees] [depth 1..4]")
+        a = prog.resolve(need(0))
+        f = prog.function_at(a) or prog.functions.get(a)
+        if f is None:
+            raise ValueError(f"no procedure at {a:#x}")
+        direction = args[1] if len(args) > 1 else "both"
+        if direction not in ("both", "callers", "callees"):
+            raise ValueError("direction must be one of: both, callers, callees")
+        raw_depth = args[2] if len(args) > 2 else "1"
+        try:
+            depth = int(raw_depth)
+        except (TypeError, ValueError):
+            raise ValueError("depth must be an integer from 1 to 4") from None
+        if not 1 <= depth <= 4:
+            raise ValueError("depth must be from 1 to 4")
+        from .render import callgraph
+        result = callgraph(prog, f, direction=direction, depth=depth)
+        cap = " (truncated at configured graph limits)" if result["truncated"] else ""
+        return {"output": result["dot"], "goto": hex(a), "nodes": result["nodes"],
+                "edges": result["edges"], "truncated": result["truncated"],
+                "summary": f"{direction}, depth {depth}: {result['nodes']} nodes, {result['edges']} edges{cap}"}
     if cmd == "find":
         q = need(0).lower()
         hits = [f"{a:#x}  {n}" for a, n in sorted(prog.names.items()) if q in (prog.display(a) or n).lower()]

@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "corpus_id": "rdis-baseline-corpus-v4",
+  "generated_from_ci": {
+    "workflow_run_id": 39411079671,
+    "workflow_url": "https://github.com/sagarchive/rdis/actions/runs/39411079671",
+    "pull_request": 5,
+    "pull_request_head_sha": "987ad310f7784826ad198d238fc9ea2682865fa6",
+    "tested_merge_checkout_sha": "29fdc234129abccfa95aeeef8f99eb6e07d8e554",
+    "conclusion": "success"
+  },
+  "metrics": [
+    {
+      "fixture": "compiler-switch-cfg-v1",
+      "architecture": "x86_64",
+      "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "optimization": "-O0",
+      "jump_tables": "disabled to isolate direct branch edge semantics",
+      "oracle": "GNU objdump direct-branch CFG reconstruction",
+      "expected_edges": 48,
+      "observed_edges": 48,
+      "true_positives": 48,
+      "false_positives": [],
+      "false_negatives": [],
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    {
+      "fixture": "optimized-relative-jump-table-v1",
+      "architecture": "x86_64",
+      "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "optimization": "-O2",
+      "pie": true,
+      "case_count": 12,
+      "table_encoding": "12 signed little-endian int32 offsets relative to RIP-relative base",
+      "table_base": "0x2004",
+      "dispatch": "0x12dd",
+      "expected_blocks": 15,
+      "expected_edges": 14,
+      "observed_edges": 14,
+      "true_positives": 14,
+      "false_positives": [],
+      "false_negatives": [],
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "oracle": "GNU objdump instruction decode + independently parsed signed int32 .rodata offsets"
+    },
+    {
+      "fixture": "aarch64-branch-cfg-v1",
+      "architecture": "arm64",
+      "expected_edges": 4,
+      "observed_edges": 4,
+      "true_positives": 4,
+      "false_positives": [],
+      "false_negatives": [],
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    {
+      "fixture": "x86-64-loop-cfg-v1",
+      "architecture": "x86_64",
+      "expected_edges": 3,
+      "observed_edges": 3,
+      "true_positives": 3,
+      "false_positives": [],
+      "false_negatives": [],
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    {
+      "fixture": "function-discovery-v1",
+      "architecture": "x86_64",
+      "expected_function_starts": 7,
+      "configurations": [
+        {
+          "optimization": "-O0",
+          "symbols": true,
+          "observed": 7,
+          "precision": 1,
+          "recall": 1,
+          "f1": 1
+        },
+        {
+          "optimization": "-O0",
+          "symbols": false,
+          "observed": 7,
+          "precision": 1,
+          "recall": 1,
+          "f1": 1
+        },
+        {
+          "optimization": "-O2",
+          "symbols": true,
+          "observed": 7,
+          "precision": 1,
+          "recall": 1,
+          "f1": 1
+        },
+        {
+          "optimization": "-O2",
+          "symbols": false,
+          "observed": 7,
+          "precision": 1,
+          "recall": 1,
+          "f1": 1
+        }
+      ]
+    }
+  ],
+  "interpretation": {
+    "claim": "All enumerated ground-truth edges and named function starts matched in these small fixtures.",
+    "limitations": [
+      "The switch fixtures are small and compiler-specific, not an exhaustive jump-table accuracy score.",
+      "Indirect-call/branch recall, absolute pointer tables, exception/unwind flow, overlapping/shared/tail blocks and non-x86 jump-table patterns remain unverified.",
+      "F1 values apply only to the listed fixtures and compiler settings."
+    ]
+  },
+  "artifacts": {
+    "python_310": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258983927",
+    "python_312": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12258424366",
+    "macos_arm64": "https://github.com/sagarchive/rdis/actions/runs/39411079671/artifacts/12259232225"
+  }
+}

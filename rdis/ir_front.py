@@ -12,6 +12,7 @@ is computed, before control transfers), and `covered` lists every instruction ad
 """
 import re
 
+from . import sleigh
 from .arch import CALL, RET, JMP, CJMP, IJMP, mem_operand
 
 try:
@@ -21,6 +22,8 @@ except ImportError:      # optional: NativeFront covers MIPS / RISC-V without it
 
 
 def _lang(arch, thumb):
+    if getattr(arch, "lang", None):          # a SleighArch carries its own language id
+        return arch.lang
     n = arch.name
     if n == "x86_64":
         return "x86:LE:64:default"
@@ -49,7 +52,9 @@ class PcodeFront:
 
     def _context(self, thumb):
         if thumb not in self._ctx:
-            c = pypcode.Context(_lang(self.arch, thumb))
+            lang = _lang(self.arch, thumb)
+            self._langs = {**getattr(self, "_langs", {}), thumb: lang}
+            c = pypcode.Context(lang)
             if thumb:
                 c.setVariableDefault("TMode", 1)
             self._ctx[thumb] = c
@@ -78,7 +83,7 @@ class PcodeFront:
         """
         ctx = self._context(thumb)
         try:
-            tr = ctx.translate(code, addr, max_instructions=1)
+            tr = sleigh.safe_translate(ctx, getattr(self, "_langs", {}).get(thumb), code, addr, max_instructions=1)
         except Exception:
             return None, [], []
         ops, covered, op_addresses = [], [], []

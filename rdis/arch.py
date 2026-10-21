@@ -26,6 +26,10 @@ class Arch:
 
     delay_slot = False  # MIPS: the instruction after a branch executes before the branch takes
 
+    def slot(self, i, k):
+        """Does instruction `i` (of kind `k`) have a delay slot? Per ISA here; per instruction for SLEIGH."""
+        return self.delay_slot and k in (JMP, CJMP, IJMP, RET)
+
     def kind(self, i):
         # cache per instruction: kind() is called many times for the same decoded insn, and each
         # capstone group lookup rebuilds the group list, so this dominated analysis time.
@@ -230,4 +234,14 @@ def make(name):
         mode = (cs.CS_MODE_RISCV32 if bits == 32 else cs.CS_MODE_RISCV64) | cs.CS_MODE_RISCVC
         return Arch(f"riscv{bits}", cs.CS_ARCH_RISCV, mode, bits, [f"a{n}" for n in range(8)],
                     "a0", "sp", "s0", b"\x13\x00\x00\x00", [f"fa{n}" for n in range(8)], "fa0")
+    from . import sleigh                      # every other CPU Ghidra describes, through pypcode
+    a = sleigh.make(name)
+    if a is not None:
+        return a
+    from . import plugins                     # a CPU backend supplied by a plugin; never shadows a built-in
+    a = plugins.find_arch(name)
+    if a is not None:
+        if not isinstance(a, Arch):
+            raise ValueError(f"plugin architecture {name!r} did not return an Arch")
+        return a
     raise ValueError(f"unsupported architecture: {name}")

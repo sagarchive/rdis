@@ -16,17 +16,21 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 |---|---|---|
 | Formats | Mach-O (thin + fat), ELF, PE, **WebAssembly**, raw firmware | Mach-O/ELF/PE |
 | Containers | **APK / IPA / AAR / JAR / ZIP** (open one lib or the whole package), **DMG** (via `hdiutil`), **tar / tar.gz / tar.xz**, transparent **gzip / xz / bzip2**; any other file opens as a **raw** binary | — |
-| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM** | x86/x64/ARM |
+| CPUs | x86, x86-64, **ARM (ARM + Thumb)**, ARM64, **MIPS32/64 (BE/LE, delay slots)**, **RISC-V 32/64 (+RVC)**, **WASM**; with `pypcode`, **12 more CPU families (19 named variants) through Ghidra's SLEIGH specs** (PowerPC, SPARC, 68k, AVR, MSP430, SuperH, Z80, 6502, Xtensa, eBPF, LoongArch, TriCore) and **any of its 194 language variants** as `--arch sleigh:<id>` (`rdis --list-archs`) | x86/x64/ARM |
 | Stripped binaries | recovers a code range from executable segments when section headers are gone | yes |
 | Multi-user web | **per-visitor sessions, shared read-only analysis, concurrency-tested** | single desktop app |
+| Binary diff | function matching across builds (name, address-masked bytes, CFG shape, strings, call graph, similarity) with confidence and explicit ambiguity; annotation transfer above a threshold | not listed on its product page |
+| Library recognition | local signature databases built from any binary with symbols (`--sig-make`, `--sig`): relocation-masked hashes, no tiny or ambiguous matches, every name carries its source and confidence | not listed on its product page |
 | Function / basic-block discovery | symbols, function-starts, `.pdata`, encoding-level prologue scan (incl. Dart/Flutter AOT), call graph | yes |
-| Control-flow graph | Interactive browser CFG, zoom-to-fit, pointer-centered zoom, keyboard block selection, standalone SVG + DOT export | Interactive native CFG + PDF export |
+| Control-flow graph | Interactive browser CFG with automatic left-to-right layout for broad switch/fan-out graphs, reversible TB/LR layout, fit/Entry/minimap, keyboard block selection, standalone SVG + DOT export | Interactive native CFG, minimap + PDF export |
+| Interprocedural call graph | GUI Calls view, direction/depth controls, bounded caller/callee graph with local/import/unresolved nodes; CLI, console and MCP interfaces | Graph/call navigation and xrefs |
 | C pseudo-code | CFG structuring and symbolic lifting (x86/ARM); optional SLEIGH/P-code frontend through `pypcode` for architectures mapped by RDIS; native MIPS/RISC-V frontend; experimental typed IR contract and field-layout recovery. Execution suite: 124 optimized, vectorized and struct cases are compiled and compared against reference results; real-binary compile rate is measured separately from semantic correctness | yes |
 | Type/variable recovery | pointer vs int args, access-width types, void/value returns, named locals | yes |
 | Objective-C metadata | classes, categories, **protocols** (+`@optional`, adoption), methods, ivars, properties, selectors, CFStrings | yes |
 | Swift metadata | structs, classes, enums + fields, **protocol conformances**, demangled | yes |
 | Struct/field reconstruction | heuristic access-based layouts with observed widths and some type evidence; overlapping views and call-linked layouts are supported; incomplete inference is explicitly experimental | yes |
 | SIMD | **lane-exact, compilable C** for NEON and SSE via vector extensions (`(u32x4)a + (u32x4)b`, `__builtin_reduce_add`), not pseudo-intrinsics | intrinsics |
+| Binary triage | per-section entropy, packing indicators, runtime identification; every finding carries its evidence and none is a verdict (`--triage`, MCP `triage`) | not listed on its product page |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
 | Cross-references | to any address/symbol | yes |
@@ -50,7 +54,14 @@ python tests/compile_rate.py arm64 40 40       # real /usr/bin functions whose o
 API calls are typed from a library of 206 system prototypes (libc, POSIX, CoreFoundation, the
 Objective-C runtime), and Objective-C methods decompile to valid Objective-C. 32-bit ARM/Thumb has
 fewer verified idioms than arm64/x86-64. MIPS and RISC-V decompile through the IR,
-tested on Debian's static busybox (1,200 functions, 0 failures). The pseudo-code is a reconstruction
+tested on Debian's static busybox (1,200 functions, 0 failures).
+
+The SLEIGH-backed CPUs are newer. For PowerPC, 68k, AVR, MSP430, SPARC, SuperH, Z80, 6502, Xtensa, eBPF and
+LoongArch, function discovery, call edges, CFGs (including delay slots) and the P-code IR are checked against
+hand-assembled programs (`tests/test_sleigh.py`); TriCore and the other endian/word-size variants use the same
+path without a fixture of their own, and there is no compiler-built corpus for any of them yet. Data cross-references (strings, globals) are not recovered, the AVR register
+file shows up as memory, SPARC register windows are not modelled, and `sleigh:<id>` has no calling convention,
+so parameters and return values are not recovered. Treat their pseudo-code as a P-code reading, not a verified decompile. The pseudo-code is a reconstruction
 of what the machine code computes, not the original source.
 
 ## Install
@@ -96,12 +107,21 @@ python -m rdis BIN                      # list functions
 python -m rdis BIN -f main              # disassemble (annotated with names + strings)
 python -m rdis BIN -f main -d           # decompile to C pseudo-code
 python -m rdis BIN -f main --cfg | dot -Tpng -o cfg.png
+python -m rdis BIN -f main --callgraph --callgraph-direction callers --callgraph-depth 2 | dot -Tsvg -o callers.svg
 python -m rdis BIN --strings
 python -m rdis BIN --classes            # Objective-C / Swift declarations
 python -m rdis BIN --imports
 python -m rdis BIN --arch arm64 ...     # pick a fat Mach-O slice
 python -m rdis BIN --allow-legacy-rdb     # only after verifying an old sidecar's original binary
 python -m rdis blob.bin --loader raw --arch arm64 --base 0x8000 -f start -d   # headerless firmware
+python -m rdis --list-archs                                      # every CPU rdis can load
+python -m rdis --capabilities                                   # what is supported per CPU and level, as JSON
+python -m rdis OLD --diff NEW                                   # match functions across two builds
+python -m rdis BIN --triage                                     # entropy, packing indicators, runtime hints
+python -m rdis BIN -f hash --emulate 0x1234                     # run a function in the P-code emulator
+python -m rdis LIB --sig-make lib.sig                           # signatures from a binary with symbols
+python -m rdis STRIPPED --sig lib.sig                           # name its unnamed functions from them
+python -m rdis OLD --diff NEW --transfer --min-confidence 0.9   # carry renames/comments over (never overwrites)
 ```
 
 Add `--json` to most commands for machine-readable output.
@@ -115,8 +135,7 @@ rdis-gui /path/to/binary --desktop           # native window (needs the [desktop
 
 Familiar three-pane layout: navigator (Proc / Str / Imp / Cls + filter), disassembly with
 clickable call targets, and an inspector for binary info, sections and cross-references. The top
-toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a compact overview; use
-**Detail** for more instructions, **Fit** for the full graph, and the minimap to recenter large
+toggle switches **Assembly / Pseudo-code / CFG / Hex**. The CFG opens in a readable entry-focused view for tall/wide functions and automatically uses a left-to-right layout for very broad switch/fan-out graphs (toggle **LR/TB** to choose manually); use **Fit** for the full graph, **Entry** to return to readable entry-scale after fitting an enormous graph, **Detail** for more instructions, and the minimap to recenter large
 functions. Click or keyboard-focus a block to inspect it; double-click (or press Shift+Enter on a
 focused block) to jump to its listing. The mouse wheel zooms around the pointer, drag pans, and
 Shift+wheel pans. Conditional edges show **T/F** only when the branch target is known; unresolved
@@ -175,8 +194,23 @@ PYTHONPATH=. python -m rdis.mcp_server
 ```
 
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
-(use the venv's python). Tools (12): `info`, `list_functions`, `disassemble`, `decompile`, `cfg`,
-`strings`, `imports`, `classes`, `xrefs`, `hexdump`, `rename`, `comment`.
+(use the venv's python).
+
+35 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+
+| Group | Tools |
+|---|---|
+| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage`, `capabilities` |
+| Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
+| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
+| Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |
+| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks` |
+
+Contract: bad requests get JSON-RPC errors (`-32601` unknown method, `-32602` unknown tool, missing, unknown or
+mistyped argument). A tool that runs and fails returns `isError` with `{"error": {"code", "message"}}` where `code` is
+`not_found`, `invalid_argument`, `denied`, `response_too_large` or `internal`; Python tracebacks go to stderr, never to the
+client. Listings take `limit` (capped at 5,000) and `offset` and report `total` and `truncated`. Read-only tools never write
+a sidecar; the only side effect is the analysis cache (`RDIS_CACHE_DIR`, default `./.rdis_cache`).
 
 These cover the native-provider surface [REA](https://github.com/morluto/rea) expects (pseudocode,
 assembly, strings, symbols, calls, references), so rdis can act as a REA analysis provider in place
@@ -184,16 +218,32 @@ of Hopper/Ghidra/IDA.
 
 ## Plugins
 
-Drop a `.py` file in `./plugins` (or `$RDIS_PLUGINS`) that registers at import:
+A plugin is a `.py` file that declares `RDIS_API = 1` and registers what it adds:
 
 ```python
 from rdis import plugins
-plugins.register_loader("myfmt", probe_fn, load_fn)   # custom file format
-plugins.register_arch("mycpu", arch_factory)          # custom CPU backend
-plugins.register_tool("name", fn, "help")             # extra MCP/CLI tool
+RDIS_API = 1
+plugins.register_loader("myfmt", probe_fn, load_fn)   # a file format: probe(path, opts) -> bool, load(path, arch=None, **opts) -> Image
+plugins.register_arch("mycpu", arch_factory)          # a CPU backend: factory() -> Arch (never shadows a built-in)
+plugins.register_tool("name", fn, "help")             # an analysis tool: fn(program, **kwargs) -> JSON; CLI `--tool`, MCP `plugin_name`
 ```
 
-See `rdis/raw.py` for a complete loader plugin (headerless blobs).
+Working examples for each extension point are in [`examples/plugins/`](examples/plugins/). Try them:
+
+```sh
+export RDIS_PLUGINS=examples/plugins
+python -m rdis --list-plugins                 # each plugin, and the reason any was rejected
+python -m rdis BIN --tool count_calls         # a plugin tool on a binary
+```
+
+**Trust.** A plugin is arbitrary code running with your privileges; there is no sandbox. Plugins load only from
+the directories listed in `RDIS_PLUGINS` (nothing is loaded from the current directory, so opening a file inside
+someone else's repository cannot run their code). Install by adding a file to that directory, remove by deleting it.
+A plugin that fails to import, declares another API version, or claims a name another plugin or the core already owns
+is rejected with its reason (`--list-plugins`), whatever it had registered is rolled back, and everything else keeps
+working. Plugins load in filename order and the first claim to a name wins.
+
+See `rdis/raw.py` for the built-in loader plugin (headerless blobs).
 
 ## Tests
 

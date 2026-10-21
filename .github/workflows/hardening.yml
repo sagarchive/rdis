@@ -14,7 +14,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        include:
+          - python-version: "3.10"
+            constraints-overlay: constraints/baseline-linux-py310.txt
+          - python-version: "3.12"
+            constraints-overlay: constraints/baseline-linux-py312.txt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,12 +26,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install package and runtime dependencies
+        env:
+          CONSTRAINTS_OVERLAY: ${{ matrix.constraints-overlay }}
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install pip==26.2.1
+          python -m pip install -c constraints/baseline-ci.txt -c "$CONSTRAINTS_OVERLAY" -e .
       - name: Build wheel and verify packaged web assets
+        env:
+          CONSTRAINTS_OVERLAY: ${{ matrix.constraints-overlay }}
         run: |
-          python -m pip install build
+          python -m pip install -c constraints/baseline-ci.txt -c "$CONSTRAINTS_OVERLAY" "build==1.6.1"
           python -m build --wheel
           python - <<'PY'
           import glob, zipfile
@@ -36,7 +44,7 @@ jobs:
           with zipfile.ZipFile(wheel[0]) as archive:
               assert "rdis/web/index.html" in archive.namelist()
           PY
-          python -m pip install --force-reinstall dist/*.whl
+          python -m pip install --force-reinstall -c constraints/baseline-ci.txt -c "$CONSTRAINTS_OVERLAY" dist/*.whl
           rdis --help
           rdis-gui --help
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rdis-mcp
@@ -102,11 +110,42 @@ jobs:
           print("SEO/discovery files structurally validated")
           PY
 
-      - name: Run hardening regressions
-        run: python -m unittest discover -s tests -p 'test_hardening.py' -v
-      - name: Run typed IR contract tests
-        run: python -m unittest discover -s tests -p 'test_ir_*.py' -v
-
+      - name: Capture reproducible Python environment
+        if: always()
+        env:
+          CONSTRAINTS_OVERLAY: ${{ matrix.constraints-overlay }}
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --constraints-file constraints/baseline-ci.txt \
+            --constraints-file "$CONSTRAINTS_OVERLAY" \
+            --job "hardening-python-${{ matrix.python-version }}" \
+            --command "python tests/run_baseline.py --profile portable --output-dir artifacts/baseline/run --environment-manifest artifacts/baseline/manifest.json"
+      - name: Run portable baseline corpus
+        run: |
+          python tests/run_baseline.py \
+            --manifest tests/baseline_corpus.json \
+            --profile portable \
+            --output-dir artifacts/baseline/run \
+            --environment-manifest artifacts/baseline/manifest.json
+      - name: Upload Python baseline manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-python-${{ matrix.python-version }}
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Run extended unit suites
+        run: python -m unittest -v tests.test_cfg_unresolved tests.test_diff tests.test_signatures tests.test_mcp_contract tests.test_malformed_inputs tests.test_fuzz_smoke tests.test_plugins tests.test_scorecard tests.test_triage tests.test_function_boundaries tests.test_capabilities tests.test_server_headers
+      # After the baseline capture on purpose: pypcode is an optional extra, so it must not change the
+      # recorded environment. This is the only job that exercises the SLEIGH multi-CPU backend.
+      - name: Run SLEIGH multi-CPU tests (optional pypcode extra)
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m pip install "pypcode==4.0.1"
+          python -m unittest discover -s tests -p 'test_sleigh.py' -v
+          python -m unittest -v tests.test_emulate tests.test_fuzz_smoke
 
   browser-cfg:
     runs-on: ubuntu-latest
@@ -121,9 +160,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install RDIS for real-binary integration test
+        env:
+          CONSTRAINTS_OVERLAY: constraints/baseline-linux-py312.txt
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install pip==26.2.1
+          python -m pip install -c constraints/baseline-ci.txt -c "$CONSTRAINTS_OVERLAY" -e .
       - name: Compile deterministic CFG binary
         run: cc -O0 -g -fno-inline -fno-pie -no-pie tests/fixtures/cfg_fixture.c -o /tmp/rdis-cfg-fixture
       - uses: actions/setup-node@v4
@@ -145,6 +186,28 @@ jobs:
           path: artifacts/cfg-browser-${{ matrix.browser }}/
           if-no-files-found: warn
           retention-days: 14
+      - name: Capture browser test environment
+        if: always()
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+          CONSTRAINTS_OVERLAY: constraints/baseline-linux-py312.txt
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --constraints-file constraints/baseline-ci.txt \
+            --constraints-file "$CONSTRAINTS_OVERLAY" \
+            --job "browser-cfg-${{ matrix.browser }}" \
+            --browser "${PLAYWRIGHT_BROWSER}" \
+            --command "cc -O0 -g -fno-inline -fno-pie -no-pie tests/fixtures/cfg_fixture.c -o /tmp/rdis-cfg-fixture" \
+            --command "node tests/browser_cfg.mjs"
+      - name: Upload browser baseline manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-browser-${{ matrix.browser }}
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30
 
   macos-regression:
     runs-on: macos-14
@@ -154,17 +217,30 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install package and runtime dependencies
+        env:
+          CONSTRAINTS_OVERLAY: constraints/baseline-macos-arm64-py312.txt
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-      - name: Run full product self-check
-        run: python tests/test_rdis.py
-      - name: Record reproducible analysis benchmark
-        run: python tests/benchmark_analysis.py /bin/ls --arch arm64 --repeat 3 --output /tmp/rdis-benchmark.json
-      - name: Show benchmark artifact in CI log
-        run: cat /tmp/rdis-benchmark.json
-      - name: Run execution-checked decompiler maturity suite
-        run: python tests/maturity.py
+          python -m pip install pip==26.2.1
+          python -m pip install -c constraints/baseline-ci.txt -c "$CONSTRAINTS_OVERLAY" -e .
+      - name: Capture macOS baseline environment
+        if: always()
+        env:
+          CONSTRAINTS_OVERLAY: constraints/baseline-macos-arm64-py312.txt
+        run: |
+          python tests/capture_environment.py \
+            --output-dir artifacts/baseline \
+            --constraints-file constraints/baseline-ci.txt \
+            --constraints-file "$CONSTRAINTS_OVERLAY" \
+            --job macos-regression \
+            --command "python tests/run_baseline.py --profile macos-arm64 --output-dir artifacts/baseline/run --environment-manifest artifacts/baseline/manifest.json" \
+            --command "python tests/concurrency_test.py http://127.0.0.1:8781"
+      - name: Run reproducible macOS baseline corpus
+        run: |
+          python tests/run_baseline.py \
+            --manifest tests/baseline_corpus.json \
+            --profile macos-arm64 \
+            --output-dir artifacts/baseline/run \
+            --environment-manifest artifacts/baseline/manifest.json
       - name: Stress multi-visitor isolation and deterministic analysis
         run: |
           rdis-gui --multi-user --host 127.0.0.1 --port 8781 --no-open >/tmp/rdis-server.log 2>&1 &
@@ -188,3 +264,19 @@ jobs:
             cat /tmp/rdis-server-rss.log || true
             exit 1
           fi
+
+      - name: Collect macOS baseline and concurrency artifacts
+        if: always()
+        run: |
+          mkdir -p artifacts/baseline
+          cp artifacts/baseline/run/benchmark-arm64-ls.json artifacts/baseline/benchmark.json 2>/dev/null || true
+          cp /tmp/rdis-server-rss.log artifacts/baseline/server-rss-kib.log 2>/dev/null || true
+          cp /tmp/rdis-server.log artifacts/baseline/server.log 2>/dev/null || true
+      - name: Upload macOS baseline and raw benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdis-baseline-macos
+          path: artifacts/baseline/
+          if-no-files-found: warn
+          retention-days: 30

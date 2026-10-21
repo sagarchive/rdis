@@ -11,7 +11,8 @@ import diffcheck, maturity_cases as M
 
 tiers = sys.argv[1].split(",") if len(sys.argv) > 1 else list(M.TIERS)
 archs = sys.argv[2].split(",") if len(sys.argv) > 2 else ["arm64", "x86_64"]
-only = set(sys.argv[3].split(",")) if len(sys.argv) > 3 else None
+only = set(sys.argv[3].split(",")) if len(sys.argv) > 3 and sys.argv[3] != "all" else None
+tool = sys.argv[4] if len(sys.argv) > 4 else "rdis"
 tot = ok = 0
 for t in tiers:
     src, sup, cases, opts, vec = M.TIERS[t]
@@ -20,10 +21,10 @@ for t in tiers:
             for case in cases:
                 if only and case[0] not in only:
                     continue
-                probs = diffcheck.run(src, arch, [case], opt=opt, support=sup, vectorize=vec)
+                probs = diffcheck.run(src, arch, [case], opt=opt, support=sup, vectorize=vec, tool=tool)
                 tot += 1
                 if probs:
-                    print(f"FAIL {t:6} {arch:6} {opt} {case[0]:10} {probs[0][:5000]}")
+                    print(f"FAIL {tool} {t:6} {arch:6} {opt} {case[0]:10} {probs[0][:5000]}")
                 else:
                     ok += 1
 print(f"\nSCORE {ok}/{tot}")
