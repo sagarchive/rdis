@@ -199,7 +199,6 @@ class Lifter:
         fsrc, fret_value, fret_single = None, False, False   # same tracking for the FP return reg
         rread = fread = False    # was the return register read after its last write?
         tail_ptr = None          # pointer type returned through a tail call to a known API
-        tail_int = False         # tail call to a known API that returns an integer
         fret = self.arch.fret
         ipos = rpos = fpos = 0   # program-order position of the last write to each return reg
         int_votes = fp_votes = 0  # per `ret`: which return register was written most recently
@@ -244,7 +243,10 @@ class Lifter:
                         r_ = self._canon(self.arch.args[n_]) if n_ < len(self.arch.args) else None
                         if pt.endswith("*") and r_ in args and r_ in still_arg:
                             proto_ptr.setdefault(r_, pt)
-                    retsrc = fsrc = "call"   # a (tail) call clobbers/produces the return regs
+                    # For regular CALLs to known value-returning APIs, retsrc was set to "value" above.
+                    # For tail calls and calls to void/unknown functions, the return reg is clobbered.
+                    if not (k == CALL and pr and pr[0] not in ("void", "double", "float")):
+                        retsrc = fsrc = "call"   # a (tail) call clobbers/produces the return regs
                 else:
                     rd, wr = self._rw(i)
                     rread |= self._canon(self.arch.ret) in rd and retsrc == "value"
@@ -339,8 +341,6 @@ class Lifter:
             fret_value, fp_votes, int_votes = True, 1, 0
         elif use == "int" and ret_is_value:
             fp_votes = 0
-        elif use is None and tail_int and not fret_value:
-            ret_is_value, int_votes = True, int_votes + 1      # a bare thunk to an int-returning API, no caller to say otherwise
         elif use == "none":
             # every caller ignores both return registers (checked across the CFG): no result
             ret_is_value = fret_value = False
