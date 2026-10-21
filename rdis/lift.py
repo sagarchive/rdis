@@ -235,18 +235,11 @@ class Lifter:
                             ret_is_value, int_votes = True, int_votes + 1
                             if pr[0].endswith("*"):
                                 tail_ptr = pr[0]
-                    if tail and pr and pr[0] != "void" and not pr[0].endswith("*") and pr[0] not in ("double", "float"):
-                        tail_int = True
-                    if k == CALL and pr and pr[0] not in ("void", "double", "float"):
-                        retsrc, rpos, rread = "value", ipos, False      # a known API's result lands in the return register
                     for n_, pt in enumerate(pr[1] if pr else ()):
                         r_ = self._canon(self.arch.args[n_]) if n_ < len(self.arch.args) else None
                         if pt.endswith("*") and r_ in args and r_ in still_arg:
                             proto_ptr.setdefault(r_, pt)
-                    # For regular CALLs to known value-returning APIs, retsrc was set to "value" above.
-                    # For tail calls and calls to void/unknown functions, the return reg is clobbered.
-                    if not (k == CALL and pr and pr[0] not in ("void", "double", "float")):
-                        retsrc = fsrc = "call"   # a (tail) call clobbers/produces the return regs
+                    retsrc = fsrc = "call"   # a (tail) call clobbers/produces the return regs
                 else:
                     rd, wr = self._rw(i)
                     rread |= self._canon(self.arch.ret) in rd and retsrc == "value"
