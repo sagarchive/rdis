@@ -80,6 +80,18 @@ def run_signatures(a, prog):
     print(f"{len(out['matches'])} named, {len(out['ambiguous'])} ambiguous")
 
 
+def run_sig_build_db(a):
+    """Build a signature database from system libraries."""
+    from . import sig_db
+    arch = a.arch or "x86_64"
+    sig_db.build_platform_signature_db(
+        a.sig_build_db,
+        arch,
+        lib_dirs=a.sig_lib_dir,
+        extra_libs=a.sig_extra_lib,
+    )
+
+
 def run_triage(a, path):
     from .triage import triage
     out = triage(path, arch=a.arch)
@@ -151,15 +163,17 @@ def list_plugins():
 
 
 def main(argv=None):
-    if "--list-archs" in (sys.argv[1:] if argv is None else argv):
+    args_list = sys.argv[1:] if argv is None else argv
+    if "--list-archs" in args_list:
         return list_archs()
-    if "--list-plugins" in (sys.argv[1:] if argv is None else argv):
+    if "--list-plugins" in args_list:
         return list_plugins()
-    if "--capabilities" in (sys.argv[1:] if argv is None else argv):
+    if "--capabilities" in args_list:
         from .capabilities import capabilities
         return print(json.dumps(capabilities(), indent=1, sort_keys=True))
+    
     p = argparse.ArgumentParser(prog="rdis", description="multi-format disassembler and decompiler")
-    p.add_argument("binary")
+    p.add_argument("binary", nargs="?", help="binary file to analyze (optional for --sig-build-db)")
     p.add_argument("-f", "--func", help="function name, sub_xxx, or 0xADDR")
     p.add_argument("-d", "--decompile", action="store_true", help="emit C pseudo-code")
     p.add_argument("--cfg", action="store_true", help="emit control-flow graph for one function (Graphviz DOT)")
@@ -186,6 +200,9 @@ def main(argv=None):
     p.add_argument("--allow-legacy-rdb", action="store_true",
                    help="import an old sidecar without a content hash (verify the original binary first)")
     p.add_argument("--sig-make", metavar="DB", help="write a signature database from this binary's named functions")
+    p.add_argument("--sig-build-db", metavar="DB", help="build a signature database from system libraries (libc, libc++, OpenSSL, zlib) for current platform/arch")
+    p.add_argument("--sig-lib-dir", action="append", help="additional library directory for --sig-build-db")
+    p.add_argument("--sig-extra-lib", action="append", help="extra library file to include in --sig-build-db")
     p.add_argument("--sig", metavar="DB", help="name this binary's unnamed functions from a signature database")
     p.add_argument("--emulate", metavar="ARGS", help="run -f/--func in the P-code emulator with comma-separated "
                    "integer arguments (e.g. 7,0x10); stops with an error on anything it cannot model")
@@ -205,6 +222,16 @@ def main(argv=None):
         p.error("--callgraph cannot be combined with --cfg or --decompile")
     if not a.callgraph and (a.callgraph_direction != "both" or a.callgraph_depth != 1):
         p.error("--callgraph-direction and --callgraph-depth require --callgraph")
+    
+    # Handle --sig-build-db which doesn't require a binary
+    if a.sig_build_db:
+        if not a.arch:
+            p.error("--sig-build-db requires --arch")
+        return run_sig_build_db(a)
+
+    if not a.binary:
+        p.error("binary argument is required")
+    
     try:
         path = a.binary
         if a.entry:

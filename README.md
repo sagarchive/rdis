@@ -196,15 +196,15 @@ PYTHONPATH=. python -m rdis.mcp_server
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
 (use the venv's python).
 
-35 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+41 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
 
 | Group | Tools |
 |---|---|
 | Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage`, `capabilities` |
 | Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
-| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
+| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures`, `sig_db_load`, `sig_db_match`, `xrefs_from`, `exports`, `globals` |
 | Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |
-| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks` |
+| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks`, `sig_db_build` |
 
 Contract: bad requests get JSON-RPC errors (`-32601` unknown method, `-32602` unknown tool, missing, unknown or
 mistyped argument). A tool that runs and fails returns `isError` with `{"error": {"code", "message"}}` where `code` is

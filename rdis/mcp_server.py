@@ -330,6 +330,161 @@ def t_jni_natives(path, arch=None, **k):
                         for a, (n, sig, _) in sorted(p.jni_natives.items())]}
 
 
+# ---- Signature database tools ----------------------------------------------
+
+def t_sig_db_load(path, db, arch=None, **k):
+    """Load a signature database and return its metadata."""
+    from .signatures import load
+    db_data = load(db)
+    return {
+        "format": db_data.get("format"),
+        "arch": db_data.get("arch"),
+        "min_insns": db_data.get("min_insns"),
+        "num_entries": len(db_data.get("entries", {})),
+        "sources": db_data.get("sources", db_data.get("source", [])),
+    }
+
+
+def t_sig_db_match(path, db, arch=None, min_insns=None, **k):
+    """Match functions against a signature database (supports multiple DBs via comma-separated list)."""
+    from . import signatures
+    from .sig_db import match_multiple_dbs
+    
+    p = _prog(path, arch, **k)
+    
+    # Support comma-separated list of databases
+    db_paths = [d.strip() for d in db.split(",") if d.strip()]
+    
+    if len(db_paths) == 1:
+        out = signatures.match(p, signatures.load(db_paths[0]), min_insns)
+    else:
+        out = match_multiple_dbs(p, db_paths, min_insns)
+    
+    rows = lambda items: [{**r, "addr": hex(r["addr"])} for r in items]
+    return {"matches": rows(out["matches"]), "ambiguous": rows(out["ambiguous"])}
+
+
+def t_sig_db_build(path, output_db, arch=None, lib_dirs=None, extra_libs=None, **k):
+    """Build a signature database from system libraries for the binary's architecture."""
+    from . import sig_db
+    
+    p = _prog(path, arch, **k)
+    target_arch = arch or p.arch.name
+    
+    # Convert string lists if provided
+    if isinstance(lib_dirs, str):
+        lib_dirs = [d.strip() for d in lib_dirs.split(",") if d.strip()]
+    if isinstance(extra_libs, str):
+        extra_libs = [d.strip() for d in extra_libs.split(",") if d.strip()]
+    
+    db = sig_db.build_platform_signature_db(
+        output_db,
+        target_arch,
+        lib_dirs=lib_dirs,
+        extra_libs=extra_libs,
+    )
+    return {
+        "ok": True,
+        "output": output_db,
+        "arch": target_arch,
+        "num_signatures": len(db["entries"]),
+        "num_sources": len(db["sources"]),
+    }
+
+
+
+
+# ---- Cross-reference & export tools ----------------------------------------
+
+def t_xrefs_from(path, addr, arch=None, **k):
+    """Get all cross-references FROM an address (outgoing edges)."""
+    p = _prog(path, arch, **k)
+    a = p.resolve(addr)
+    refs = []
+    # p.xrefs is target -> {(from_addr, kind)}
+    for target, ref_set in p.xrefs.items():
+        for src, kind in ref_set:
+            if src == a:
+                refs.append({"from": hex(src), "to": hex(target), "type": kind})
+    return {"xrefs": refs}
+
+
+def _collect_exports(p):
+    """Collect exported symbols from the binary. Returns list of (addr, name)."""
+    exports = []
+    lief_bin = getattr(p.image, "lief", None)
+    if lief_bin is None:
+        return exports
+    fmt = p.image.format
+    try:
+        if fmt == "macho":
+            # Mach-O: exported symbols have export_info
+            for s in lief_bin.symbols:
+                if s.has_export_info and s.value != 0:
+                    exports.append((s.value, str(s.name)))
+        elif fmt == "elf":
+            # ELF: exported symbols are in .dynsym with default/protected visibility
+            for s in lief_bin.dynamic_symbols:
+                if s.value != 0 and s.binding == lief.ELF.Symbol.BINDING.GLOBAL:
+                    exports.append((s.value, str(s.name)))
+        elif fmt == "pe":
+            # PE: use exported_functions
+            for e in lief_bin.exported_functions:
+                exports.append((p.image.base + e.address, str(e.name)))
+    except Exception:
+        pass
+    return exports
+
+
+def t_exports(path, arch=None, **k):
+    """List exported symbols (functions and data)."""
+    p = _prog(path, arch, **k)
+    exports = []
+    for addr, name in _collect_exports(p):
+        exports.append({"addr": hex(addr), "name": name})
+    return {"exports": exports}
+
+
+def _collect_globals(p):
+    """Collect global/data symbols from the binary. Returns list of (addr, name)."""
+    globals_ = []
+    lief_bin = getattr(p.image, "lief", None)
+    if lief_bin is None:
+        return globals_
+    fmt = p.image.format
+    try:
+        # Get data section ranges
+        data_ranges = []
+        for s in p.image.sections:
+            if not s.code and s.size > 0:
+                data_ranges.append((s.va, s.va + s.size))
+        if not data_ranges:
+            return globals_
+        # Check symbols that fall in data sections and are not functions
+        func_addrs = set(p.functions.keys())
+        import_addrs = set(p.image.imports.keys())
+        for addr, name in p.names.items():
+            if addr in func_addrs or addr in import_addrs:
+                continue
+            # Check if address is in a data section
+            for start, end in data_ranges:
+                if start <= addr < end:
+                    globals_.append((addr, name))
+                    break
+    except Exception:
+        pass
+    return globals_
+
+
+def t_globals(path, arch=None, **k):
+    """List global variables (data symbols)."""
+    p = _prog(path, arch, **k)
+    globals_ = []
+    for addr, name in _collect_globals(p):
+        globals_.append({"addr": hex(addr), "name": name})
+    return {"globals": globals_}
+
+
 TOOLS = {
     "list_functions": (t_list_functions, "List discovered functions (addr, resolved name).",
                        {"path": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
@@ -399,10 +554,22 @@ TOOLS = {
                     {"path": "string", "arch": "string?"}),
     "jni_natives": (t_jni_natives, "Android JNI natives recovered from RegisterNatives tables.",
                     {"path": "string", "arch": "string?"}),
+    "sig_db_load": (t_sig_db_load, "Load a signature database and return its metadata (format, arch, entries, sources).",
+                     {"path": "string", "db": "string", "arch": "string?"}),
+    "sig_db_match": (t_sig_db_match, "Match functions against one or more signature databases (comma-separated); returns matches with confidence and source.",
+                      {"path": "string", "db": "string", "arch": "string?", "min_insns": "integer?"}),
+    "sig_db_build": (t_sig_db_build, "Build a signature database from system libraries (libc, libc++, OpenSSL, zlib) for the binary's architecture; writes to output_db.",
+                      {"path": "string", "output_db": "string", "arch": "string?", "lib_dirs": "array?", "extra_libs": "array?"}),
+    "xrefs_from": (t_xrefs_from, "Get all cross-references FROM an address (outgoing edges).",
+                      {"path": "string", "addr": "string", "arch": "string?"}),
+    "exports": (t_exports, "List exported symbols (functions and data).",
+                      {"path": "string", "arch": "string?"}),
+    "globals": (t_globals, "List global variables (data symbols).",
+                      {"path": "string", "arch": "string?"}),
 }
 
 
-WRITES = {"rename", "comment", "rename_many", "define_function", "undefine_function", "set_type", "bookmarks"}
+WRITES = {"rename", "comment", "rename_many", "define_function", "undefine_function", "set_type", "bookmarks", "sig_db_build"}
 COMMON = {"loader": "string?", "base": "any?"}
 _TYPES = {"string": str, "integer": int, "array": list, "boolean": bool, "object": dict}
 
