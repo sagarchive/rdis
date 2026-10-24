@@ -26,7 +26,7 @@ def _code_hash():
     # Cached Program snapshots include discovered functions/names/metadata. Changes to any
     # module that influences those results must invalidate the persistent snapshot.
     for m in ("analysis.py", "arch.py", "loader.py", "raw.py", "jni.py", "objc.py",
-              "swift.py", "demangle.py", "typelib.py", "plugins.py", "cache.py"):
+              "swift.py", "demangle.py", "typelib.py", "plugins.py", "cache.py", "gobin.py"):
         with open(os.path.join(here, m), "rb") as f:
             h.update(f.read())
     return h.hexdigest()[:12]
@@ -121,6 +121,14 @@ def analyze(image, objc=True, swift=True, prologues=True, store=True):
         pass                              # non-dict JSON -> AttributeError, ...): re-analyze
     t = time.time()
     prog = Program(image).analyze(objc=objc, swift=swift, prologues=prologues)
+    # Apply Go function names recovered from the gopclntab (no-op for non-Go binaries,
+    # never raises). Done here, after discovery, so stripped Go binaries expose real
+    # names (e.g. main.main) in list_functions/decompile for both the CLI and MCP paths.
+    try:
+        from .gobin import apply_go_names
+        apply_go_names(prog, image.path)
+    except Exception:
+        pass
     if store and path and time.time() - t >= MIN_SECONDS:
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -108,9 +108,34 @@ def t_callgraph(path, func, arch=None, direction="both", depth=1, **k):
     return render.callgraph(p, f, direction=direction, depth=depth)
 
 def t_strings(path, arch=None, minlen=4, limit=500, offset=0, **k):
+    from .stringrefs import string_refs
     p = _prog(path, arch, **k)
-    items = [{"addr": hex(a), "text": s} for a, s in sorted(p.strings(minlen).items())]
+    strings = p.strings(minlen)
+    refs = string_refs(p, strings)
+    items = [{"addr": hex(a), "text": s, "refs": [{"function": hex(r["function"]), "name": r["name"], "site": hex(r["site"])}
+                                                   for r in refs.get(a, ())[:5]], "ref_count": len(refs.get(a, ()))}
+             for a, s in sorted(strings.items())]
     return _page(items, limit, offset, "strings")
+
+
+def t_iocs(path, arch=None, limit=200, **k):
+    """Extract indicators of compromise from the binary's strings."""
+    p = _prog(path, arch, **k)
+    strings = [{"addr": a, "text": s} for a, s in sorted(p.strings().items())]
+    from .iocs import extract, attach_functions
+    result = attach_functions(extract(strings, limit=limit), p)
+    # Convert addresses to hex strings for JSON
+    for key in ("urls", "ips", "test_hosts", "execution", "persistence"):
+        for item in result[key]:
+            item["addresses"] = [hex(a) for a in item["addresses"]]
+    for item in result["domains"]:
+        item["addresses"] = [hex(a) for a in item["addresses"]]
+    return result
+
+def t_behavior(path, arch=None, **k):
+    """Capabilities inferred from imports, strings, function names and Go modules, each linked to its evidence."""
+    from .behavior import analyze
+    return analyze(_prog(path, arch, **k))
 
 def t_imports(path, arch=None, limit=500, offset=0, **k):
     p = _prog(path, arch, **k)
@@ -328,6 +353,25 @@ def t_jni_natives(path, arch=None, **k):
     p = _prog(path, arch, **k)
     return {"natives": [{"addr": hex(a), "name": n, "signature": sig}
                         for a, (n, sig, _) in sorted(p.jni_natives.items())]}
+
+
+def t_go_info(path, arch=None, limit=500, offset=0, **k):
+    """Go build-info and pclntab analysis for Go binaries."""
+    from . import gobin
+    try:
+        image = _prog(path, arch, **k).image
+    except Exception:
+        image = None
+    build_info = gobin.read_build_info(path, image)
+    funcs = gobin.read_pclntab(path, image)
+    pkgs = gobin.packages(funcs) if funcs else []
+    items = [{"entry_addr": hex(f["entry_addr"]), "name": f["name"]} for f in funcs]
+    out = {"build_info": build_info, "go_version": build_info["go_version"] if build_info else None,
+           "main_module": build_info.get("main_module") if build_info else None,
+           "dependencies": [d["path"] for d in (build_info.get("deps") or [])] if build_info else [],
+           "function_count": len(funcs), "packages": pkgs,
+           **_page(items, limit, offset, "functions")}
+    return out
 
 
 # ---- Signature database tools ----------------------------------------------
@@ -554,6 +598,8 @@ TOOLS = {
                     {"path": "string", "arch": "string?"}),
     "jni_natives": (t_jni_natives, "Android JNI natives recovered from RegisterNatives tables.",
                     {"path": "string", "arch": "string?"}),
+    "go_info": (t_go_info, "Go binary analysis: build-info (Go version, module path, deps) and pclntab function table with packages.",
+                {"path": "string", "arch": "string?", "limit": "integer?", "offset": "integer?"}),
     "sig_db_load": (t_sig_db_load, "Load a signature database and return its metadata (format, arch, entries, sources).",
                      {"path": "string", "db": "string", "arch": "string?"}),
     "sig_db_match": (t_sig_db_match, "Match functions against one or more signature databases (comma-separated); returns matches with confidence and source.",
@@ -566,6 +612,10 @@ TOOLS = {
                       {"path": "string", "arch": "string?"}),
     "globals": (t_globals, "List global variables (data symbols).",
                       {"path": "string", "arch": "string?"}),
+    "iocs": (t_iocs, "Extract indicators of compromise (URLs, domains, IPs, test hosts, execution and persistence strings) from the binary's strings.",
+              {"path": "string", "arch": "string?", "limit": "integer?"}),
+    "behavior": (t_behavior, "Capability summary (spawns processes, makes HTTP requests, requests admin rights, embeds a VPN stack, ...) with the evidence behind each line.",
+                 {"path": "string", "arch": "string?"}),
 }
 
 

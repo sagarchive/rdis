@@ -108,6 +108,90 @@ def run_triage(a, path):
     print(out["note"])
 
 
+def run_bundle_triage(a, path):
+    from .bundle import bundle_triage
+    out = bundle_triage(path)
+    if a.json:
+        print(json.dumps(out, sort_keys=True, default=str))
+        return
+    s = out["summary"]
+    print(f"{out['root']}: {out['kind']}, {s['binaries']} native binaries "
+          f"({s['signed']} signed, {s['adhoc']} ad-hoc, {s['unsigned']} unsigned)")
+    for p in out["plists"]:
+        label = " ".join(str(p[k]) for k in ("CFBundleIdentifier", "CFBundleShortVersionString") if p.get(k))
+        print(f"  {p['path']}: {label}".rstrip())
+        for key, text in p.get("usage", {}).items():
+            print(f"      asks for {key}: {str(text)[:70]}")
+        for key in ("url_schemes", "allows_arbitrary_loads", "SMPrivilegedExecutables"):
+            if p.get(key):
+                print(f"      {key}: {p[key]}")
+    if out["binaries"]:
+        print(f"\n  {'binary':<44} {'format':<14} {'entropy':>7}  {'runtime':<12} signature")
+    for b in out["binaries"]:
+        if "error" in b:
+            print(f"  {b['path'][:44]:<44} unreadable: {b['error'][:60]}")
+            continue
+        sig = b["signature"]
+        if not sig.get("available"):
+            sigtxt = "n/a (no codesign on this host)"
+        elif not sig.get("signed"):
+            sigtxt = "unsigned"
+        elif sig.get("adhoc"):
+            sigtxt = "ad-hoc"
+        else:
+            sigtxt = f"{(sig['authorities'] or ['signed'])[0]}" + (f" team {sig['team_id']}" if sig.get("team_id") else "")
+        extra = (" hardened" if sig.get("hardened_runtime") else "") + (f" {len(sig['entitlements'])} entitlements" if sig.get("entitlements") else "")
+        print(f"  {b['path'][-44:]:<44} {(b['format'] + ' ' + b['arch'])[:14]:<14} {b['max_section_entropy']:>7}  "
+              f"{(', '.join(b['runtimes']) or '-')[:12]:<12} {sigtxt}{extra}")
+        for ind in b["indicators"]:
+            print(f"      [{ind}]")
+    for sc in out.get("scripts", []):
+        kind = "native binary" if sc["native"] else sc["interpreter"] or "no shebang"
+        print(f"\n  install script {sc['component'] + '/' if sc['component'] else ''}{sc['name']}  ({sc['size']} bytes, {kind})")
+        for f in sc["findings"]:
+            print(f"      line {f['line']}: {f['rule']}: {f['text'][:90]}")
+    for e in out.get("errors", []):
+        print(f"  note: {e}")
+    print(out["note"])
+
+
+def run_go(a, path):
+    from . import gobin
+    image = None
+    try:
+        image = open_image(path, arch=a.arch)
+    except Exception:
+        pass
+    build_info = gobin.read_build_info(path, image)
+    funcs = gobin.read_pclntab(path, image)
+    pkgs = gobin.packages(funcs)
+    out = {"build_info": build_info, "go_version": build_info["go_version"] if build_info else None,
+           "main_module": (build_info or {}).get("path"),
+           "dependencies": [d["path"] for d in (build_info or {}).get("deps", [])],
+           "function_count": len(funcs), "packages": pkgs}
+    if a.json:
+        print(json.dumps(out, sort_keys=True))
+        return
+    bi = build_info
+    if bi:
+        print(f"Go version: {bi['go_version']}")
+        print(f"Module path: {bi.get('path')}")
+        if bi.get("deps"):
+            print(f"Dependencies:")
+            for d in bi["deps"]:
+                print(f"  {d['path']} {d.get('version', '')}")
+    else:
+        print("No Go build-info found (binary may be stripped of build info).")
+    print(f"\nPclntab functions: {len(funcs)}")
+    print(f"Packages ({len(pkgs)}):")
+    for p in pkgs:
+        print(f"  {p['function_count']:>6}  {p['package']}")
+    if funcs:
+        print(f"\nFirst 20 functions:")
+        for f in funcs[:20]:
+            print(f"  {f['entry_addr']:#012x}  {f['name']}")
+
+
 def run_tool(a, prog):
     from . import plugins
     plugins.load_all()
@@ -183,6 +267,8 @@ def main(argv=None):
     p.add_argument("--callgraph-depth", type=int, choices=range(1, 5), default=1, metavar="{1,2,3,4}",
                    help="maximum number of call edges from the selected function (default: 1)")
     p.add_argument("--strings", action="store_true")
+    p.add_argument("--behavior", action="store_true", help="capability summary from imports, strings, function names and Go modules, with evidence")
+    p.add_argument("--iocs", action="store_true", help="extract indicators of compromise (URLs, domains, IPs, test hosts, execution and persistence strings)")
     p.add_argument("--classes", action="store_true", help="Objective-C / Swift declarations")
     p.add_argument("--imports", action="store_true")
     p.add_argument("-l", "--entry", metavar="MEMBER",
@@ -207,6 +293,7 @@ def main(argv=None):
     p.add_argument("--emulate", metavar="ARGS", help="run -f/--func in the P-code emulator with comma-separated "
                    "integer arguments (e.g. 7,0x10); stops with an error on anything it cannot model")
     p.add_argument("--max-steps", type=int, default=1_000_000, help="instruction budget for --emulate")
+    p.add_argument("--go", action="store_true", help="Go binary analysis: build-info (Go version, module path, deps) and pclntab function table")
     p.add_argument("--triage", action="store_true", help="entropy, packing indicators and runtime identification (evidence, not verdicts)")
     p.add_argument("--diff", metavar="OTHER", help="match this binary's functions against another build of it")
     p.add_argument("--transfer", action="store_true",
@@ -234,6 +321,10 @@ def main(argv=None):
     
     try:
         path = a.binary
+        if a.triage and not a.entry:
+            from . import bundle
+            if bundle.is_bundle(path):
+                return run_bundle_triage(a, path)
         if a.entry:
             path = containers.extract(path, containers.find_entry(path, a.entry))
         else:
@@ -247,6 +338,8 @@ def main(argv=None):
         prog = build(a, path)
         if a.triage:
             return run_triage(a, path)
+        if a.go:
+            return run_go(a, path)
         if a.tool:
             return run_tool(a, prog)
         if a.diff:
@@ -257,9 +350,80 @@ def main(argv=None):
         sys.exit(f"rdis: {e}")
 
     if a.strings:
+        from .stringrefs import string_refs
         s = prog.strings()
-        print(json.dumps({hex(k): v for k, v in s.items()}) if a.json else
-              "\n".join(f"{k:#x}  {v!r}" for k, v in sorted(s.items())))
+        refs = string_refs(prog, s)
+        if a.json:
+            print(json.dumps({hex(k): v for k, v in s.items()}))
+        else:
+            for k, v in sorted(s.items()):
+                users = ", ".join(r["name"] for r in refs.get(k, ())[:4])
+                more = len(refs.get(k, ())) - 4
+                print(f"{k:#x}  {v!r}" + (f"  <- {users}" + (f" (+{more})" if more > 0 else "") if users else ""))
+        return
+    if a.behavior:
+        from .behavior import analyze
+        out = analyze(prog)
+        if a.json:
+            print(json.dumps(out, sort_keys=True))
+            return
+        if out["modules"]:
+            print(f"Go modules: {', '.join(out['modules'][:12])}" + (" ..." if len(out["modules"]) > 12 else ""))
+        for b in out["behaviors"]:
+            print(f"[{b['confidence']}] {b['title']}")
+            for e in b["evidence"][:6]:
+                where = f" @ {e['address']}" if e["address"] else ""
+                used = f"  <- {', '.join(e['functions'][:3])}" if e["functions"] else ""
+                print(f"    {e['kind']}: {e['value'][:80]}{where}{used}")
+        if not out["behaviors"]:
+            print("no capabilities found")
+        print(out["note"])
+        return
+    if a.iocs:
+        from .iocs import extract, attach_functions
+        s = prog.strings()
+        strs = [{"addr": a, "text": v} for a, v in s.items()]
+        result = attach_functions(extract(strs), prog)
+        fx = lambda f: ("  <- " + ", ".join(f["functions"])) if f.get("functions") else ""
+        if a.json:
+            print(json.dumps(result, sort_keys=True))
+        else:
+            # Readable grouped report
+            smry = result["summary"]
+            print(f"URLs:            {smry['urls']['total']} (showing {len(result['urls'])})" +
+                  (" truncated" if smry['urls']['truncated'] else ""))
+            for u in result["urls"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in u["addresses"])
+                print(f"  {u['value']}  @ [{addrs}]{fx(u)}")
+            print(f"Domains:         {smry['domains']['total']} (showing {len(result['domains'])})" +
+                  (" truncated" if smry['domains']['truncated'] else ""))
+            for d in result["domains"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in d["addresses"])
+                hosts = ", ".join(d["hosts"])
+                print(f"  {d['value']}  hosts: [{hosts}]  @ [{addrs}]{fx(d)}")
+            print(f"IPs:             {smry['ips']['total']} (showing {len(result['ips'])})" +
+                  (" truncated" if smry['ips']['truncated'] else ""))
+            for ip in result["ips"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in ip["addresses"])
+                flags = f"  class={ip.get('ip_class', '?')}"
+                if ip["confidence"] == "low":
+                    flags += "  low_signal"
+                print(f"  {ip['value']}{flags}  @ [{addrs}]{fx(ip)}")
+            print(f"Test hosts:      {smry['test_hosts']['total']} (showing {len(result['test_hosts'])})" +
+                  (" truncated" if smry['test_hosts']['truncated'] else ""))
+            for th in result["test_hosts"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in th["addresses"])
+                print(f"  {th['value']}  @ [{addrs}]{fx(th)}")
+            print(f"Execution:       {smry['execution']['total']} (showing {len(result['execution'])})" +
+                  (" truncated" if smry['execution']['truncated'] else ""))
+            for e in result["execution"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in e["addresses"])
+                print(f"  {e['value']}  @ [{addrs}]  ({e['rule']}){fx(e)}")
+            print(f"Persistence:     {smry['persistence']['total']} (showing {len(result['persistence'])})" +
+                  (" truncated" if smry['persistence']['truncated'] else ""))
+            for p in result["persistence"][:20]:
+                addrs = ", ".join(f"{a:#x}" for a in p["addresses"])
+                print(f"  {p['value']}  @ [{addrs}]  ({p['rule']}){fx(p)}")
         return
     if a.imports:
         imp = prog.image.imports
