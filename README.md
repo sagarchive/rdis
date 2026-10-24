@@ -31,9 +31,6 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Struct/field reconstruction | heuristic access-based layouts with observed widths and some type evidence; overlapping views and call-linked layouts are supported; incomplete inference is explicitly experimental | yes |
 | SIMD | **lane-exact, compilable C** for NEON and SSE via vector extensions (`(u32x4)a + (u32x4)b`, `__builtin_reduce_add`), not pseudo-intrinsics | intrinsics |
 | Binary triage | per-section entropy, packing indicators, runtime identification; every finding carries its evidence and none is a verdict (`--triage`, MCP `triage`) | not listed on its product page |
-| Go binaries | build info (version, modules), gopclntab function names and packages, split Go strings; stripped Go binaries get real function names (`--go`, MCP `go_info`) | needs scripts or plugins |
-| Installers and bundles | `.app` and flat `.pkg`/`.xar`: per-binary runtime, entropy, code signature and entitlements, Info.plist permission keys, pre/postinstall scripts with what they do (`--triage`) | not listed on its product page |
-| Indicators and behavior | categorised URLs/domains/IPs/execution/persistence strings and a capability summary, each linked to its evidence and the function that uses it (`--iocs`, `--behavior`) | needs scripts or plugins |
 | Hex view | per-function hex + ASCII dump (CLI, GUI, MCP) | yes |
 | Demangling | Swift + C++ (system tools) | yes |
 | Cross-references | to any address/symbol | yes |
@@ -46,6 +43,12 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Analysis database | renames + comments persisted to `<binary>.rdb`, shared by CLI/GUI/MCP; **content-addressed analysis cache** (`.rdis_cache/`) reopens a 9 MB Flutter lib in 0.6s instead of 31s | yes |
 | Android JNI | **`env->FindClass(...)` naming for all 229 JNIEnv slots; `RegisterNatives` tables found and their natives named + typed** | no |
 | Runs on Linux | **yes** | **yes** ([supported Linux builds](https://www.hopperapp.com/download)) |
+
+### Go, installers and indicators
+
+- **Go binaries** (`--go`, MCP `go_info`): build info (version, modules), gopclntab function names and packages, split Go strings. Stripped Go binaries get real function names.
+- **Installers and bundles** (`--triage` on a `.app` or flat `.pkg`/`.xar`): per-binary runtime, entropy, code signature and entitlements, Info.plist permission keys, and the pre/postinstall scripts with what they do.
+- **Indicators and behavior** (`--iocs`, `--behavior`, MCP `iocs`, `behavior`): URLs, domains, IPs, execution and persistence strings, and a capability summary, each linked to its evidence and the function that uses it.
 
 How the decompiler is checked, reproducibly:
 
