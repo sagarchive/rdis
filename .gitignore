@@ -16,3 +16,7 @@ __pycache__/
 # OS / editor
 .DS_Store
 *.swp
+
+# local tooling, not part of rdis
+tools/cline-mcp/
+.worktrees/

@@ -70,6 +70,31 @@ for _n in range(32):
     _X86_CANON.update({f"ymm{_n}": f"xmm{_n}", f"zmm{_n}": f"xmm{_n}"})
 _ARM_FP = re.compile(r"[bhsdqv](\d{1,2})")  # every view of SIMD/FP register N (b/h/s/d/q/v) is vN
 
+# Well-known libc functions whose non-void return value should be propagated when they are
+# the last call before a return with no intervening write to the return register.
+# This is an explicit allow-list (not all typelib entries) to avoid incorrectly inferring
+# returns for printf-family wrappers and other void-returning callers.
+_LIBC_VALUE_RETURNS = {
+    # strings and memory
+    "strlen", "strnlen", "strcmp", "strncmp", "strcasecmp", "strncasecmp",
+    "strcpy", "strncpy", "strlcpy", "strlcat", "strcat", "strncat",
+    "strchr", "strrchr", "strstr", "strcasestr", "strdup", "strndup",
+    "strtok", "strtok_r", "strsep", "strerror", "strspn", "strcspn", "strpbrk",
+    "memcpy", "memmove", "memset", "memcmp", "memchr", "bzero",
+    "__memcpy_chk", "__memset_chk", "__strcpy_chk", "__strlcpy_chk", "__strlcat_chk",
+    # conversion and ctype
+    "atoi", "atol", "atof", "strtol", "strtoul", "strtoll", "strtoull", "strtod",
+    "toupper", "tolower", "isalpha", "isdigit", "isspace", "isprint", "isalnum",
+    # allocation and process
+    "malloc", "calloc", "realloc", "reallocf", "valloc", "posix_memalign",
+    # I/O (excluding printf family)
+    "puts", "getenv",
+    "open", "read", "write", "close",
+    "fopen", "fread", "fwrite",
+    # misc
+    "rand",
+}
+
 
 def m_is_cmp(i):
     return i.mnemonic in ("cmp", "test")
@@ -199,6 +224,8 @@ class Lifter:
         fsrc, fret_value, fret_single = None, False, False   # same tracking for the FP return reg
         rread = fread = False    # was the return register read after its last write?
         tail_ptr = None          # pointer type returned through a tail call to a known API
+        libc_ret_type = None     # return type from a known libc call (non-tail) that reaches ret
+        libc_ret_pos = 0         # program-order position of the libc call (0 = none)
         fret = self.arch.fret
         ipos = rpos = fpos = 0   # program-order position of the last write to each return reg
         int_votes = fp_votes = 0  # per `ret`: which return register was written most recently
@@ -235,17 +262,63 @@ class Lifter:
                             ret_is_value, int_votes = True, int_votes + 1
                             if pr[0].endswith("*"):
                                 tail_ptr = pr[0]
+                    # Tail call to an in-binary function: propagate its inferred
+                    # return type (we know the actual type, unlike the libc typelib).
+                    if tail and ct is not None and ct in self.prog.functions \
+                            and ct not in self.prog.image.imports:
+                        g_ret = self._func_return_type(ct)
+                        if g_ret is not None and g_ret != "void":
+                            if g_ret in ("float", "double"):
+                                fret_value, fp_votes, fret_single = True, fp_votes + 1, g_ret == "float"
+                            else:
+                                ret_is_value, int_votes = True, int_votes + 1
+                                if g_ret.endswith("*"):
+                                    tail_ptr = g_ret
                     for n_, pt in enumerate(pr[1] if pr else ()):
                         r_ = self._canon(self.arch.args[n_]) if n_ < len(self.arch.args) else None
                         if pt.endswith("*") and r_ in args and r_ in still_arg:
                             proto_ptr.setdefault(r_, pt)
-                    retsrc = fsrc = "call"   # a (tail) call clobbers/produces the return regs
+                    # For ALL calls, mark return registers as clobbered by the call.
+                    # This ensures that an earlier write to the return register doesn't
+                    # survive past a call whose result we don't care about (e.g., printf).
+                    retsrc = fsrc = "call"
+
+                    # For non-tail calls to known libc functions with non-void returns,
+                    # treat the call result as the function's return value if no later
+                    # instruction overwrites the return register before `ret`.
+                    if not tail and pr and pr[0] != "void":
+                        callee_name = self.prog.display(ct).lstrip("_")
+                        if callee_name in _LIBC_VALUE_RETURNS:
+                            if pr[0] in ("float", "double"):
+                                fsrc, fret_value, fret_single = "value", True, pr[0] == "float"
+                            else:
+                                retsrc, libc_ret_type = "value", pr[0]
+                                libc_ret_pos = ipos  # record position to invalidate if overwritten later
+                                # Do NOT set ret_is_value=True here; it will be set at RET if this value reaches it.
+                    # Non-tail call to an in-binary function: propagate its inferred
+                    # return type exactly like the libc-table case above -- the call
+                    # must be the last write to the return register before the ret;
+                    # a later write invalidates the propagated type (via libc_ret_pos).
+                    if not tail and ct is not None and ct in self.prog.functions \
+                            and ct not in self.prog.image.imports:
+                        g_ret = self._func_return_type(ct)
+                        if g_ret is not None and g_ret != "void":
+                            if g_ret in ("float", "double"):
+                                fsrc, fret_value, fret_single = "value", True, g_ret == "float"
+                            else:
+                                retsrc, libc_ret_type = "value", g_ret
+                                libc_ret_pos = ipos  # invalidate if overwritten later
                 else:
                     rd, wr = self._rw(i)
                     rread |= self._canon(self.arch.ret) in rd and retsrc == "value"
                     fread |= bool(fret) and self._canon(fret) in rd and fsrc == "value"
                     if self._canon(self.arch.ret) in wr:
                         retsrc, rpos, rread = "value", ipos, False
+                        # If a write to the return register occurs after a libc call
+                        # that we were tracking for return-value inference, invalidate it.
+                        if libc_ret_pos and ipos > libc_ret_pos:
+                            libc_ret_type = None
+                            libc_ret_pos = 0
                     if fret and self._canon(fret) in wr:
                         fpos, fread = ipos, False
                         # only a scalar write is a float result; a vector op leaves a temp in v0
@@ -341,7 +414,7 @@ class Lifter:
         # when both registers hold values, the one written last before the returns is the result
         self._ret_fp = fret_value and (not ret_is_value or fp_votes > int_votes)
         ret_is_value = ret_is_value and not self._ret_fp
-        self._rettype = (tail_ptr or "int64_t") if ret_is_value else (("float" if fret_single else "double")
+        self._rettype = (libc_ret_type or tail_ptr or "int64_t") if ret_is_value else (("float" if fret_single else "double")
                                                                       if self._ret_fp else "void")
         self._ret_void = not (ret_is_value or self._ret_fp)
         # stack locals: name + type by width / address-taken
@@ -355,6 +428,44 @@ class Lifter:
         for disp in localptr:
             self._localname.setdefault(disp, f"local_{abs(disp):x}")
             self._localtype[disp] = self._localtype.get(disp, "int64_t")
+
+    _MAX_RET_INFER_DEPTH = 8
+
+    def _func_return_type(self, faddr):
+        """Infer the return type of the in-binary function at ``faddr``.
+
+        Propagates transitively: a call to *g* inside *f*'s body is resolved by
+        inferring *g*'s return type with the same machinery, recursively.
+
+        Per-Program cache so each function is inferred at most once.  A
+        recursion-depth cap (8) and cycle detection (a function currently on
+        the inference stack counts as unknown) prevent infinite descent on
+        recursive call graphs.
+        """
+        cache = self.prog.__dict__.setdefault("_ret_types_cache", {})
+        if faddr in cache:
+            return cache[faddr]
+        inferring = self.prog.__dict__.setdefault("_ret_inferring", set())
+        if len(inferring) >= self._MAX_RET_INFER_DEPTH:   # depth cap
+            return None
+        if faddr in inferring:                            # cycle detected
+            return None
+        if faddr not in self.prog.functions or faddr in self.prog.image.imports:
+            return None                                   # import, not in-binary
+        inferring.add(faddr)
+        try:
+            func = self.prog.functions[faddr]
+            sub = Lifter(self.prog)
+            sub._scan_args(func)
+            sub._infer_types(func)
+            ret = sub._rettype
+            cache[faddr] = ret
+            return ret
+        except Exception:
+            cache[faddr] = None
+            return None
+        finally:
+            inferring.discard(faddr)
 
     _DERIVE = ("mov", "add", "sub", "lea", "adds", "subs", "orr")
 

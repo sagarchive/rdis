@@ -271,6 +271,8 @@ def slices(path):
         return [{"arch": "wasm", "label": "WebAssembly module"}]
     if _is_dmg(path):
         return _dmg_slices(path)
+    if head[:4] == b"xar!":
+        return _pkg_slices(path)
     import tarfile
     try:
         if tarfile.is_tarfile(path):
@@ -286,6 +288,14 @@ def slices(path):
     return list(_RAW)                   # unknown: open as a headerless blob at a chosen architecture
 
 
+def pkgxar_magic(path):
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(4) == b"xar!"
+    except OSError:
+        return False
+
+
 def _is_dmg(path):
     """Apple disk image: UDIF trailer 'koly' in the last 512 bytes."""
     try:
@@ -294,6 +304,34 @@ def _is_dmg(path):
             return b"koly" in f.read(512)
     except OSError:
         return False
+
+
+def _pkg_slices(path):
+    """Native binaries inside a flat installer package (.pkg / .xar), one choice per payload file."""
+    from . import pkgxar
+    try:
+        info = pkgxar.analyze(path)
+    except pkgxar.PkgError as e:
+        return [{"arch": None, "disabled": True, "label": f"Unreadable package: {e}"}]
+    out = [{"entry": f"{f['component']}\x00{f['path']}", "arch": None, "size": f["size"],
+            "label": f"{f['component'] + '/' if f['component'] else ''}{f['path']}  ({f['size']:,} B)"}
+           for f in info["files"] if f["native"]]
+    return out or [{"arch": None, "disabled": True, "label": "No native binaries in the package payloads"}]
+
+
+def _pkg_extract(path, entry, cache_dir, max_mb, max_total_mb):
+    from . import pkgxar
+    component, _, rel = entry.partition("\x00")
+    body = pkgxar.payload_file(path, component, rel)
+    if len(body) > max_mb << 20:
+        raise ValueError(f"package member larger than {max_mb} MB")
+    os.makedirs(cache_dir, exist_ok=True)
+    tag = hashlib.sha256(f"{os.path.abspath(path)}|{_file_digest(path)}|{entry}".encode()).hexdigest()[:24]
+    safe = "".join(c for c in os.path.basename(rel) if c.isalnum() or c in "._-")[:64] or "bin"
+    out = os.path.join(cache_dir, f"{tag}-{safe}")
+    if not (os.path.exists(out) and os.path.getsize(out) == len(body)):
+        _write_atomic(cache_dir, out, lambda dst: dst.write(body), (max_total_mb << 20) if max_total_mb is not None else None)
+    return out
 
 
 def _dmg_slices(path):
@@ -421,6 +459,8 @@ def extract(path, entry, cache_dir=".rdis_uploads", max_mb=128, max_total_mb=Non
         return out
     # same detection order as slices(): a zip (APK) with "koly" in its trailing comment is a zip
     if not zipfile.is_zipfile(path):
+        if pkgxar_magic(path):
+            return _pkg_extract(path, entry, cache_dir, max_mb, max_total_mb)
         if _is_dmg(path):
             out = _dmg_list(path, _extract_entry=entry, cache_dir=cache_dir, max_mb=max_mb, max_total_mb=max_total_mb)
             if out is None:

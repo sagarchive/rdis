@@ -44,6 +44,12 @@ RDIS uses the optional `pypcode` package as a SLEIGH/P-code semantics frontend f
 | Android JNI | **`env->FindClass(...)` naming for all 229 JNIEnv slots; `RegisterNatives` tables found and their natives named + typed** | no |
 | Runs on Linux | **yes** | **yes** ([supported Linux builds](https://www.hopperapp.com/download)) |
 
+### Go, installers and indicators
+
+- **Go binaries** (`--go`, MCP `go_info`): build info (version, modules), gopclntab function names and packages, split Go strings. Stripped Go binaries get real function names.
+- **Installers and bundles** (`--triage` on a `.app` or flat `.pkg`/`.xar`): per-binary runtime, entropy, code signature and entitlements, Info.plist permission keys, and the pre/postinstall scripts with what they do.
+- **Indicators and behavior** (`--iocs`, `--behavior`, MCP `iocs`, `behavior`): URLs, domains, IPs, execution and persistence strings, and a capability summary, each linked to its evidence and the function that uses it.
+
 How the decompiler is checked, reproducibly:
 
 ```sh
@@ -118,6 +124,10 @@ python -m rdis --list-archs                                      # every CPU rdi
 python -m rdis --capabilities                                   # what is supported per CPU and level, as JSON
 python -m rdis OLD --diff NEW                                   # match functions across two builds
 python -m rdis BIN --triage                                     # entropy, packing indicators, runtime hints
+python -m rdis APP_OR_PKG --triage                              # one table per bundle or installer: runtime, entropy, signature, scripts
+python -m rdis BIN --go                                         # Go version, modules, packages, functions from gopclntab
+python -m rdis BIN --iocs                                       # URLs, domains, IPs, test hosts, exec and persistence strings
+python -m rdis BIN --behavior                                   # capabilities with the evidence behind each
 python -m rdis BIN -f hash --emulate 0x1234                     # run a function in the P-code emulator
 python -m rdis LIB --sig-make lib.sig                           # signatures from a binary with symbols
 python -m rdis STRIPPED --sig lib.sig                           # name its unnamed functions from them
@@ -196,15 +206,15 @@ PYTHONPATH=. python -m rdis.mcp_server
 Register in an MCP client with command `python`, args `["-m","rdis.mcp_server"]`, `cwd` = this repo
 (use the venv's python).
 
-35 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
+44 tools, each with a typed input schema (`additionalProperties: false`) and a `readOnlyHint` annotation:
 
 | Group | Tools |
 |---|---|
-| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage`, `capabilities` |
+| Read: program | `info`, `list_functions`, `search`, `lookup`, `strings`, `iocs`, `behavior`, `go_info`, `imports`, `classes`, `jump_tables`, `jni_natives`, `unresolved`, `triage`, `capabilities`, `go_info` |
 | Read: code | `disassemble`, `decompile`, `cfg`, `basic_blocks`, `stack_frame`, `hexdump`, `read_bytes`, `find_bytes`, `find_insns` |
-| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures` |
+| Read: relationships | `xrefs`, `callers`, `callees`, `callgraph`, `diff`, `signatures`, `sig_db_load`, `sig_db_match`, `xrefs_from`, `exports`, `globals` |
 | Run | `emulate` (P-code interpreter; never executes host code, step budget capped) |
-| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks` |
+| Write (persist to `<binary>.rdb`) | `rename`, `rename_many`, `comment`, `define_function`, `undefine_function`, `set_type`, `bookmarks`, `sig_db_build` |
 
 Contract: bad requests get JSON-RPC errors (`-32601` unknown method, `-32602` unknown tool, missing, unknown or
 mistyped argument). A tool that runs and fails returns `isError` with `{"error": {"code", "message"}}` where `code` is

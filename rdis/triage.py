@@ -22,6 +22,11 @@ RUNTIMES = (
     ("Rust", (b"rustc/", b"core::panicking", b"/rustc/", b"RUST_BACKTRACE")),
     ("Swift", (b"__swift5_", b"swift_retain", b"libswiftCore")),
     ("Objective-C", (b"__objc_classlist", b"objc_msgSend", b"__objc_methname")),
+    ("Qt", (b"libQt", b"Qt5Core", b"Qt6Core", b"QtCore", b"_ZN7QObject")),
+    ("Electron / Chromium", (b"Electron Framework", b"ELECTRON_RUN_AS_NODE", b"libffmpeg")),
+    ("Flutter", (b"libflutter", b"FlutterEngine", b"io.flutter")),
+    ("Unity / IL2CPP", (b"UnityPlayer", b"il2cpp_", b"libil2cpp")),
+    ("Java VM", (b"JNI_CreateJavaVM", b"libjvm")),
     ("Bun", (b"Bun v", b"bun:main", b"BUN_RUNTIME")),
     ("Node.js / V8", (b"node::", b"NODE_OPTIONS", b"v8::internal")),
     ("Python (frozen)", (b"PyInstaller", b"_MEIPASS", b"Py_Initialize")),
@@ -60,6 +65,9 @@ def _permissions(path):
 
 
 def triage(path, arch=None):
+    from . import bundle
+    if bundle.is_bundle(path):
+        return bundle.bundle_triage(path)
     image = open_image(path, arch=arch)
     sections, indicators = [], []
     for s in image.sections:
@@ -92,6 +100,20 @@ def triage(path, arch=None):
     blob = b"".join(_sample(image.read, s.va, s.size) for s in image.sections if s.size)
     runtimes = [{"runtime": name, "evidence": [m.decode("latin-1") for m in markers if m in blob]}
                 for name, markers in RUNTIMES]
+    # Add Go build-info details to Go evidence
+    go_detail = None
+    try:
+        from .gobin import read_build_info
+        go_detail = read_build_info(path, image)
+    except Exception:
+        pass
+    if go_detail:
+        for r in runtimes:
+            if r["runtime"] == "Go" and go_detail:
+                r["go_version"] = go_detail.get("go_version")
+                r["main_module"] = go_detail.get("path")
+                r["dependencies"] = [d["path"] for d in go_detail.get("deps", [])]
+                break
     return {
         "file": os.path.basename(path), "bytes": os.path.getsize(path), "format": image.format, "arch": image.arch.name,
         "entry": hex(image.entry), "sections": sections,
