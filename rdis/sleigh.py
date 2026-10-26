@@ -105,6 +105,7 @@ _SPECS = {
     "ppc64":    ("PowerPC:BE:64:default", 64, _regs("r", 3, 10), "r3", "r1", "r31", _regs("f", 1, 8), "f1", False),
     "ppc64le":  ("PowerPC:LE:64:default", 64, _regs("r", 3, 10), "r3", "r1", "r31", _regs("f", 1, 8), "f1", False),
     "sparc":    ("sparc:BE:32:default", 32, _regs("o", 0, 5), "o0", "sp", "fp", [], None, True),
+    "parisc":   ("pa-risc:BE:32:default", 32, ["r26", "r25", "r24", "r23"], "r28", "sp", "r3", [], None, True),
     "sparc64":  ("sparc:BE:64:default", 64, _regs("o", 0, 5), "o0", "sp", "fp", [], None, True),
     "m68k":     ("68000:BE:32:default", 32, [], "D0", "SP", "A6", [], None, False),
     "avr8":     ("avr8:LE:16:default", 16, ["R24", "R22", "R20", "R18"], "R24", "SP", "Y", [], None, False),
