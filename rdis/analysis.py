@@ -308,6 +308,8 @@ class Program:
         seeds = [a for a in self.image.symbols if self.image.is_code(a)]
         seeds += [m.imp for c in self.objc.classes for m in c.methods]
         seeds += self._jni_natives()
+        go = self._go_functions()
+        seeds += [a for a in go if self.image.is_code(a)]
         if self.image.is_code(self.image.entry):
             seeds.append(self.image.entry)
             self.auto_name(self.image.entry, "entry")
@@ -327,6 +329,7 @@ class Program:
             if len(self.functions) != before:
                 self._infer_noreturn()
                 self._recover_tables()
+        self._drop_inside_go_functions()
         self.pretty = demangle_all(self.names.values())
         # NOTE: the sidecar .rdb is NOT auto-loaded here. A shared analysis must stay free of any
         # one user's edits; callers that own a single workspace (the CLI, a single-user server)
@@ -650,12 +653,34 @@ class Program:
                 a += step
         return Function(start, self._lazy(self._split(start, insns, delays, stops)), calls, tables, frozenset(stops))
 
+    def _go_functions(self):
+        """The Go linker's function table (gopclntab): complete and exact, so it seeds discovery and bounds functions."""
+        if getattr(self, "_gofuncs", None) is None:
+            from .gobin import function_table
+            self._gofuncs = function_table(self.image)
+            for a, n in self._gofuncs.items():
+                self.auto_name(a, n)
+        return self._gofuncs
+
+    def _drop_inside_go_functions(self):
+        """Inside the Go text range every function is in gopclntab; a discovered start strictly inside
+        another Go function is a block, not a function. Code outside the range (cgo) is left alone."""
+        go = self._go_functions()
+        if not go:
+            return
+        starts = sorted(go)
+        lo, hi = starts[0], starts[-1]
+        for a in [a for a in self.functions if lo < a < hi and a not in go and a not in self.image.symbols]:
+            del self.functions[a]
+            self.names.pop(a, None)
+
     def _function_starts(self):
         """Addresses the file itself declares as function starts (symbols, LC_FUNCTION_STARTS, unwind data),
         without ARM mapping symbols or local labels."""
         if getattr(self, "_starts", None) is None:
             self._starts = frozenset(a for a, n in self.image.symbols.items()
-                                     if self.image.is_code(a) and not n.startswith(("$", ".L", "ltmp")))
+                                     if self.image.is_code(a) and not n.startswith(("$", ".L", "ltmp"))) \
+                | frozenset(self._go_functions())
         return self._starts
 
     def _noreturn(self, target):
@@ -1182,6 +1207,9 @@ class Program:
                 if self.image.format == "pe":
                     for m in re.finditer(rb"(?:[\x20-\x7e]\x00){%d,}\x00\x00" % minlen, data):
                         out.setdefault(s.va + m.start(), m.group()[:-2].decode("utf-16le"))
+            if self._go_functions():
+                from .gobin import split_strings
+                out = split_strings(self.image, out)
             self._strings = out
         return self._strings
 

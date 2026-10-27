@@ -50,6 +50,10 @@ def match(prog, db, min_insns=None):
         raise ValueError(f"database is for {db.get('arch')}, binary is {prog.arch.name}")
     floor = max(min_insns or 0, db.get("min_insns", MIN_INSNS))
     matches, ambiguous = [], []
+    
+    # Support both old format (top-level "source") and new format (per-entry "sources")
+    db_source = db.get("source", {"name": "unknown"})
+    
     for addr, func in sorted(prog.functions.items()):
         f = features(prog, func)
         if f.size < floor or not is_generated(f.name):
@@ -57,7 +61,13 @@ def match(prog, db, min_insns=None):
         entry = db["entries"].get(f.exact)
         if entry is None:
             continue
-        row = {"addr": addr, "size": f.size, "source": db["source"]["name"]}
+        
+        # Determine source name: prefer per-entry sources, fall back to db-level source
+        source_name = db_source["name"]
+        if "sources" in entry and entry["sources"]:
+            source_name = entry["sources"][0].get("name", source_name)
+        
+        row = {"addr": addr, "size": f.size, "source": source_name}
         if len(entry["names"]) == 1:
             matches.append({**row, "name": entry["names"][0], "confidence": confidence(f.size)})
         else:
